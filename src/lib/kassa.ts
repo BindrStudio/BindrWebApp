@@ -56,7 +56,7 @@ export function regelIn(nieuw: NieuwExemplaar & { id: string }, prijs: number, r
   return { richting: "in", nieuw, naam: nieuw.naam, code: nieuw.code, prijs: rond2(prijs), referentie: referentie ?? null };
 }
 
-/** Artikelen komen binnen (bv. 50 bulkkaarten voor 5 euro). */
+/** Artikelen komen binnen (bv. drie booster packs van de klant). */
 export function regelArtikelIn(a: Artikel, aantal: number, prijs: number): Regel {
   return { richting: "in", artikel_id: a.id, aantal, naam: a.naam, prijs: rond2(prijs) };
 }
@@ -187,7 +187,8 @@ export function maakOngedaan(v: Voorraad, t: Transactie): { voorraad: Voorraad; 
     if (t.soort === "retour") {
       if (r.exemplaar_id) {
         const e = exemplaren.get(r.exemplaar_id);
-        if (e) exemplaren.set(e.id, { ...e, status: r.vorige_status ?? "verkocht", afgeboekt_op: t.tijd });
+        const vorig = r.vorige_status && ["verkocht", "geruild", "weg"].includes(r.vorige_status) ? r.vorige_status : "verkocht";
+        if (e) exemplaren.set(e.id, { ...e, status: vorig, afgeboekt_op: t.tijd });
       } else if (r.artikel_id) {
         const a = artikelen.get(r.artikel_id);
         if (a) artikelen.set(a.id, { ...a, aantal: Math.max(0, a.aantal - (r.aantal ?? 1)) });
@@ -199,7 +200,7 @@ export function maakOngedaan(v: Voorraad, t: Transactie): { voorraad: Voorraad; 
         const e = exemplaren.get(r.exemplaar_id);
         if (e && e.transactie_id === t.id) {
           exemplaren.set(e.id, {
-            ...e, status: e.gereserveerd_voor ? "gereserveerd" : "in voorraad", transactie_id: null, afgeboekt_op: null,
+            ...e, status: "in voorraad", transactie_id: null, afgeboekt_op: null,
           });
         }
       } else if (r.artikel_id) {

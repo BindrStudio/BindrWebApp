@@ -5,7 +5,7 @@
 - Stijl: kleuren uit het logo (perzik, zeeblauw met gestippeld "stiksel", boter, bruine inkt), titels in Fredoka. Tokens staan bovenaan `public/styles.css`.
 - Geen runtime-afhankelijkheden buiten React. Bibliotheken die de browser nodig heeft staan ongewijzigd in `public/vendor` met hun licentie.
 - Bouwen: `npm run build` schrijft `public/app.js` (beheer) en `public/catalogus/app.js` (klant) en zet een nieuwe versie in `public/sw.js`. Alle drie gaan mee in de commit.
-- Testen: `npm test` (unit, via esbuild + `node --test`) en `npm run typecheck`. `tests/beursdag.test.ts` rekent de volledige testcase beursdag na (kas € 344, SumUp € 595, voorraad 105 → 98, catalogus 85 → 64 / € 6.479); `tests/wachtrij.test.ts` de offline wachtrij en conflicten. De e2e-doorloop (`npm run e2e`) doet dezelfde testcase in de echte app, plus klantenpagina en QR-scan met nep-camera.
+- Testen: `npm test` (unit, via esbuild + `node --test`) en `npm run typecheck`. `tests/beursdag.test.ts` rekent de volledige testcase beursdag na (kas € 349, SumUp € 595, voorraad 105 → 98, catalogus 85 → 64 / € 6.479); `tests/wachtrij.test.ts` de offline wachtrij en conflicten. De e2e-doorloop (`npm run e2e`) doet dezelfde testcase in de echte app, plus klantenpagina en QR-scan met nep-camera.
 - In de UI heten de plaatsen **Catalogus** (database: `vitrine`) en **Vault** (database: `stockdoos`).
 - Elke wijziging gaat via `state.ts`: meteen lokaal, daarna via de wachtrij naar de server. Transacties lopen via `src/lib/kassa.ts` (lokaal) en de databasefunctie `boek_transactie` (server); die twee volgen exact dezelfde regels. Pas je er één aan, pas dan ook de andere aan.
 - De klantenpagina (`src/klant`) mag niets uit de beheer-app importeren behalve config, types en kleine hulpfuncties, en toont enkel de publieke weergaven.
@@ -15,7 +15,11 @@
 - Elk fysiek exemplaar heeft een eigen code: 6 tekens Crockford (`0-9A-HJKMNP-TV-Z`), getoond als `XXX-XXX`, in de QR als `BR:XXXXXX`. Nooit een prijs op het QR-label.
 - Het hartje (prijssticker vooraan) is de verkoopprijs in de vitrine; `hartjesdatum` wordt bij elke wijziging gezet. Stockdoos-items hebben enkel een `verkoopprijs`.
 - Prijsvoorstel = trend (of gem30, anders laagste) × conditiefactor, afgerond op hele euro, minimum € 1. Enkel EN en JP krijgen een voorstel. De beheerder kiest altijd zelf; afwijken zet `prijs_handmatig` (slotje).
-- Prijscheck enkel op vitrine-items in voorraad/gereserveerd, zonder slotje, met drempels in euro per prijsklasse.
+- Prijscheck enkel op vitrine-items in voorraad, zonder slotje, met drempels in euro per prijsklasse.
+- Geen reserveren, geen bulk en geen standgeld: die zijn bewust geschrapt (de kolommen blijven in de database, de app gebruikt ze niet).
+- Bod bij inkoop en ruil: een percentage van de marktwaarde (standaard inkoop 70%, ruil 80%), ronde voorstellen via `src/lib/bod.ts`. De beheerder kiest altijd zelf.
+- Cardmarket enkel via de publieke prijsgids en gewone links (geen scraping). `src/lib/markt.ts` maakt de link met filters (NM, taal, verkopers uit BE en NL).
+- Dubbels in de catalogus: zelfde kaart, conditie, taal, variant en prijs = één tegel met een aantal (`src/lib/weergave.ts`, gedeeld met de klantenpagina).
 - Combinatiekorting: `verdeelTotaal` verdeelt op de cent; het afrondingsverschil gaat naar de duurste kaart.
 - Betalen: enkel cash en SumUp, ook samen. Terugbetalen enkel cash.
 - Een transactie heeft een id van de gsm (offline veilig opnieuw te versturen) en past exemplaren en artikelen aan; een exemplaar dat al weg is, wordt een conflict, nooit stil overschreven.

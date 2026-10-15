@@ -50,7 +50,7 @@ export async function laadTestset(): Promise<{ exemplaren: NieuwExemplaar[]; art
     const opslag = (r.opslag || "").toLowerCase() === "vitrine" ? "vitrine" : ("stockdoos" as Opslag);
     if (!r.code) {
       artikelen.push({
-        naam: r.naam, soort: r.type === "bulk" ? "bulk" : r.type === "eigen product" ? "eigen product" : "sealed",
+        naam: r.naam, soort: r.type === "eigen product" ? "eigen product" : r.type === "sealed" || !r.type ? "sealed" : "andere",
         aantal: Number(r.aantal || 0), prijs: num(r.verkoopprijs), opslag, opmerking: tekst(r.opmerking),
       });
       continue;
@@ -79,8 +79,7 @@ export async function laadTestset(): Promise<{ exemplaren: NieuwExemplaar[]; art
       grade: tekst(r.grade),
       cardmarket_id: cm,
       opslag,
-      status: r.status === "gereserveerd" ? "gereserveerd" : "in voorraad",
-      gereserveerd_voor: r.status === "gereserveerd" ? "Instagram (testset)" : null,
+      status: "in voorraad",
       verkoopprijs: num(r.verkoopprijs),
       prijs_handmatig: r.prijs_handmatig === "ja",
       hartjesprijs: opslag === "vitrine" ? num(r.stickerprijs) : null,

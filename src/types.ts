@@ -1,5 +1,5 @@
 export type Opslag = "vitrine" | "stockdoos";
-export type Status = "in voorraad" | "gereserveerd" | "verkocht" | "geruild" | "weg";
+export type Status = "in voorraad" | "verkocht" | "geruild" | "weg";
 export type LabelStatus = "te printen" | "geprint" | "gestickerd";
 export type Soort = "kaart" | "slab" | "eigen product";
 export type Catalogus = "en" | "asia";
@@ -24,7 +24,6 @@ export interface Exemplaar {
   cardmarket_id: number | null;
   opslag: Opslag;
   status: Status;
-  gereserveerd_voor: string | null;
   verkoopprijs: number | null;
   prijs_handmatig: boolean;
   hartjesprijs: number | null;
@@ -36,6 +35,7 @@ export interface Exemplaar {
   opmerking: string | null;
   transactie_id: string | null; // laatste verkoop of ruil waarmee het de voorraad verliet
   afgeboekt_op: string | null;
+  vitrine_sinds?: string | null; // sinds wanneer het in de catalogus ligt (voor "Nieuw")
   aangemaakt_op: string;
   gewijzigd_op: string;
 }
@@ -43,7 +43,7 @@ export interface Exemplaar {
 export interface Artikel {
   id: string;
   naam: string;
-  soort: "sealed" | "eigen product" | "bulk" | "andere";
+  soort: "sealed" | "eigen product" | "andere";
   aantal: number;
   prijs: number | null;
   opslag: Opslag;
@@ -56,7 +56,7 @@ export type NieuwExemplaar = Partial<Exemplaar> & Pick<Exemplaar, "code" | "naam
 
 /** De stand van de voorraad op één moment (bij de start en het einde van een beurs). */
 export interface Stand {
-  catalogus: number;        // exemplaren in de catalogus (vitrine), ook gereserveerde
+  catalogus: number;        // exemplaren in de catalogus (vitrine)
   catalogusWaarde: number;  // som van de hartjes
   artikelenWaarde: number;  // artikelen in de catalogus, prijs × aantal
   voorraad: number;         // alle exemplaren in voorraad (catalogus + vault)

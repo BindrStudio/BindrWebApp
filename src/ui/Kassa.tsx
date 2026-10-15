@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  actieveBeurs, afrekenen, huidig, inMandje, leegMandje, meld, ongedaanMaken, openTransactie, print, totaalAanpassen,
+  actieveBeurs, afrekenen, bodToepassen, huidig, inMandje, leegMandje, meld, ongedaanMaken, openTransactie, print, totaalAanpassen,
   useApp, verwijderRegel, wijzigRegel,
 } from "../state";
 import type { Artikel, CatalogusKaart, Exemplaar, Regel, Transactie } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
 import { inVoorraad } from "../lib/exemplaar";
-import { beursCijfers, netto, regelArtikelIn, regelArtikelUit, regelIn, regelUit, totaalIn, totaalUit, type Betaling } from "../lib/kassa";
+import { beursCijfers, netto, regelArtikelUit, regelIn, regelUit, totaalIn, totaalUit, type Betaling } from "../lib/kassa";
 import { euro, getal, zonderAccenten } from "../lib/format";
 import { nieuweCode, toonCode } from "../lib/code";
 import { afbeelding } from "../lib/catalog";
@@ -15,11 +15,13 @@ import { tril } from "../lib/camera";
 import { uuid } from "../lib/uuid";
 import { Badges, Hartje, Icoon, KaartFoto, Kiezer, Leeg, Segment, Sheet, Veld } from "./common";
 import { MandjeActie } from "./MandjeActie";
-import { CodeInvoer, FotoScanner, QrScanner } from "./Scan";
+import { Scanner, type FotoResultaat } from "./Scan";
 import { KiesKaart } from "./Toevoegen";
 import { BeursAfsluiten, BeursStart, TransactiesLijst } from "./Beurs";
+import { MarktBlok } from "./Markt";
+import { bodVoorstellen, marktwaarde, procentVan } from "../lib/bod";
 
-type Paneel = null | "scan" | "zoek" | "artikel" | "klantkaart" | "klantartikel" | "afrekenen" | "start" | "afsluiten" | "transacties";
+type Paneel = null | "scan" | "zoek" | "artikel" | "klantkaart" | "afrekenen" | "start" | "afsluiten" | "transacties";
 
 export function Kassa() {
   const s = useApp();
@@ -71,10 +73,11 @@ export function Kassa() {
               <span className="zacht klein">bij ruil of inkoop</span>
             </div>
             {binnen.map(({ r, i }) => <RegelRij key={i} r={r} i={i} />)}
-            {binnen.length > 1 && <TotaalRij richting="in" totaal={totaalIn(regels)} />}
+            {binnen.some((x) => (x.r.referentie ?? 0) > 0)
+              ? <BodPaneel ruil={uit.length > 0} />
+              : binnen.length > 1 && <TotaalRij richting="in" totaal={totaalIn(regels)} />}
             <div className="kant-knoppen">
               <button className="knop zacht" onClick={() => setPaneel("klantkaart")}><Icoon naam="plus" maat={18} /> Kaart van klant</button>
-              <button className="knop zacht" onClick={() => setPaneel("klantartikel")}><Icoon naam="stapel" maat={18} /> Bulk of artikel</button>
             </div>
           </section>
 
@@ -96,7 +99,6 @@ export function Kassa() {
       {paneel === "zoek" && <VoorraadZoeker onSluit={sluit} />}
       {paneel === "artikel" && <ArtikelKiezer onSluit={sluit} />}
       {paneel === "klantkaart" && <KlantKaart onSluit={sluit} />}
-      {paneel === "klantartikel" && <KlantArtikel onSluit={sluit} />}
       {paneel === "afrekenen" && <Afrekenen onSluit={sluit} onKlaar={(t, w) => { sluit(); setKlaar({ t, wisselgeld: w }); }} />}
       {paneel === "start" && <BeursStart onSluit={sluit} />}
       {paneel === "afsluiten" && beurs && <BeursAfsluiten beurs={beurs} onSluit={sluit} />}
@@ -217,11 +219,81 @@ function TotaalRij({ richting, totaal }: { richting: "uit" | "in"; totaal: numbe
   );
 }
 
+// ── Bod op de kaarten van de klant ───────────────────────────────────────────
+
+/**
+ * Het bod voor de klant, op het moment zelf: de marktwaarde van zijn kaarten, het percentage
+ * (inkoop 70%, ruil 80%), ronde bedragen om te kiezen en een eigen bedrag met zijn percentage.
+ */
+function BodPaneel({ ruil }: { ruil: boolean }) {
+  const { mandje, instellingen } = useApp();
+  const [soort, setSoort] = useState<"inkoop" | "ruil">(ruil ? "ruil" : "inkoop");
+  const [eigen, setEigen] = useState("");
+  useEffect(() => { setSoort(ruil ? "ruil" : "inkoop"); }, [ruil]);
+  const m = marktwaarde(mandje.regels);
+  const pct = soort === "ruil" ? instellingen.ruilPct : instellingen.inkoopPct;
+  const exact = Math.round(m.totaal * pct) / 100;
+  const voorstellen = bodVoorstellen(exact);
+  const eigenBedrag = getal(eigen);
+  const gekozen = m.bod > 0;
+  const kies = (bod: number) => {
+    bodToepassen(bod);
+    setEigen("");
+    tril();
+  };
+  const huidigPct = procentVan(m.bod, m.totaal);
+  return (
+    <div className="bod-paneel">
+      <div className="bod-kop">
+        <div>
+          <span className="zacht klein">Marktwaarde · {m.kaarten} {m.kaarten === 1 ? "kaart" : "kaarten"}</span>
+          <strong className="bod-markt">{euro(m.totaal)}</strong>
+        </div>
+        <Segment<"inkoop" | "ruil"> waarde={soort} onKies={setSoort} opties={[
+          { waarde: "inkoop", label: `Inkoop ${instellingen.inkoopPct}%` },
+          { waarde: "ruil", label: `Ruil ${instellingen.ruilPct}%` },
+        ]} />
+      </div>
+      <div className="bod-som">{pct}% van {euro(m.totaal)} = <strong>{euro(exact)}</strong></div>
+      <div className="bod-keuzes">
+        {voorstellen.map((b) => (
+          <button key={b} className={`bod-keuze${gekozen && m.bod === b ? " aan" : ""}`} onClick={() => kies(b)}>
+            <strong>{euro(b)}</strong>
+            <span>{procentVan(b, m.totaal)}%</span>
+          </button>
+        ))}
+      </div>
+      <div className="bod-eigen">
+        <span className="euro-invoer mini"><span>€</span>
+          <input inputMode="decimal" value={eigen} placeholder="Eigen bod" aria-label="Eigen bod"
+            onChange={(e) => setEigen(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && eigenBedrag != null && eigenBedrag >= 0) kies(eigenBedrag); }} />
+        </span>
+        {eigenBedrag != null && eigenBedrag > 0 ? (
+          <>
+            <span className={`bod-pct${procentVan(eigenBedrag, m.totaal) > pct ? " hoog" : ""}`}>{procentVan(eigenBedrag, m.totaal)}%</span>
+            <button className="knop klein" onClick={() => kies(eigenBedrag)}>Bied</button>
+          </>
+        ) : <span className="zacht klein">typ een bedrag: je ziet meteen het percentage</span>}
+      </div>
+      {gekozen ? (
+        <div className={`bod-stand${huidigPct > pct ? " hoog" : ""}`}>
+          <Icoon naam="check" maat={16} /> Bod {euro(m.bod)} · {huidigPct}% van de marktwaarde
+          {huidigPct > pct && <span> (boven {pct}%)</span>}
+        </div>
+      ) : (
+        <p className="zacht klein bod-uitleg">Tik een bedrag: het bod wordt verdeeld over de kaarten volgens hun marktwaarde.</p>
+      )}
+      {m.zonder > 0 && <p className="nakijken klein">{m.zonder === 1 ? "1 kaart heeft" : `${m.zonder} kaarten hebben`} geen marktprijs: geef die zelf een waarde (tik op de prijs).</p>}
+    </div>
+  );
+}
+
 // ── Toevoegen aan het mandje ─────────────────────────────────────────────────
 
 function KassaScanner({ onSluit }: { onSluit: () => void }) {
-  const [modus, setModus] = useState<"qr" | "foto" | "code">("qr");
   const [vraag, setVraag] = useState<Exemplaar | null>(null);
+  const [foto, setFoto] = useState<FotoResultaat | null>(null);
   const { mandje } = useApp();
   const recent = mandje.regels.filter((r) => r.richting === "uit").slice(-4).reverse();
 
@@ -230,20 +302,29 @@ function KassaScanner({ onSluit }: { onSluit: () => void }) {
     const actueel = s.exemplaren.find((e) => e.id === ex.id) ?? ex;
     const al = s.mandje.regels.some((r) => r.exemplaar_id === actueel.id && r.richting === "uit");
     if (al) { meld(`${actueel.naam} zit al in het mandje`, "info", undefined, 2000); return; }
-    if (inVoorraad(actueel) && actueel.status === "in voorraad" && actueel.opslag === "vitrine") {
+    setFoto(null);
+    if (inVoorraad(actueel) && actueel.opslag === "vitrine") {
       inMandje(regelUit(actueel));
       tril(40);
       meld(`${actueel.naam} · ${euro(actueel.hartjesprijs)}`, "ok", undefined, 2000);
     } else {
-      setVraag(actueel); // gereserveerd, vault of al weg: eerst een vraag
+      setVraag(actueel); // vault of al weg: eerst een vraag
     }
+  };
+
+  // Een kaart herkend op een foto: met precies één vrij exemplaar meteen in het mandje, anders kiezen.
+  const opFoto = (r: FotoResultaat) => {
+    if (r.zeker) {
+      const s = huidig();
+      const inMand = new Set(s.mandje.regels.map((x) => x.exemplaar_id));
+      const vrij = s.exemplaren.filter((e) => e.kaart_id === r.kandidaten[0].id && inVoorraad(e) && !inMand.has(e.id));
+      if (vrij.length === 1) return kies(vrij[0]);
+    }
+    setFoto(r);
   };
 
   return (
     <Sheet titel="Scannen voor het mandje" onSluit={onSluit} vol>
-      <Segment<"qr" | "foto" | "code"> waarde={modus} onKies={(m) => { setModus(m); setVraag(null); }} opties={[
-        { waarde: "qr", label: "QR-code" }, { waarde: "foto", label: "Foto" }, { waarde: "code", label: "Code typen" },
-      ]} />
       {vraag && (
         <div className="blok">
           <strong>{vraag.naam} <span className="code">{toonCode(vraag.code)}</span></strong>
@@ -251,9 +332,8 @@ function KassaScanner({ onSluit }: { onSluit: () => void }) {
           <button className="tekstknop" onClick={() => setVraag(null)}>Verder scannen</button>
         </div>
       )}
-      {modus === "qr" && <QrScanner gepauzeerd={!!vraag} onCode={kies} />}
-      {modus === "foto" && <FotoScanner gepauzeerd={!!vraag} kies={kies} />}
-      {modus === "code" && <CodeInvoer kies={kies} />}
+      {foto && <FotoKeuze r={foto} onKies={kies} onWeg={() => setFoto(null)} />}
+      <Scanner gepauzeerd={!!vraag || !!foto} onExemplaar={(ex) => kies(ex)} onFoto={opFoto} compact />
       {recent.length > 0 && (
         <div className="recent-mandje">
           <span className="zacht klein">Net toegevoegd</span>
@@ -262,6 +342,41 @@ function KassaScanner({ onSluit }: { onSluit: () => void }) {
       )}
       <button className="knop groot" onClick={onSluit}>Klaar</button>
     </Sheet>
+  );
+}
+
+/** Na een kaartfoto in de kassa: welke kaart, en welk exemplaar ervan? */
+function FotoKeuze({ r, onKies, onWeg }: { r: FotoResultaat; onKies: (ex: Exemplaar) => void; onWeg: () => void }) {
+  const { exemplaren, mandje } = useApp();
+  const [kaart, setKaart] = useState<CatalogusKaart | null>(r.zeker ? r.kandidaten[0] : null);
+  const inMand = new Set(mandje.regels.map((x) => x.exemplaar_id));
+  const exs = kaart ? exemplaren.filter((e) => e.kaart_id === kaart.id && inVoorraad(e)) : [];
+  return (
+    <div className="blok foto-keuze">
+      <div className="scan-rij">
+        <img className="scan-foto" src={r.foto} alt="" />
+        <div className="res-tekst">
+          <strong>{kaart ? kaart.naam : "Welke kaart is het?"}</strong>
+          <span className="zacht">{kaart ? `${kaart.setCode || kaart.setId} ${kaart.nummer} · ${exs.length ? "kies het exemplaar" : "niet in voorraad"}` : "Niet zeker herkend"}</span>
+        </div>
+        <button className="rond-knop" onClick={onWeg} aria-label="Sluiten"><Icoon naam="kruis" maat={14} /></button>
+      </div>
+      <div className="scan-keuzes">
+        {!kaart && r.kandidaten.slice(0, 5).map((k) => (
+          <button key={k.id} className="scan-keuze" onClick={() => setKaart(k)}>
+            <KaartFoto src={afbeelding(k)} alt={k.naam} klein />
+            <span><strong>{k.naam}</strong><em>{k.setCode || k.setId} {k.nummer}</em></span>
+          </button>
+        ))}
+        {kaart && exs.map((e) => (
+          <button key={e.id} className={`scan-keuze ex${inMand.has(e.id) ? " al" : ""}`} disabled={inMand.has(e.id)} onClick={() => onKies(e)}>
+            <span className="code">{toonCode(e.code)}</span>
+            <Badges ex={e} />
+            <span className="rechts">{e.opslag === "vitrine" ? euro(e.hartjesprijs) : `vault ${euro(e.verkoopprijs)}`}</span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -340,7 +455,7 @@ function KlantKaart({ onSluit }: { onSluit: () => void }) {
   return (
     <Sheet titel={kaart || handmatig ? "Kaart van de klant" : "Welke kaart brengt de klant?"} onSluit={onSluit} vol>
       {kaart || handmatig
-        ? <KlantKaartDetails key={teller} kaart={kaart} onTerug={reset} onKlaar={() => { reset(); meld("In het mandje (wij krijgen). Volgende kaart, of Klaar.", "ok", undefined, 2500); }} />
+        ? <KlantKaartDetails key={teller} kaart={kaart} onTerug={reset} onKlaar={() => { reset(); meld("Kaart van de klant toegevoegd", "ok", undefined, 1800); }} />
         : <KiesKaart onKies={setKaart} onHandmatig={() => setHandmatig(true)} metArtikel={false} handmatigTekst="Staat de kaart niet in de catalogus? Vul dan zelf naam, set en nummer in." />}
       <button className="tekstknop" onClick={onSluit}>Klaar</button>
     </Sheet>
@@ -362,6 +477,8 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart 
   const proef = (conditie: string) => voorstelVoor({ soort: "kaart", cardmarket_id: kaart?.cardmarket ?? null, taal: v.taal, conditie, variant: v.variant } as Exemplaar, gids, instellingen);
   const nm = proef("NM");
   const metConditie = proef(v.conditie);
+  // Marktwaarde met conditie, op de cent (het voorstel is afgerond op hele euro's, minimum 1).
+  const markt = metConditie ? Math.round(metConditie.referentie * metConditie.factor * 100) / 100 : null;
 
   const toevoegen = () => {
     if (!v.naam.trim()) return meld("Vul een naam in", "fout");
@@ -376,7 +493,7 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart 
       opslag: "stockdoos" as const, verkoopprijs: metConditie?.voorstel ?? null,
     };
     Object.assign(vorigeKlantKaart, { taal: v.taal, conditie: v.conditie });
-    inMandje(regelIn(nieuw, getal(v.waarde) ?? 0, metConditie?.voorstel ?? null));
+    inMandje(regelIn(nieuw, getal(v.waarde) ?? 0, markt));
     onKlaar();
   };
 
@@ -409,44 +526,22 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart 
       <Veld label="Conditie (kies zelf)"><Kiezer waarde={v.conditie} opties={CONDITIES} onKies={(c) => setV({ ...v, conditie: c })} /></Veld>
       <Veld label="Variant"><Kiezer waarde={v.variant} opties={VARIANTEN} onKies={(c) => setV({ ...v, variant: c })} /></Veld>
       <div className="referentie">
-        <div><span>Near Mint-referentie</span><strong>{nm ? euro(nm.referentie) : "geen"}</strong></div>
-        <div><span>Met conditie {v.conditie}</span><strong>{metConditie ? euro(metConditie.voorstel) : "–"}</strong></div>
+        <div><span>Near Mint (trend)</span><strong>{nm ? euro(nm.referentie) : "geen"}</strong></div>
+        <div><span>Marktwaarde {v.conditie}</span><strong>{markt != null ? euro(markt) : "–"}</strong></div>
       </div>
-      <Veld label="Ruilwaarde of inkoopprijs (€)" hint="Leeg laten mag: dan geef je straks één totaal voor alle kaarten van de klant.">
+      {markt != null && (
+        <div className="referentie pct">
+          <div><span>Inkoop {instellingen.inkoopPct}%</span><strong>{euro(Math.round(markt * instellingen.inkoopPct) / 100)}</strong></div>
+          <div><span>Ruil {instellingen.ruilPct}%</span><strong>{euro(Math.round(markt * instellingen.ruilPct) / 100)}</strong></div>
+        </div>
+      )}
+      {kaart && <MarktBlok cardmarketId={kaart.cardmarket} variant={v.variant} taal={v.taal} setId={kaart.setId} catalogus={kaart.catalogus} />}
+      <Veld label="Ruilwaarde of inkoopprijs (€)" hint="Leeg laten is het makkelijkst: in het mandje kies je daarna één bod voor alle kaarten samen.">
         <input inputMode="decimal" value={v.waarde} onChange={(e) => setV({ ...v, waarde: e.target.value })} placeholder="bv. 15" />
       </Veld>
       <button className="knop groot" onClick={toevoegen}><Icoon naam="plus" maat={18} /> In het mandje</button>
       <p className="zacht klein">De kaart krijgt na het afrekenen een eigen code en label, en komt in de vault tot jullie er een hartje op zetten.</p>
     </div>
-  );
-}
-
-function KlantArtikel({ onSluit }: { onSluit: () => void }) {
-  const { artikelen } = useApp();
-  const [id, setId] = useState(artikelen.find((a) => a.soort === "bulk")?.id ?? artikelen[0]?.id ?? "");
-  const [aantal, setAantal] = useState("50");
-  const [prijs, setPrijs] = useState("");
-  const a = artikelen.find((x) => x.id === id);
-  return (
-    <Sheet titel="Bulk of artikel van de klant" onSluit={onSluit}>
-      {!artikelen.length ? <p className="zacht">Maak eerst een artikel aan in de catalogus (bv. "Bulkkaarten").</p> : (
-        <div className="formulier">
-          <Veld label="Artikel">
-            <select value={id} onChange={(e) => setId(e.target.value)}>
-              {artikelen.map((x) => <option key={x.id} value={x.id}>{x.naam} ({x.aantal})</option>)}
-            </select>
-          </Veld>
-          <div className="twee">
-            <Veld label="Aantal"><input inputMode="numeric" value={aantal} onChange={(e) => setAantal(e.target.value)} /></Veld>
-            <Veld label="Prijs voor alles (€)"><input inputMode="decimal" value={prijs} onChange={(e) => setPrijs(e.target.value)} autoFocus /></Veld>
-          </div>
-          <button className="knop groot" disabled={!a || !(getal(aantal)! > 0)} onClick={() => {
-            inMandje(regelArtikelIn(a!, Math.round(getal(aantal)!), getal(prijs) ?? 0));
-            onSluit();
-          }}>In het mandje</button>
-        </div>
-      )}
-    </Sheet>
   );
 }
 

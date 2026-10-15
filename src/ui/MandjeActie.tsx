@@ -7,15 +7,15 @@ import { datumKort, euro, getal, vandaag } from "../lib/format";
 import { Icoon } from "./common";
 
 /**
- * De knop "In het mandje" voor één exemplaar, met de twee vragen die de beurs nodig heeft:
- * een gereserveerde kaart (bewust ophalen) en een kaart uit de vault (eerst een hartje).
+ * De knop "In het mandje" voor één exemplaar. Een kaart uit de vault krijgt eerst een hartje
+ * en gaat naar de catalogus, zodat de verkoop klopt met wat de klant zag.
  */
 export function MandjeActie({ ex, naToevoegen, onAnnuleer, stil = false, vraagMeteen = false }: {
   ex: Exemplaar; naToevoegen?: () => void; onAnnuleer?: () => void; stil?: boolean; vraagMeteen?: boolean;
 }) {
   const { mandje } = useApp();
-  const [stap, setStap] = useState<null | "reservatie" | "vault">(() =>
-    !vraagMeteen || !inVoorraad(ex) ? null : ex.status === "gereserveerd" ? "reservatie" : ex.opslag === "stockdoos" ? "vault" : null);
+  const [stap, setStap] = useState<null | "vault">(() =>
+    vraagMeteen && inVoorraad(ex) && ex.opslag === "stockdoos" ? "vault" : null);
   const [hartje, setHartje] = useState(String(ex.hartjesprijs ?? ex.verkoopprijs ?? ""));
 
   if (!inVoorraad(ex)) {
@@ -48,22 +48,9 @@ export function MandjeActie({ ex, naToevoegen, onAnnuleer, stil = false, vraagMe
     naToevoegen?.();
   };
   const klik = () => {
-    if (ex.status === "gereserveerd") setStap("reservatie");
-    else if (ex.opslag === "stockdoos") setStap("vault");
+    if (ex.opslag === "stockdoos") setStap("vault");
     else voegToe();
   };
-
-  if (stap === "reservatie") {
-    return (
-      <div className="mandje-actie vraag">
-        <p><strong>Gereserveerd voor {ex.gereserveerd_voor || "een klant"}.</strong> Is dit de klant die reserveerde?</p>
-        <div className="knoppenrij">
-          <button className="knop" onClick={() => (ex.opslag === "stockdoos" ? setStap("vault") : voegToe())}>Ja, reservatie ophalen</button>
-          <button className="knop zacht" onClick={() => { setStap(null); onAnnuleer?.(); }}>Nee, niet verkopen</button>
-        </div>
-      </div>
-    );
-  }
 
   if (stap === "vault") {
     const p = getal(hartje);
@@ -86,7 +73,6 @@ export function MandjeActie({ ex, naToevoegen, onAnnuleer, stil = false, vraagMe
   return (
     <button className="knop groot mandje-knop" onClick={klik}>
       <Icoon naam="mandje" maat={20} /> In het mandje
-      {ex.status === "gereserveerd" && <span className="mini-label">gereserveerd</span>}
       {ex.opslag === "stockdoos" && <span className="mini-label">vault</span>}
     </button>
   );

@@ -114,6 +114,17 @@ function Prijsregels() {
   };
   return (
     <Groep titel="Prijsregels">
+      <div className="rij bod-instelling">
+        <span>Bod bij inkoop</span>
+        <span className="pct-veld"><input inputMode="numeric" defaultValue={instellingen.inkoopPct} aria-label="Inkoop in procent"
+          onBlur={(e) => { const n = getal(e.target.value); if (n != null && n > 0 && n <= 100) zetInstellingen({ inkoopPct: Math.round(n) }); }} /> %</span>
+      </div>
+      <div className="rij bod-instelling">
+        <span>Waarde bij ruil</span>
+        <span className="pct-veld"><input inputMode="numeric" defaultValue={instellingen.ruilPct} aria-label="Ruil in procent"
+          onBlur={(e) => { const n = getal(e.target.value); if (n != null && n > 0 && n <= 100) zetInstellingen({ ruilPct: Math.round(n) }); }} /> %</span>
+      </div>
+      <p className="groep-uitleg">Van de marktwaarde (Cardmarket, met conditie) van de kaarten van een klant. De kassa stelt ronde bedragen voor; je kiest altijd zelf.</p>
       <button className="rij-knop" onClick={() => setOpen(!open)}>
         <Icoon naam={open ? "neer" : "pijlRechts"} maat={18} /> Drempels en conditiefactoren
       </button>
@@ -161,13 +172,13 @@ function Klantencatalogus() {
   const bekijk = klantUrl(backend?.soort === "demo");
   return (
     <Groep titel="Klantencatalogus">
-      <p className="groep-uitleg">Een aparte pagina voor klanten, zonder login: enkel wat in de catalogus ligt, met foto, conditie en prijs, en een knop om te reserveren via Instagram.</p>
+      <p className="groep-uitleg">Een aparte pagina voor klanten, zonder login: enkel wat in de catalogus ligt, met foto, conditie en prijs, en een link naar onze Instagram.</p>
       <a className="rij-knop" href={bekijk} target="_blank" rel="noreferrer"><Icoon naam="oog" maat={18} /> Bekijk als klant{backend?.soort === "demo" ? " (met de demo)" : ""}</a>
       <button className="rij-knop" onClick={() => setQr(true)}><Icoon naam="qr" maat={18} /> QR-code voor aan de stand</button>
       <div className="rij instagram-rij">
         <span><Icoon naam="instagram" maat={18} /> Instagram</span>
         <span className="instagram-veld">
-          @<input value={naam} onChange={(e) => setNaam(e.target.value)} placeholder="bindr" autoCapitalize="none" autoCorrect="off" />
+          @<input value={naam} onChange={(e) => setNaam(e.target.value)} placeholder="bindrstudio" autoCapitalize="none" autoCorrect="off" />
           {naam.trim().replace(/^@/, "") !== instagram && <button className="tekstknop klein" onClick={() => zetInstagram(naam)}>Bewaar</button>}
         </span>
       </div>
@@ -177,8 +188,7 @@ function Klantencatalogus() {
           <thead><tr><th></th><th>Klant</th><th>Beheerder</th></tr></thead>
           <tbody>
             <tr><td>Catalogus: foto, naam, set, conditie, prijs</td><td>ja</td><td>ja</td></tr>
-            <tr><td>Referentiecode om te reserveren</td><td>ja</td><td>ja</td></tr>
-            <tr><td>Gereserveerde kaarten</td><td>nee</td><td>ja</td></tr>
+            <tr><td>Hoeveel exemplaren er zijn</td><td>ja</td><td>ja</td></tr>
             <tr><td>Vault</td><td>nee</td><td>ja</td></tr>
             <tr><td>Aankoopprijs, bron, marge</td><td>nee</td><td>ja</td></tr>
             <tr><td>Kassa, beurzen, transacties</td><td>nee</td><td>ja</td></tr>

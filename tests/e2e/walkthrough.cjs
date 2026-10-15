@@ -43,8 +43,7 @@ function fouten(page) {
   const wijKrijgen = () => page.locator(".mandje-kant").nth(1);
   async function scan(...codes) {
     await wijGeven().getByRole("button", { name: "Scan" }).click();
-    await sheet().getByRole("button", { name: "Code typen" }).click();
-    for (const c of codes) { await sheet().locator(".code-veld").fill(c); await wacht(200); }
+    for (const c of codes) { await sheet().getByLabel("Code typen").fill(c); await wacht(200); }
   }
   async function scanKlaar() { await sheet().getByRole("button", { name: "Klaar" }).last().click(); await wacht(200); }
   async function verkoop(...codes) { await scan(...codes); await scanKlaar(); }
@@ -66,14 +65,6 @@ function fouten(page) {
       await wacht(150);
     }
     await sheet().getByRole("button", { name: "Klaar", exact: true }).click();
-  }
-  async function klantBulk(naam, aantal, prijs) {
-    await wijKrijgen().getByRole("button", { name: "Bulk of artikel" }).click();
-    const opt = await sheet().locator("select option", { hasText: naam }).first().getAttribute("value");
-    await sheet().getByLabel("Artikel").selectOption(opt);
-    await sheet().getByLabel("Aantal").fill(String(aantal));
-    await sheet().getByLabel("Prijs voor alles (€)").fill(String(prijs));
-    await sheet().getByRole("button", { name: "In het mandje" }).click();
   }
   async function prijs(naam, bedrag) {
     const r = page.locator(".regel", { hasText: naam });
@@ -149,7 +140,6 @@ function fouten(page) {
   await tab("Kassa");
   await page.getByRole("button", { name: "Beurs starten" }).click();
   await sheet().getByLabel("Naam").fill("Testbeurs Gent");
-  await sheet().getByLabel("Standgeld (€)").fill("40");
   await sheet().getByLabel(/Startbedrag in de cashkoffer/).fill("150");
   const startStand = await sheet().locator(".stand-rij").innerText();
   assert.match(startStand, /85 stuks/);
@@ -220,24 +210,38 @@ function fouten(page) {
   stap("F1: vijf kaarten voor 24");
   await klantKaart([6, 5, 5, 4, 4].map((w, i) => ({ naam: `Inkoop F1-${i + 1}`, waarde: w })));
   await afrekenen(); await volgende();
-  stap("F2 LP, F3 bulk, F4 Chinees");
+  stap("F2 LP, F4 Chinees (bulk bestaat niet meer)");
   await klantKaart([{ naam: "Inkoop LP", conditie: "LP", waarde: 30 }]); await afrekenen(); await volgende();
-  await klantBulk("Bulkkaarten", 50, 5); await afrekenen(); await volgende();
   await klantKaart([{ naam: "Pikachu", taal: "CN-T", waarde: 8 }]); await afrekenen(); await volgende();
 
+  stap("bod: twee kaarten uit de catalogus, marktwaarde en 70%");
+  await wijKrijgen().getByRole("button", { name: "Kaart van klant" }).click();
+  for (const q of ["togekiss swsh4 178", "charizard ex obf 125"]) {
+    await sheet().locator(".zoekbalk input").fill(q);
+    await sheet().locator(".resultaten li button").first().click();
+    await sheet().locator(".markt").waitFor();
+    const cm = await sheet().locator(".cm-knop").getAttribute("href");
+    assert.match(cm, /idProduct=\d+&language=1&minCondition=2&sellerCountry=2,23/, "Cardmarket-link met NM, Engels, BE en NL");
+    await sheet().getByRole("button", { name: "In het mandje" }).click();
+    await wacht(200);
+  }
+  await sheet().getByRole("button", { name: "Klaar", exact: true }).click();
+  const paneel = page.locator(".bod-paneel");
+  await paneel.waitFor();
+  assert.match(await paneel.innerText(), /70% van/);
+  await paneel.locator(".bod-keuze").nth(1).click();
+  await paneel.locator(".bod-stand").waitFor();
+  assert.match(await paneel.locator(".bod-stand").innerText(), /\d+% van de marktwaarde/);
+  await paneel.getByLabel("Eigen bod").fill("12");
+  assert.match(await paneel.locator(".bod-pct").innerText(), /\d+%/);
+  await foto("09b-bod");
+  await geenHorizontaleScroll("bod");
+  await page.getByRole("button", { name: "Leegmaken" }).click();
+  await wacht(200);
+
   // ── G. Uitzonderingen ──────────────────────────────────────────────────────
-  stap("G1: gereserveerde kaart, toevallige klant");
-  await scan("XS7-6TS");
-  await sheet().getByText(/Gereserveerd voor/).waitFor();
-  await foto("10-gereserveerd");
-  await sheet().getByRole("button", { name: "Nee, niet verkopen" }).click();
-  await scanKlaar();
-  assert.equal(await page.locator(".regel").count(), 0, "niets in het mandje");
-  stap("G2: reservatie ophalen");
-  await scan("XS7-6TS");
-  await sheet().getByRole("button", { name: "Ja, reservatie ophalen" }).click();
-  await scanKlaar();
-  await afrekenen("cash"); await volgende();
+  stap("G2: gewone verkoop (reserveren bestaat niet meer)");
+  await verkoop("XS7-6TS"); await afrekenen("cash"); await volgende();
   stap("G3: verkeerd gescand, ongedaan maken");
   await verkoop("C99-983"); await afrekenen("cash");
   await page.getByRole("button", { name: "Ongedaan maken" }).last().click();
@@ -256,8 +260,13 @@ function fouten(page) {
   await verkoop("XT6-6CZ"); await afrekenen("cash"); await volgende();
   stap("G6/G7: code typen, eigen prijs 1150 met slotje");
   await tab("Scan");
-  await page.getByRole("button", { name: "Code typen" }).click();
-  await page.locator(".code-veld").fill("0j6 8vc");
+  await page.getByLabel("Code typen").fill("0j6 8vc");
+  await page.locator(".scan-item", { hasText: "0J6-8VC" }).waitFor();
+  await page.getByLabel("Code typen").fill("0J6-8VC");
+  await wacht(300);
+  assert.equal(await page.locator(".scan-item").count(), 1, "hetzelfde exemplaar komt maar één keer in de lijst");
+  await foto("10-scanlijst");
+  await page.locator(".scan-item .scan-rij-knop").first().click();
   await sheet().locator(".sheet-titel", { hasText: "0J6-8VC" }).waitFor();
   const label = await sheet().locator(".label-voorbeeld").getAttribute("src");
   fs.writeFileSync(path.join(SHOTS, "label-0J6-8VC.png"), Buffer.from(label.split(",")[1], "base64"));
@@ -279,10 +288,10 @@ function fouten(page) {
   // ── H. Afsluiting ──────────────────────────────────────────────────────────
   stap("H1–H4: kas tellen en afsluiten");
   const balk = await kas();
-  assert.match(balk, /€\s?344/, `cashkoffer: ${balk}`);
+  assert.match(balk, /€\s?349/, `cashkoffer: ${balk}`);
   assert.match(balk, /€\s?595/, `SumUp: ${balk}`);
   await page.getByRole("button", { name: "Afsluiten" }).click();
-  await sheet().getByLabel("Geteld in de cashkoffer (€)").fill("344");
+  await sheet().getByLabel("Geteld in de cashkoffer (€)").fill("349");
   await sheet().getByText("De kas klopt.").waitFor();
   await sheet().getByLabel("Klopt met het totaal in de SumUp-app").check();
   await foto("12-afsluiten");
@@ -304,14 +313,30 @@ function fouten(page) {
   const verwacht = await klant.evaluate(() => {
     const d = JSON.parse(localStorage.getItem("bindr-demo-v1"));
     return d.exemplaren.filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null).length
-      + d.artikelen.filter((a) => a.opslag === "vitrine" && a.aantal > 0 && a.prijs != null).length;
+      + d.artikelen.filter((a) => a.opslag === "vitrine" && a.aantal > 0 && a.prijs != null).reduce((s, a) => s + a.aantal, 0);
   });
-  assert.equal(await klant.locator(".tegel").count(), verwacht, "klant ziet precies de catalogus");
+  const getoond = await klant.locator(".klant .tegel").evaluateAll((ts) => ts.reduce((s, t) => {
+    const m = t.querySelector(".aantal-merk");
+    return s + (m ? Number(m.textContent.replace("×", "")) : 1);
+  }, 0));
+  assert.equal(getoond, verwacht, "klant ziet precies de catalogus (dubbels als één tegel met een aantal)");
+  assert.ok(await klant.locator(".klant-merk img").isVisible(), "logo linksboven");
+  await klant.getByRole("heading", { name: "Hier vind je onze volledige catalogus" }).waitFor();
+  assert.match(await klant.locator(".klant-ig-knop").getAttribute("href"), /instagram\.com\/bindr\.test\//);
+  const alle = await klant.locator(".klant .tegel").count();
+  await klant.locator(".schakelchip", { hasText: "Andere talen" }).click();
+  await klant.waitForTimeout(300);
+  const anders = await klant.locator(".klant .tegel").count();
+  assert.ok(anders > 0 && anders < alle, `filter andere talen (${anders} van ${alle})`);
+  await klant.locator(".schakelchip", { hasText: "Andere talen" }).click();
+  await klant.locator(".sorteer select").selectOption("set");
+  await klant.locator(".set-kop").first().waitFor();
+  await klant.locator(".sorteer select").selectOption("nieuw");
   assert.equal(await klant.locator(".tabbalk, .kop-knoppen, .beurs-balk").count(), 0, "geen beheer op de klantenpagina");
   await klant.screenshot({ path: path.join(SHOTS, "14-klant.png") });
   await geenHorizontaleScroll("klantenpagina", klant);
   await klant.locator(".tegel").first().click();
-  await klant.getByRole("button", { name: "Reserveer via Instagram" }).waitFor();
+  await klant.getByRole("link", { name: /Bericht op Instagram/ }).waitFor();
   await klant.waitForTimeout(500);
   await geenHorizontaleScroll("klantendetail", klant);
   await klant.screenshot({ path: path.join(SHOTS, "15-klant-detail.png") });
@@ -333,7 +358,9 @@ function fouten(page) {
   const p2 = await ctx2.newPage();
   const f2 = fouten(p2);
   await p2.goto(BASIS + "#scan");
-  await p2.locator(".sheet-titel", { hasText: "0J6-8VC" }).waitFor({ timeout: 15000 });
+  await p2.locator(".scan-item", { hasText: "0J6-8VC" }).waitFor({ timeout: 15000 });
+  await p2.waitForTimeout(3000); // de camera blijft het label zien: het mag er niet nog eens bijkomen
+  assert.equal(await p2.locator(".scan-item").count(), 1, "QR blijft in beeld, toch maar één keer in de lijst");
   await p2.waitForTimeout(400);
   await p2.screenshot({ path: path.join(SHOTS, "16-qr-gescand.png") });
   assert.deepEqual(f2, [], "geen JavaScript-fouten bij scannen");

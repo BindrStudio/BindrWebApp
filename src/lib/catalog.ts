@@ -182,7 +182,7 @@ export interface Kandidaat {
 }
 
 /** Zoekt de kaarten die het best passen bij wat de OCR las. */
-export function herken(indexen: Index[], tekst: string): { kandidaten: Kandidaat[]; zeker: boolean } {
+export function herken(indexen: Index[], tekst: string, bonus?: (k: CatalogusKaart) => number): { kandidaten: Kandidaat[]; zeker: boolean } {
   const k = leesKenmerken(tekst);
   const scores = new Map<CatalogusKaart, number>();
   for (const idx of indexen) {
@@ -195,6 +195,7 @@ export function herken(indexen: Index[], tekst: string): { kandidaten: Kandidaat
         else if (k.codes.includes(kaart.setId.toUpperCase())) s += 40;
         const naam = zonderAccenten(kaart.naam).split(/[^a-z]+/).filter((w) => w.length >= 4);
         if (naam.some((w) => k.woorden.includes(w))) s += 15;
+        if (bonus) s += bonus(kaart);
         scores.set(kaart, Math.max(scores.get(kaart) || 0, s));
       }
     }

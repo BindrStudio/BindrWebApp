@@ -8,22 +8,28 @@ De voorraad-app van Bind'r: elk exemplaar in de vitrine en de stockdoos, met een
 
 **Voorraad: Catalogus en Vault**
 - **Catalogus** is wat te koop ligt op de beurs (klanten zien dit). **Vault** is jullie eigen stock (klanten zien dit niet). Beide ingedeeld in Singles, Slabs, Sealed en Bind'r-producten.
-- Elk exemplaar heeft een eigen code en QR-label; sealed, 3D-prints en bulk gaan per aantal.
-- Toevoegen via zoeken (naam, naam + nummer zoals `charizard 153`, `PFL 130`, `130/94`, ook Japans en Chinees), een foto of handmatig.
+- Elk exemplaar heeft een eigen code en QR-label (met het zwarte Bind'r-logo en de datum); sealed en 3D-prints gaan per aantal.
+- Dezelfde kaart in dezelfde conditie en voor dezelfde prijs staat als één tegel met een aantal rechtsboven. Filteren met schakelaars (nieuw binnen, taal, graded, prijs, set) en sorteren (nieuw binnen, prijs, per set, naam).
+- Toevoegen via zoeken (naam, naam + nummer zoals `charizard 153`, `PFL 130`, `130/94`, ook Japans en Chinees), een foto of handmatig. Meteen alle Cardmarket-info: trend, laagste, gemiddelde van 7 en 30 dagen, of de kaart en de set stijgen of dalen (met een knipoog), en een knop naar de goedkoopste aanbiedingen in België en Nederland (Near Mint, juiste taal).
 - **Prijzen nakijken**: één knop; hartjes die te ver afwijken pulseren rood. De vault toont welke kaarten in waarde stegen.
+
+**Scannen, drie in één**
+- De camera blijft open en herkent zelf een QR-code of, als er geen QR in beeld is, de kaart via tekstherkenning. Een code typen kan ook.
+- Alles komt in een lijstje; hetzelfde exemplaar komt er nooit twee keer in. Met één knop gaat de hele lijst in het mandje.
 
 **Kassa (beurs)**
 - Beurs starten met het startbedrag in de cashkoffer; de app noteert de stand van de catalogus.
-- Mandje met twee kanten: *wij geven* (scannen, zoeken, artikelen) en *wij krijgen* (kaarten of bulk van de klant). Daaruit volgt vanzelf verkoop, ruil of inkoop.
-- Onderhandelen per kaart of op het totaal (de app verdeelt op de cent). Betalen cash, SumUp of beide, met wisselgeld. 5 seconden "Ongedaan maken", retour, waarschuwing voor gereserveerde kaarten en kaarten uit de vault.
+- Mandje met twee kanten: *wij geven* (scannen, zoeken, artikelen) en *wij krijgen* (kaarten van de klant). Daaruit volgt vanzelf verkoop, ruil of inkoop.
+- **Bod op de kaarten van de klant**: de app toont de marktwaarde (Cardmarket, met conditie), rekent het percentage (inkoop 70%, ruil 80%, instelbaar) en stelt ronde bedragen voor (70% van € 183 = € 128,10 → € 125, € 128 of € 130). Een eigen bedrag kan ook; je ziet meteen welk percentage dat is.
+- Onderhandelen per kaart of op het totaal (de app verdeelt op de cent). Betalen cash, SumUp of beide, met wisselgeld. 5 seconden "Ongedaan maken", retour, en een vraag bij kaarten uit de vault.
 - Werkt zonder internet: wijzigingen wachten op het toestel en gaan door zodra er verbinding is. Verkochten twee toestellen offline hetzelfde exemplaar, dan toont de app een conflict om op te lossen.
 - Afsluiten: kas tellen, SumUp nakijken, samenvatting met omzet, korting, marge en de stand van de voorraad.
 
 **Klantencatalogus en overzicht**
-- Een aparte pagina zonder login (`/catalogus/`): enkel de catalogus met foto, conditie en prijs, en reserveren via Instagram. Geen vault, aankoopprijzen, reservaties of kassa.
+- Een aparte pagina zonder login (`/catalogus/`) in de stijl van een webshop: logo linksboven, een welkomstblok, filters en sorteren, kaarten die meekantelen en glanzen, Instagram onderaan en de eend die even vraagt of je onze recente binders al zag. Enkel de catalogus met foto, conditie en prijs: geen vault, aankoopprijzen of kassa.
 - Overzicht van beurzen en voorraadwaarde, en export van alle transacties als CSV.
 
-**Labels** op een Niimbot B1 / B1 Pro via Bluetooth, rechtstreeks vanuit de app (50 × 15 mm, zonder prijs).
+**Labels** op een Niimbot B1 / B1 Pro via Bluetooth, rechtstreeks vanuit de app (50 × 15 mm, zonder prijs, met het zwarte Bind'r-logo en de datum van het label).
 
 ## Printen
 
@@ -82,7 +88,7 @@ tests/       unit tests en de e2e-doorloop
 ### Automatisch
 
 - **App publiceren**: bij elke push en elke nacht. Haalt de Cardmarket-prijsgids op, houdt Supabase wakker en zet `public/` op GitHub Pages.
-- **Kaartencatalogus bijwerken**: elke maandag, uit [TCGdex](https://github.com/tcgdex/cards-database).
+- **Kaartencatalogus bijwerken**: elke maandag, uit [TCGdex](https://github.com/tcgdex/cards-database), met een klein `sets.json` (naam en releasedatum per set) voor de klantenpagina.
 
 ## Bronnen
 

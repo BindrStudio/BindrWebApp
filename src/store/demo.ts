@@ -3,7 +3,7 @@
 // De kassa gebruikt dezelfde rekenkern als de offline wachtrij (src/lib/kassa.ts).
 import type { Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Transactie } from "../types";
 import { Fout, type Alles, type Backend } from "./backend";
-import { standaardArtikel, standaardExemplaar } from "../lib/exemplaar";
+import { metVitrineSinds, schoonArtikel, schoonExemplaar, standaardArtikel, standaardExemplaar } from "../lib/exemplaar";
 import { aanvaardConflict, losConflictOp, maakOngedaan, pasToe } from "../lib/kassa";
 
 const SLEUTEL = "bindr-demo-v1";
@@ -20,6 +20,8 @@ export class DemoBackend implements Backend {
     const leeg: Opslag = { exemplaren: [], artikelen: [], beurzen: [], transacties: [], instellingen: {} };
     try {
       this.data = { ...leeg, ...(JSON.parse(localStorage.getItem(SLEUTEL) || "null") || {}) };
+      this.data.exemplaren = this.data.exemplaren.map(schoonExemplaar);
+      this.data.artikelen = this.data.artikelen.map(schoonArtikel);
     } catch {
       this.data = leeg;
     }
@@ -81,7 +83,8 @@ export class DemoBackend implements Backend {
   async wijzigExemplaar(id: string, wijziging: Partial<Exemplaar>) {
     const i = this.data.exemplaren.findIndex((e) => e.id === id);
     if (i < 0) throw new Fout("Exemplaar niet gevonden", 404);
-    this.data.exemplaren[i] = { ...this.data.exemplaren[i], ...wijziging, gewijzigd_op: new Date().toISOString() };
+    const oud = this.data.exemplaren[i];
+    this.data.exemplaren[i] = metVitrineSinds(oud, { ...oud, ...wijziging, gewijzigd_op: new Date().toISOString() });
     this.bewaar();
     return this.data.exemplaren[i];
   }

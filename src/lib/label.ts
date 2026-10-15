@@ -68,17 +68,31 @@ function past(ctx: CanvasRenderingContext2D, tekst: string, max: number): string
   return t.trimEnd() + "…";
 }
 
-function hart(ctx: CanvasRenderingContext2D, x: number, y: number, s: number) {
-  // punt onderaan op (x, y), breedte ≈ 1.8 s
-  ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.bezierCurveTo(x - s * 0.9, y - s * 0.55, x - s * 0.45, y - s * 1.15, x, y - s * 0.75);
-  ctx.bezierCurveTo(x + s * 0.45, y - s * 1.15, x + s * 0.9, y - s * 0.55, x, y);
-  ctx.fill();
+// Het zwarte Bind'r-logo rechtsboven op het label (public/img/logo-zwart.png).
+const LOGO_SRC = "img/logo-zwart.png";
+let logo: HTMLImageElement | null = null;
+let logoLaden: Promise<HTMLImageElement | null> | null = null;
+
+/** Laadt het logo voor op het label; daarna tekent tekenLabel het mee. */
+export function laadLabelLogo(): Promise<HTMLImageElement | null> {
+  if (typeof Image === "undefined") return Promise.resolve(null);
+  logoLaden ??= new Promise((ok) => {
+    const img = new Image();
+    img.onload = () => { logo = img; ok(img); };
+    img.onerror = () => { logoLaden = null; ok(null); };
+    img.src = LOGO_SRC;
+  });
+  return logoLaden;
+}
+
+/** De dag dat het label geprint (en geplakt) wordt, kort: 15/10/26. */
+export function labelDatum(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${String(d.getFullYear()).slice(2)}`;
 }
 
 /** Tekent het label (zwart op wit) op een canvas in de resolutie van de printer. */
-export function tekenLabel(ex: Exemplaar, maat: LabelMaat = MAAT_300): HTMLCanvasElement {
+export function tekenLabel(ex: Exemplaar, maat: LabelMaat = MAAT_300, datum = labelDatum()): HTMLCanvasElement {
   const pxmm = maat.dpi / 25.4;
   const c = document.createElement("canvas");
   c.width = maat.breedte;
@@ -113,14 +127,32 @@ export function tekenLabel(ex: Exemplaar, maat: LabelMaat = MAAT_300): HTMLCanva
   const tx = x0 + qrZijde + mm(1.9);
   const max = c.width - tx - mm(1.2);
   const pt = (p: number) => Math.round((p * s / 72) * maat.dpi);
+  const rechts = c.width - mm(1.2);
   ctx.textBaseline = "alphabetic";
   ctx.font = `700 ${pt(9.5)}px "Helvetica Neue", Arial, sans-serif`;
   ctx.fillText(code, tx, y(4.7));
+  const codeEinde = tx + ctx.measureText(code).width;
+
+  // Het zwarte Bind'r-logo rechtsboven (of, zolang het niet geladen is, de naam in vette letters).
+  const logoH = mm(4.1);
+  if (logo && logo.naturalWidth) {
+    const logoB = Math.round((logoH * logo.naturalWidth) / logo.naturalHeight);
+    if (rechts - logoB > codeEinde + mm(1)) ctx.drawImage(logo, rechts - logoB, y(0.9), logoB, logoH);
+  } else {
+    ctx.font = `800 ${pt(7.5)}px "Helvetica Neue", Arial, sans-serif`;
+    const b = ctx.measureText("Bind'r").width;
+    if (rechts - b > codeEinde + mm(1)) ctx.fillText("Bind'r", rechts - b, y(4.4));
+  }
+
   ctx.font = `400 ${pt(6.5)}px "Helvetica Neue", Arial, sans-serif`;
   ctx.fillText(past(ctx, naam, max), tx, y(8.3));
+
+  // Onderaan: set, nummer en conditie links, de datum van het label rechts.
+  ctx.font = `400 ${pt(5.6)}px "Helvetica Neue", Arial, sans-serif`;
+  const datumB = ctx.measureText(datum).width;
+  ctx.fillText(datum, rechts - datumB, y(11.7));
   ctx.font = `400 ${pt(6)}px "Helvetica Neue", Arial, sans-serif`;
-  ctx.fillText(past(ctx, detail, max - mm(4)), tx, y(11.7));
-  hart(ctx, c.width - mm(3), y(15 - 2.4), mm(2.2));
+  ctx.fillText(past(ctx, detail, max - datumB - mm(1.5)), tx, y(11.7));
   return c;
 }
 

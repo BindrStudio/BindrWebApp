@@ -26,13 +26,15 @@ jobs:
           git -C ../cards-database sparse-checkout set data data-asia
 
       - name: Catalogus bouwen
-        run: node scripts/build-catalog.mjs ../cards-database public/data
+        run: |
+          node scripts/build-catalog.mjs ../cards-database public/data
+          node scripts/build-sets.mjs
 
       - name: Opslaan als er iets veranderde
         run: |
           git config user.name "bindr-catalogus"
           git config user.email "actions@users.noreply.github.com"
-          git add public/data/catalog-en.json public/data/catalog-asia.json
+          git add public/data/catalog-en.json public/data/catalog-asia.json public/data/sets.json
           if git diff --staged --quiet; then
             echo "Geen nieuwe kaarten"
           else

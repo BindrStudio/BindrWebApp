@@ -12,6 +12,8 @@ export interface Instellingen {
   nakijkenAfwijking: number; // trend en 30-dagengemiddelde verschillen meer dan dit deel
   automatischPrinten: boolean;
   labelMaat: string; // id uit LABELMATEN
+  inkoopPct: number; // wat we bieden bij inkoop, in % van de marktwaarde
+  ruilPct: number;   // wat een kaart van de klant waard is bij ruil, in %
 }
 
 export const STANDAARD_INSTELLINGEN: Instellingen = {
@@ -26,6 +28,8 @@ export const STANDAARD_INSTELLINGEN: Instellingen = {
   nakijkenAfwijking: 0.3,
   automatischPrinten: false,
   labelMaat: "50x15",
+  inkoopPct: 70,
+  ruilPct: 80,
 };
 
 // Talen waarvoor de Cardmarket-prijsgids een bruikbare richtprijs geeft.
@@ -49,9 +53,11 @@ export interface Voorstel {
 
 export function prijsVoor(regel: PrijsRegel | undefined, holo: boolean) {
   if (!regel) return null;
-  const [trend, laagste, gem30, trendH, laagsteH, gem30H] = regel;
-  if (holo && (trendH != null || gem30H != null)) return { trend: trendH, laagste: laagsteH, gem30: gem30H, holo: true };
-  return { trend, laagste, gem30, holo: false };
+  const [trend, laagste, gem30, trendH, laagsteH, gem30H, gem1, gem7, gem1H, gem7H] = regel;
+  if (holo && (trendH != null || gem30H != null)) {
+    return { trend: trendH ?? null, laagste: laagsteH ?? null, gem30: gem30H ?? null, gem1: gem1H ?? null, gem7: gem7H ?? null, holo: true };
+  }
+  return { trend: trend ?? null, laagste: laagste ?? null, gem30: gem30 ?? null, gem1: gem1 ?? null, gem7: gem7 ?? null, holo: false };
 }
 
 /** Het prijsvoorstel van de app voor één exemplaar, of null als de beheerder zelf moet prijzen. */
@@ -87,7 +93,7 @@ export function prijscheck(exemplaren: Exemplaar[], gids: Prijsgids | null, inst
   const uit: TeWijzigen[] = [];
   for (const ex of exemplaren) {
     if (ex.opslag !== "vitrine") continue;
-    if (ex.status !== "in voorraad" && ex.status !== "gereserveerd") continue;
+    if (ex.status !== "in voorraad") continue;
     if (ex.prijs_handmatig || ex.hartjesprijs == null) continue;
     const v = voorstelVoor(ex, gids, inst);
     if (!v) continue;
@@ -120,7 +126,7 @@ export function verdeelTotaal(prijzen: number[], nieuwTotaal: number): number[] 
 export function waardeStijgers(exemplaren: Exemplaar[], gids: Prijsgids | null, inst: Instellingen): Map<string, TeWijzigen> {
   const uit = new Map<string, TeWijzigen>();
   for (const ex of exemplaren) {
-    if (ex.opslag !== "stockdoos" || (ex.status !== "in voorraad" && ex.status !== "gereserveerd")) continue;
+    if (ex.opslag !== "stockdoos" || ex.status !== "in voorraad") continue;
     const v = voorstelVoor(ex, gids, inst);
     if (!v) continue;
     const basis = ex.verkoopprijs ?? ex.aankoopprijs;

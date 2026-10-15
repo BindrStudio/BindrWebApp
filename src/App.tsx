@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { naarTab, sluit, sluitToast, start, useApp, type Tab } from "./state";
+import { actieveBeurs, naarTab, sluit, sluitToast, start, useApp, type Tab } from "./state";
 import { Voorraad } from "./ui/Voorraad";
 import { Scan } from "./ui/Scan";
 import { Labels } from "./ui/Labels";
@@ -40,6 +40,7 @@ export function App() {
   if (fase === "login") return <><Login /><Toasts toasts={toasts} /></>;
 
   const inMandje = mandje.regels.length;
+  const beurs = actieveBeurs();
 
   return (
     <div className="app">
@@ -49,6 +50,12 @@ export function App() {
           {online ? `Wijzigingen doorsturen… (${wachtrij})` : `Offline${wachtrij ? ` · ${wachtrij} ${wachtrij === 1 ? "wijziging wacht" : "wijzigingen wachten"}` : ""} · alles werkt verder`}
         </div>
       )}
+      <header className="merkbalk">
+        <img src="img/logo-woord.png" alt="Bind'r" width={77} height={34} />
+        {beurs && tab !== "kassa" && (
+          <button className="beurs-pil" onClick={() => naarTab("kassa")}><span className="stip" /><span>{beurs.naam}</span></button>
+        )}
+      </header>
       <main key={tab} className="tab-inhoud">
         {tab === "catalogus" && <Voorraad opslag="vitrine" />}
         {tab === "vault" && <Voorraad opslag="stockdoos" />}

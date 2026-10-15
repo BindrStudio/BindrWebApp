@@ -1,22 +1,152 @@
-/* Klantencatalogus: zelfde huisstijl, eigen kop, geen tabbalk. */
-.klant { max-width: 1000px; margin: 0 auto; padding: calc(16px + var(--boven)) 16px calc(32px + var(--onder)); display: flex; flex-direction: column; gap: 14px; }
-.klant-kop { display: flex; align-items: center; gap: 14px; }
-.klant-logo { width: 110px; flex: none; }
-.klant-kop h1 { font-size: 30px; line-height: 1.05; }
-.klant-kop p { margin: 4px 0 0; color: var(--inkt-2); font-size: 14px; }
-.klant-filters { display: grid; gap: 10px; position: sticky; top: 0; z-index: 10; padding: 8px 0; background: var(--perzik); }
-.klant-zoekrij { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-.klant-zoekrij select { border: 0; border-radius: 13px; background: rgba(59, 42, 18, .07); padding: 0 12px; font-size: 14px; max-width: 160px; }
-.klant-zoekrij .zoekbalk input { padding-left: 4px; }
-.klant-leeg, .klant-fout { text-align: center; color: var(--inkt-2); padding: 40px 16px; }
-.klant-voet { text-align: center; color: var(--inkt-3); font-size: 13px; margin: 8px 0 0; }
-.klant-laden { margin: 40px auto; }
-.klant-detail { display: grid; gap: 10px; justify-items: start; }
-.klant-detail-foto { width: min(260px, 70vw); justify-self: center; }
-.klant-detail-foto .foto { border-radius: 14px; box-shadow: var(--schaduw); }
-.klant-detail .hartje.groot { justify-self: center; }
-.klant-detail .gegevens { width: 100%; }
-.klant-melding { margin: 0; padding: 10px 12px; border-radius: 12px; background: var(--zee-licht); color: var(--zee-donker); font-size: 14px; }
+/* Klantencatalogus: zelfde huisstijl als de app, met een eigen kop, een welkomstblok,
+   filters zoals een webshop, Instagram onderaan en de eend die even dag komt zeggen. */
+
+.klant { max-width: 1080px; margin: 0 auto; padding: 0 16px calc(32px + var(--onder)); display: flex; flex-direction: column; gap: 14px; }
+.verborgen { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Bovenbalk: logo links, Instagram rechts. Mat glas, blijft staan. */
+.klant-balk {
+  position: sticky; top: 0; z-index: 20; margin: 0 -16px; padding: calc(8px + var(--boven)) 16px 8px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: rgba(252, 235, 215, .82); backdrop-filter: saturate(1.6) blur(16px); -webkit-backdrop-filter: saturate(1.6) blur(16px);
+  border-bottom: 1px solid rgba(59, 42, 18, .06);
+}
+.klant-merk { display: block; line-height: 0; transition: transform .3s var(--veer); }
+.klant-merk img { height: 40px; width: auto; }
+.klant-merk:hover { transform: rotate(-2deg) scale(1.04); }
+.klant-ig-knop { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 999px; background: var(--room); color: var(--inkt); text-decoration: none; font-weight: 600; font-size: 14px; box-shadow: var(--schaduw); transition: transform .2s var(--veer); }
+.klant-ig-knop:hover { transform: translateY(-1px); }
+.klant-ig-knop svg { color: #c13584; }
+@media (max-width: 380px) { .klant-ig-knop span { display: none; } }
+
+/* Welkomstblok: "Hier vind je onze volledige catalogus" */
+.klant-held {
+  position: relative; overflow: hidden; margin-top: 6px; padding: 22px 18px 18px; border-radius: 26px;
+  display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center;
+  background:
+    radial-gradient(circle at 92% 18%, rgba(255, 255, 255, .55), transparent 40%),
+    linear-gradient(140deg, var(--zee) 0%, #5f949b 60%, #6fa3a6 100%);
+  color: #fff; box-shadow: 0 14px 34px rgba(60, 106, 114, .28);
+  animation: held-in .7s var(--veer) both;
+}
+.klant-held::after { content: ""; position: absolute; inset: 8px; border-radius: 20px; border: 2px dashed rgba(243, 201, 129, .7); pointer-events: none; }
+@keyframes held-in { from { opacity: 0; transform: translateY(16px) scale(.98); } }
+.held-tekst { position: relative; z-index: 1; display: grid; gap: 10px; min-width: 0; }
+.held-label { display: inline-flex; align-items: center; gap: 6px; width: fit-content; padding: 4px 10px; border-radius: 999px; background: rgba(255, 255, 255, .18); color: var(--boter); font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.klant-held h1 { font-size: clamp(25px, 6.8vw, 44px); line-height: 1.06; color: #fff; text-wrap: balance; }
+.klant-held p { margin: 0; font-size: 15px; line-height: 1.45; color: rgba(255, 255, 255, .9); max-width: 46ch; }
+.held-knoppen { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.klant-held .knop { background: var(--boter); color: var(--inkt); }
+.klant-held .knop::after { border-color: rgba(59, 42, 18, .35); }
+.klant-held .knop.zacht { background: rgba(255, 255, 255, .16); color: #fff; }
+.held-beeld { position: relative; z-index: 1; width: 128px; height: 128px; align-self: start; }
+.held-beeld img { position: relative; width: 100%; height: 100%; animation: dobber 3.2s ease-in-out infinite; filter: drop-shadow(0 10px 14px rgba(0, 0, 0, .2)); }
+.held-bel { position: absolute; inset: -6px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, .7), rgba(255, 255, 255, .12) 60%); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .45); animation: dobber 3.2s ease-in-out infinite reverse; }
+.held-ster { position: absolute; color: var(--boter); animation: twinkel 2.2s ease-in-out infinite; }
+.held-ster svg { width: 18px; height: 18px; }
+.held-ster.s1 { left: -14px; top: 18px; }
+.held-ster.s2 { right: -6px; top: -4px; animation-delay: .6s; }
+.held-ster.s2 svg { width: 12px; height: 12px; }
+.held-ster.s3 { right: 2px; bottom: 4px; animation-delay: 1.1s; color: #fff; }
+.held-cijfers { position: relative; z-index: 1; grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.held-cijfers button { display: grid; justify-items: start; padding: 8px 12px; border-radius: 14px; background: rgba(255, 255, 255, .14); color: #fff; text-align: left; transition: background .2s, transform .2s var(--veer); }
+.held-cijfers button:hover { background: rgba(255, 255, 255, .24); transform: translateY(-2px); }
+.held-cijfers strong { font-family: var(--titel); font-weight: 600; font-size: 22px; line-height: 1; }
+.held-cijfers span { font-size: 12px; font-weight: 700; opacity: .85; }
+@media (max-width: 420px) {
+  .held-beeld { width: 84px; height: 84px; margin: -4px -4px 0 0; }
+  .klant-held { padding: 20px 16px 16px; }
+  .klant-held p { font-size: 14px; }
+}
+
+/* Zoeken en sorteren: blijft onder de bovenbalk staan. */
+.klant-zoekrij {
+  position: sticky; top: calc(57px + var(--boven)); z-index: 15; margin: 0 -16px; padding: 8px 16px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px;
+  background: linear-gradient(var(--perzik) 75%, rgba(252, 235, 215, 0)); scroll-margin-top: calc(57px + var(--boven));
+}
+.klant-zoekrij .zoekbalk { background: var(--room); box-shadow: var(--schaduw); }
+.klant-zoekrij .zoekbalk input { padding-left: 2px; }
+.sorteer { position: relative; display: flex; align-items: center; gap: 6px; padding: 0 12px; border-radius: 13px; background: var(--room); box-shadow: var(--schaduw); color: var(--zee-donker); }
+.sorteer select { appearance: none; border: 0; background: none; font-size: 14px; font-weight: 600; color: var(--inkt); padding: 12px 0; max-width: 128px; cursor: pointer; }
+.sorteer select:focus { outline: none; }
+
+.klant-filters { display: grid; gap: 10px; }
+.klant-filters .chips { margin: 0 -16px; padding: 2px 16px 4px; }
+.schakelchip { display: inline-flex; align-items: center; gap: 7px; }
+.schakelbol { width: 26px; height: 16px; border-radius: 8px; background: rgba(59, 42, 18, .14); position: relative; transition: background .25s; flex: none; }
+.schakelbol::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .2); transition: transform .3s var(--veer); }
+.schakelchip.aan .schakelbol { background: var(--boter); }
+.schakelchip.aan .schakelbol::after { transform: translateX(10px); }
+.klant-resultaat { display: flex; align-items: center; justify-content: space-between; min-height: 24px; font-size: 14px; font-weight: 600; color: var(--inkt-2); }
+.klant-resultaat .tekstknop { padding: 0; }
+
+/* Tegels op de klantenpagina */
+.klant .raster { grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 14px; }
+@media (max-width: 380px) { .klant .raster { gap: 10px; grid-template-columns: repeat(2, 1fr); } }
+.klant .tegel-onder { margin-top: 4px; }
+.klant .hartje svg { fill: currentColor; }
 .artikel-glyph { font-family: var(--titel); font-size: 44px; font-weight: 600; opacity: .5; }
-.klant .tegel .hartje { font-family: var(--titel); }
+.artikel-vlak .glans { border-radius: 10px; }
+
+
+.klant-leeg, .klant-fout { text-align: center; color: var(--inkt-2); padding: 32px 16px; display: grid; justify-items: center; gap: 10px; }
+.klant-leeg img { animation: dobber 3s ease-in-out infinite; }
+.klant-leeg p { margin: 0; }
+.klant-laden { margin: 40px auto; }
+
+/* Detail */
 .klant .sheet { max-height: calc(100dvh - 24px); }
+.klant-detail { display: grid; gap: 12px; justify-items: start; }
+.klant-detail-foto { position: relative; width: min(250px, 64vw); justify-self: center; border-radius: 16px;
+  transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .4s var(--veer);
+  animation: kaart-zweef 5s ease-in-out infinite; }
+.klant-detail-foto.kantelt { transition: transform .08s linear; animation: none; }
+.klant-detail-foto .foto, .klant-detail-foto .artikel-vlak { border-radius: 16px; box-shadow: 0 18px 40px rgba(59, 42, 18, .25); }
+.klant-detail-foto.holo .glans { opacity: .45; animation: glimmer 4s ease-in-out infinite; }
+@keyframes kaart-zweef { 0%, 100% { transform: perspective(900px) rotateY(-4deg) rotateX(2deg); } 50% { transform: perspective(900px) rotateY(4deg) rotateX(-1deg); } }
+.detail-prijsrij { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-self: center; }
+.aantal-label { padding: 5px 10px; border-radius: 999px; background: var(--inkt); color: var(--boter); font-weight: 700; font-size: 13px; }
+.nieuw-label { padding: 5px 10px; border-radius: 999px; background: var(--boter); color: var(--inkt); font-weight: 700; font-size: 13px; }
+.klant-detail .gegevens { width: 100%; background: var(--room); border-radius: 16px; padding: 14px 16px; }
+.klant-vraag { width: 100%; display: grid; gap: 10px; padding: 14px; border-radius: 16px; background: var(--boter-licht); }
+.klant-vraag p { margin: 0; font-size: 14px; color: var(--inkt-2); text-align: center; }
+.ig-knop { text-decoration: none; background: linear-gradient(110deg, #f58529, #dd2a7b 45%, #8134af 80%); }
+.ig-knop::after { border-color: rgba(255, 255, 255, .45); }
+
+/* Onderaan: Instagram en het logo */
+.klant-voet { margin-top: 26px; display: grid; justify-items: center; gap: 6px; text-align: center; color: var(--inkt-2); font-size: 13px; }
+.klant-voet p { margin: 0; }
+.ig-blok { width: 100%; display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: 22px; text-align: left; text-decoration: none; color: #fff;
+  background: linear-gradient(110deg, #f58529, #dd2a7b 45%, #8134af 80%, #515bd4); background-size: 160% 160%;
+  box-shadow: 0 14px 30px rgba(129, 52, 175, .25); animation: ig-golf 8s ease-in-out infinite; transition: transform .3s var(--veer); margin-bottom: 14px; }
+.ig-blok:hover { transform: translateY(-3px) scale(1.01); }
+@keyframes ig-golf { 50% { background-position: 100% 50%; } }
+.ig-blok-icoon { width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; background: rgba(255, 255, 255, .2); flex: none; }
+.ig-blok-tekst { flex: 1; display: grid; gap: 2px; }
+.ig-blok-tekst strong { font-family: var(--titel); font-size: 20px; font-weight: 600; }
+.ig-blok-tekst span { font-size: 13.5px; opacity: .92; }
+.ig-blok-pijl { font-size: 22px; transition: transform .3s var(--veer); }
+.ig-blok:hover .ig-blok-pijl { transform: translateX(4px); }
+.voet-logo { width: 120px; height: auto; margin-top: 6px; opacity: .95; }
+
+/* De eend met een tekstballon, linksonder */
+.eend-popup { position: fixed; left: 12px; bottom: calc(12px + var(--onder)); z-index: 50; display: flex; align-items: flex-end; gap: 0; pointer-events: none; }
+.eend-beeld { width: 84px; height: 84px; order: 1; pointer-events: auto; animation: eend-in .8s var(--veer) both, dobber 2.8s 1s ease-in-out infinite; filter: drop-shadow(0 8px 12px rgba(59, 42, 18, .25)); }
+.eend-ballon { order: 2; position: relative; margin: 0 0 58px -6px; max-width: 210px; padding: 12px 14px; border-radius: 18px 18px 18px 6px; background: var(--wit); color: var(--inkt);
+  text-decoration: none; font-family: var(--titel); font-weight: 600; font-size: 16px; line-height: 1.2; box-shadow: 0 10px 28px rgba(59, 42, 18, .22); pointer-events: auto;
+  animation: ballon-in .5s .55s var(--veer) both; display: grid; gap: 6px; }
+.eend-ballon span { display: inline-flex; align-items: center; gap: 5px; font-family: var(--tekst); font-size: 13px; font-weight: 700; color: #c13584; }
+.eend-ballon::before { content: ""; position: absolute; left: -7px; bottom: 10px; border: 8px solid transparent; border-right-color: var(--wit); border-left: 0; }
+.eend-sluit { order: 3; pointer-events: auto; align-self: flex-start; margin: 0 0 0 -14px; width: 26px; height: 26px; border-radius: 50%; background: var(--inkt); color: var(--room); font-size: 12px; display: grid; place-items: center; box-shadow: 0 4px 10px rgba(0, 0, 0, .2); animation: ballon-in .4s .8s var(--veer) both; position: relative; z-index: 1; }
+@keyframes eend-in { from { transform: translateY(120%) rotate(-12deg); } }
+@keyframes ballon-in { from { opacity: 0; transform: scale(.4) translateX(-20px); transform-origin: left bottom; } }
+
+@media (min-width: 760px) {
+  .klant { padding: 0 24px 40px; }
+  .klant-balk, .klant-zoekrij { margin: 0 -24px; padding-left: 24px; padding-right: 24px; }
+  .klant-held { padding: 34px 34px 28px; gap: 12px 24px; }
+  .held-beeld { width: 200px; height: 200px; }
+  .klant-filters .chips { margin: 0; padding: 2px 0 4px; flex-wrap: wrap; }
+  .klant .raster { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 18px; }
+}

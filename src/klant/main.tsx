@@ -1,14 +1,21 @@
 // De klantencatalogus: een aparte, publieke pagina zonder login en zonder beheerfuncties.
 // Ze toont enkel wat in de catalogus (vitrine) ligt, via de publieke weergaven in Supabase.
-// Niets uit de beheer-app wordt hier geladen.
-import { useEffect, useMemo, useState } from "react";
+// Niets uit de beheer-app wordt hier geladen, enkel config, types en kleine hulpfuncties.
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { SUPABASE_KEY, SUPABASE_URL } from "../config";
+import { INSTAGRAM, SUPABASE_KEY, SUPABASE_URL } from "../config";
 import { TALEN } from "../types";
-import { euro, zonderAccenten } from "../lib/format";
-import { toonCode } from "../lib/code";
+import { euro } from "../lib/format";
+import { kantel } from "../lib/kantel";
+import {
+  groepeer, groepSleutel, isNieuw, pastFilters, pastZoek, perSet, SNELFILTERS, SORTERINGEN, setIdVan, sorteer, zoekTekst, zoekWoorden,
+  type Groep, type SetInfo, type Snelfilter, type Sortering, type Toonbaar,
+} from "../lib/weergave";
 
-interface Kaart {
+// ── Gegevens ─────────────────────────────────────────────────────────────────
+
+interface VitrineRij {
+  kaart_id: string | null;
   code: string;
   naam: string;
   naam_origineel: string | null;
@@ -22,18 +29,46 @@ interface Kaart {
   variant: string;
   grader: string | null;
   grade: string | null;
-  prijs: number;
-  sinds: string | null;
+  prijs: number | string;
+  sinds: string | null;       // datum van het hartje
+  toegevoegd?: string | null; // sinds wanneer in de catalogus (nieuwer schema)
 }
-interface Artikel { id: string; naam: string; soort: string; prijs: number; aantal: number }
-type Item = { soort: "kaart"; k: Kaart } | { soort: "artikel"; a: Artikel };
+interface ArtikelRij { id: string; naam: string; soort: string; prijs: number | string; aantal: number }
+
+/** Eén ding in de catalogus: een kaart (één exemplaar) of een artikel (met een aantal). */
+interface Stuk extends Toonbaar {
+  id: string;
+  bron: "kaart" | "artikel";
+  afbeelding: string | null;
+  aantal: number;
+}
+
 type Cat = "alles" | "singles" | "slabs" | "sealed" | "bindr";
+const CATS: { id: Cat; label: string }[] = [
+  { id: "alles", label: "Alles" }, { id: "singles", label: "Singles" }, { id: "slabs", label: "Slabs" },
+  { id: "sealed", label: "Sealed" }, { id: "bindr", label: "Bind'r" },
+];
+const catVan = (s: Stuk): Cat => (s.bron === "artikel"
+  ? (s.soort === "eigen product" ? "bindr" : "sealed")
+  : s.soort === "slab" ? "slabs" : s.soort === "eigen product" ? "bindr" : "singles");
 
 const CONDITIE: Record<string, string> = { M: "Mint", NM: "Near Mint", EX: "Excellent", GD: "Good", LP: "Light Played", PL: "Played", PO: "Poor" };
 const taalNaam = (t: string) => TALEN.find((x) => x.code === t)?.label ?? t;
-const catVan = (it: Item): Cat => (it.soort === "artikel"
-  ? (it.a.soort === "eigen product" ? "bindr" : "sealed")
-  : it.k.soort === "slab" ? "slabs" : it.k.soort === "eigen product" ? "bindr" : "singles");
+
+function vanKaart(k: VitrineRij): Stuk {
+  return {
+    id: k.code, bron: "kaart", kaart_id: k.kaart_id, soort: k.soort, naam: k.naam, naam_origineel: k.naam_origineel,
+    set_naam: k.set_naam, set_code: k.set_code, nummer: k.nummer, taal: k.taal, conditie: k.conditie, variant: k.variant || "normaal",
+    grader: k.grader, grade: k.grade, prijs: Number(k.prijs), toegevoegd: k.toegevoegd ?? k.sinds, afbeelding: k.afbeelding, aantal: 1,
+  };
+}
+function vanArtikel(a: ArtikelRij): Stuk {
+  return {
+    id: a.id, bron: "artikel", kaart_id: null, soort: a.soort === "eigen product" ? "eigen product" : "sealed", naam: a.naam,
+    set_naam: null, set_code: null, nummer: null, taal: "", conditie: null, variant: "normaal", grader: null, grade: null,
+    prijs: Number(a.prijs), toegevoegd: null, afbeelding: null, aantal: a.aantal,
+  };
+}
 
 async function haal<T>(pad: string): Promise<T> {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${pad}`, { headers: { apikey: SUPABASE_KEY } });
@@ -41,188 +76,262 @@ async function haal<T>(pad: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
+interface Data { stukken: Stuk[]; instagram: string }
+
 /** Met ?demo=1 toont de pagina de demo van dit toestel (om te kijken hoe klanten het zien). */
-function laadDemo(): { kaarten: Kaart[]; artikelen: Artikel[]; instagram: string } | null {
+function laadDemo(): Data | null {
   if (!new URLSearchParams(location.search).has("demo")) return null;
   try {
     const d = JSON.parse(localStorage.getItem("bindr-demo-v1") || "null");
-    if (!d) return { kaarten: [], artikelen: [], instagram: "" };
-    const kaarten = (d.exemplaren as (Kaart & { opslag: string; status: string; hartjesprijs: number | null; hartjesdatum: string | null })[])
+    if (!d) return { stukken: [], instagram: INSTAGRAM };
+    type DemoEx = VitrineRij & { opslag: string; status: string; hartjesprijs: number | null; hartjesdatum: string | null; vitrine_sinds?: string | null };
+    const kaarten = (d.exemplaren as DemoEx[])
       .filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null)
-      .map((e) => ({
-        code: e.code, naam: e.naam, naam_origineel: e.naam_origineel, soort: e.soort, afbeelding: e.afbeelding,
-        set_naam: e.set_naam, set_code: e.set_code, nummer: e.nummer, taal: e.taal, conditie: e.conditie,
-        variant: e.variant, grader: e.grader, grade: e.grade, prijs: e.hartjesprijs!, sinds: e.hartjesdatum,
-      }));
-    const artikelen = (d.artikelen as (Artikel & { opslag: string })[])
+      .map((e) => vanKaart({ ...e, prijs: e.hartjesprijs!, sinds: e.hartjesdatum, toegevoegd: e.vitrine_sinds ?? e.hartjesdatum }));
+    const artikelen = (d.artikelen as (ArtikelRij & { opslag: string })[])
       .filter((a) => a.opslag === "vitrine" && a.aantal > 0 && a.prijs != null)
-      .map((a) => ({ id: a.id, naam: a.naam, soort: a.soort, prijs: a.prijs, aantal: a.aantal }));
-    return { kaarten, artikelen, instagram: typeof d.instellingen?.instagram === "string" ? d.instellingen.instagram : "" };
+      .map(vanArtikel);
+    const ig = d.instellingen?.instagram;
+    return { stukken: [...kaarten, ...artikelen], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM };
   } catch {
     return null;
   }
 }
 
+const aantalVan = (g: Groep<Stuk>) => g.items.reduce((s, x) => s + x.aantal, 0);
+const igProfiel = (ig: string) => `https://www.instagram.com/${encodeURIComponent(ig)}/`;
+const igBericht = (ig: string) => `https://ig.me/m/${encodeURIComponent(ig)}`;
+
+// ── De pagina ────────────────────────────────────────────────────────────────
+
 function Catalogus() {
-  const [data, setData] = useState<{ kaarten: Kaart[]; artikelen: Artikel[]; instagram: string } | null>(null);
+  const [data, setData] = useState<Data | null>(null);
+  const [sets, setSets] = useState<SetInfo | null>(null);
   const [fout, setFout] = useState<string | null>(null);
   const [cat, setCat] = useState<Cat>("alles");
   const [zoek, setZoek] = useState("");
-  const [sort, setSort] = useState<"prijs-hoog" | "prijs-laag" | "nieuw" | "naam">("prijs-hoog");
-  const [open, setOpen] = useState<Item | null>(null);
-  const [melding, setMelding] = useState<string | null>(null);
+  const [filters, setFilters] = useState<Set<Snelfilter>>(new Set());
+  const [set, setSet] = useState("");
+  const [sort, setSort] = useState<Sortering>("nieuw");
+  const [open, setOpen] = useState<Groep<Stuk> | null>(null);
   const demo = useMemo(laadDemo, []);
+  const lijstRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    fetch("../data/sets.json").then((r) => (r.ok ? r.json() : null)).then(setSets).catch(() => setSets(null));
     if (demo) { setData(demo); return; }
     Promise.all([
-      haal<Kaart[]>("publieke_vitrine?select=*"),
-      haal<Artikel[]>("publieke_artikelen?select=*").catch(() => []),
+      haal<VitrineRij[]>("publieke_vitrine?select=*"),
+      haal<ArtikelRij[]>("publieke_artikelen?select=*").catch(() => []),
       haal<{ sleutel: string; waarde: unknown }[]>("publieke_instellingen?select=*").catch(() => []),
     ]).then(([kaarten, artikelen, inst]) => {
       const ig = inst.find((x) => x.sleutel === "instagram")?.waarde;
-      setData({ kaarten: kaarten.map((k) => ({ ...k, prijs: Number(k.prijs) })), artikelen: artikelen.map((a) => ({ ...a, prijs: Number(a.prijs) })), instagram: typeof ig === "string" ? ig : "" });
+      setData({ stukken: [...kaarten.map(vanKaart), ...artikelen.map(vanArtikel)], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM });
     }).catch(() => setFout("De catalogus kon niet geladen worden. Probeer het straks opnieuw."));
   }, [demo]);
 
-  const items: Item[] = useMemo(() => data ? [
-    ...data.kaarten.map((k) => ({ soort: "kaart" as const, k })),
-    ...data.artikelen.map((a) => ({ soort: "artikel" as const, a })),
-  ] : [], [data]);
+  const stukken = data?.stukken ?? [];
+  const ig = data?.instagram ?? INSTAGRAM;
 
   const telling = useMemo(() => {
     const t: Partial<Record<Cat, number>> = {};
-    for (const it of items) t[catVan(it)] = (t[catVan(it)] ?? 0) + 1;
+    for (const s of stukken) t[catVan(s)] = (t[catVan(s)] ?? 0) + s.aantal;
     return t;
-  }, [items]);
+  }, [stukken]);
+  const nieuwAantal = useMemo(() => stukken.filter((s) => isNieuw(s)).length, [stukken]);
 
-  const lijst = useMemo(() => {
-    const woorden = zonderAccenten(zoek.trim()).split(/\s+/).filter(Boolean);
-    const prijs = (it: Item) => (it.soort === "kaart" ? it.k.prijs : it.a.prijs);
-    const naam = (it: Item) => (it.soort === "kaart" ? it.k.naam : it.a.naam);
-    return items
-      .filter((it) => cat === "alles" || catVan(it) === cat)
-      .filter((it) => {
-        if (!woorden.length) return true;
-        const t = zonderAccenten(it.soort === "kaart"
-          ? [it.k.naam, it.k.naam_origineel, it.k.set_naam, it.k.set_code, it.k.nummer].filter(Boolean).join(" ")
-          : it.a.naam);
-        return woorden.every((w) => t.includes(w));
-      })
-      .sort((a, b) => {
-        if (sort === "prijs-hoog") return prijs(b) - prijs(a);
-        if (sort === "prijs-laag") return prijs(a) - prijs(b);
-        if (sort === "naam") return naam(a).localeCompare(naam(b));
-        const sa = a.soort === "kaart" ? a.k.sinds ?? "" : "";
-        const sb = b.soort === "kaart" ? b.k.sinds ?? "" : "";
-        return sb.localeCompare(sa);
-      });
-  }, [items, cat, zoek, sort]);
+  // Sets die in de catalogus voorkomen, nieuwste eerst.
+  const setLijst = useMemo(() => {
+    const m = new Map<string, { id: string; naam: string; aantal: number; release: string }>();
+    for (const s of stukken) {
+      if (s.bron !== "kaart" || s.soort === "eigen product") continue;
+      const id = setIdVan(s);
+      if (!id) continue;
+      const x = m.get(id) ?? { id, naam: s.set_naam || sets?.[id]?.[0] || id, aantal: 0, release: sets?.[id]?.[2] ?? "" };
+      x.aantal++;
+      m.set(id, x);
+    }
+    return [...m.values()].sort((a, b) => b.release.localeCompare(a.release) || a.naam.localeCompare(b.naam));
+  }, [stukken, sets]);
 
-  const reserveer = async (it: Item) => {
-    const tekst = it.soort === "kaart"
-      ? `Hoi Bind'r! Ik wil graag reserveren: ${it.k.naam} (${[it.k.set_code, it.k.nummer].filter(Boolean).join(" ")}${it.k.conditie ? `, ${it.k.conditie}` : ""}) voor ${euro(it.k.prijs)}. Ref ${toonCode(it.k.code)}`
-      : `Hoi Bind'r! Ik wil graag reserveren: ${it.a.naam} voor ${euro(it.a.prijs)}.`;
-    try { await navigator.clipboard.writeText(tekst); setMelding("Bericht gekopieerd. Plak het in je Instagram-bericht."); }
-    catch { setMelding(tekst); }
-    if (data?.instagram) window.open(`https://ig.me/m/${encodeURIComponent(data.instagram)}`, "_blank", "noopener");
+  const groepen = useMemo(() => {
+    const woorden = zoekWoorden(zoek);
+    const zichtbaar = stukken.filter((s) =>
+      (cat === "alles" || catVan(s) === cat) &&
+      (!set || setIdVan(s) === set) &&
+      pastFilters(s, filters) &&
+      (!woorden.length || pastZoek(zoekTekst(s), woorden)));
+    const g = groepeer(zichtbaar, (s) => (s.bron === "artikel" ? `a|${s.id}` : groepSleutel(s)));
+    return sorteer(g, sort, (x) => x.eerste, sets);
+  }, [stukken, cat, set, filters, zoek, sort, sets]);
+
+  const actief = filters.size + (set ? 1 : 0) + (zoek.trim() ? 1 : 0) + (cat !== "alles" ? 1 : 0);
+  const wisAlles = () => { setFilters(new Set()); setSet(""); setZoek(""); setCat("alles"); };
+  const wissel = (f: Snelfilter) => {
+    const n = new Set(filters);
+    if (n.has(f)) n.delete(f); else n.add(f);
+    setFilters(n);
   };
+  const naarLijst = () => lijstRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  const tegels = (lijst: Groep<Stuk>[], start = 0) => lijst.map((g, i) => (
+    <KlantTegel key={g.sleutel} g={g} i={start + i} onOpen={() => setOpen(g)} />
+  ));
 
   return (
     <div className="klant">
-      <header className="klant-kop">
-        <img src="../img/logo.png" alt="Bind'r" className="klant-logo" />
-        <div>
-          <h1>Beurscatalogus</h1>
-          <p>Kaarten, slabs en Bind'r-producten die je bij ons kunt kopen.{demo ? " (voorbeeld met de demo)" : ""}</p>
-        </div>
+      <header className="klant-balk">
+        <a href="#" className="klant-merk" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); }} aria-label="Bind'r, naar boven">
+          <img src="../img/logo-woord.png" alt="Bind'r" width={150} height={66} />
+        </a>
+        <a className="klant-ig-knop" href={igProfiel(ig)} target="_blank" rel="noreferrer">
+          <IgIcoon /> <span>@{ig}</span>
+        </a>
       </header>
+
+      <section className="klant-held">
+        <div className="held-tekst">
+          <span className="held-label"><Sparkel /> Beurscatalogus</span>
+          <h1>Hier vind je onze volledige catalogus</h1>
+          <p>Kaarten, slabs en Bind'r-producten die je bij ons op de beurs kunt kopen.{demo ? " (Voorbeeld met de demo.)" : ""}</p>
+          <div className="held-knoppen">
+            <button className="knop klein" onClick={naarLijst}>Bekijk alles</button>
+            {nieuwAantal > 0 && (
+              <button className="knop klein zacht" onClick={() => { setFilters(new Set<Snelfilter>(["nieuw"])); setSort("nieuw"); naarLijst(); }}>
+                <Sparkel /> {nieuwAantal} nieuw binnen
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="held-beeld" aria-hidden="true">
+          <span className="held-bel" />
+          <img src="../img/eend.png" alt="" width={180} height={180} />
+          <span className="held-ster s1"><Sparkel /></span>
+          <span className="held-ster s2"><Sparkel /></span>
+          <span className="held-ster s3"><Sparkel /></span>
+        </div>
+        {data && (
+          <div className="held-cijfers">
+            {CATS.filter((c) => c.id !== "alles" && telling[c.id]).map((c) => (
+              <button key={c.id} onClick={() => { setCat(c.id); naarLijst(); }}>
+                <strong>{telling[c.id]}</strong><span>{c.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
 
       {fout && <p className="klant-fout">{fout}</p>}
       {!data && !fout && <div className="laadbalk klant-laden"><span /></div>}
 
       {data && (
         <>
+          <div className="klant-zoekrij" ref={lijstRef}>
+            <div className="zoekbalk">
+              <ZoekIcoon />
+              <input value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek een kaart of set" inputMode="search" aria-label="Zoeken" />
+              {zoek && <button className="wis" onClick={() => setZoek("")} aria-label="Wissen">✕</button>}
+            </div>
+            <label className="sorteer">
+              <span className="verborgen">Sorteren</span>
+              <SorteerIcoon />
+              <select value={sort} onChange={(e) => setSort(e.target.value as Sortering)} aria-label="Sorteren">
+                {SORTERINGEN.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
+            </label>
+          </div>
+
           <div className="klant-filters">
-            <div className="categorieen">
-              {(["alles", "singles", "slabs", "sealed", "bindr"] as Cat[]).filter((c) => c === "alles" || telling[c]).map((c) => (
-                <button key={c} className={cat === c ? "aan" : ""} onClick={() => setCat(c)}>
-                  {{ alles: "Alles", singles: "Singles", slabs: "Slabs", sealed: "Sealed", bindr: "Bind'r" }[c]}
-                  {c !== "alles" && <span>{telling[c]}</span>}
+            <div className="categorieen" role="tablist" aria-label="Soort">
+              {CATS.filter((c) => c.id === "alles" || telling[c.id]).map((c) => (
+                <button key={c.id} role="tab" aria-selected={cat === c.id} className={cat === c.id ? "aan" : ""} onClick={() => setCat(c.id)}>
+                  {c.label}{c.id !== "alles" && <span>{telling[c.id]}</span>}
                 </button>
               ))}
             </div>
-            <div className="klant-zoekrij">
-              <div className="zoekbalk">
-                <input value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek een kaart" inputMode="search" />
-              </div>
-              <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sorteren">
-                <option value="prijs-hoog">Duurste eerst</option>
-                <option value="prijs-laag">Goedkoopste eerst</option>
-                <option value="nieuw">Nieuwste eerst</option>
-                <option value="naam">Op naam</option>
-              </select>
+            <div className="chips" aria-label="Filters">
+              {SNELFILTERS.map((f) => (
+                <button key={f.id} className={`chip schakelchip${filters.has(f.id) ? " aan" : ""}`} aria-pressed={filters.has(f.id)} onClick={() => wissel(f.id)}>
+                  <span className="schakelbol" aria-hidden="true" />{f.label}
+                </button>
+              ))}
+              {setLijst.length > 1 && (
+                <label className={`chip setkeuze${set ? " aan" : ""}`}>
+                  <select value={set} onChange={(e) => setSet(e.target.value)} aria-label="Set">
+                    <option value="">Alle sets</option>
+                    {setLijst.map((s) => <option key={s.id} value={s.id}>{s.naam} ({s.aantal})</option>)}
+                  </select>
+                </label>
+              )}
+            </div>
+            <div className="klant-resultaat">
+              <span>{groepen.reduce((s, g) => s + aantalVan(g), 0)} {groepen.length === 1 && aantalVan(groepen[0]) === 1 ? "item" : "items"}</span>
+              {actief > 0 && <button className="tekstknop klein" onClick={wisAlles}>Wis filters</button>}
             </div>
           </div>
 
-          {!lijst.length ? <p className="klant-leeg">{items.length ? "Niets gevonden. Probeer een andere zoekterm." : "De catalogus is nog leeg. Kom zeker eens langs op de beurs!"}</p> : (
-            <div className="raster">
-              {lijst.map((it, i) => <KlantTegel key={it.soort === "kaart" ? it.k.code : it.a.id} it={it} i={i} onOpen={() => setOpen(it)} />)}
+          {!groepen.length ? (
+            <div className="klant-leeg">
+              <img src="../img/eend.png" alt="" width={96} height={96} />
+              <p>{stukken.length ? "Niets gevonden met deze filters." : "De catalogus is nog leeg. Kom zeker eens langs op de beurs!"}</p>
+              {actief > 0 && <button className="knop zacht" onClick={wisAlles}>Wis filters</button>}
             </div>
+          ) : sort === "set" ? (
+            <div className="set-groepen">
+              {(() => {
+                let teller = 0;
+                return perSet(groepen, (x) => x.eerste).map((s) => {
+                  const start = teller;
+                  teller += s.items.length;
+                  return (
+                    <section key={s.set + start} className="set-groep">
+                      <h2 className="set-kop"><span>{s.naam}</span><em>{s.items.reduce((n, g) => n + aantalVan(g), 0)}</em></h2>
+                      <div className="raster">{tegels(s.items, start)}</div>
+                    </section>
+                  );
+                });
+              })()}
+            </div>
+          ) : (
+            <div className="raster">{tegels(groepen)}</div>
           )}
-          <p className="klant-voet">Prijzen in euro, zolang de voorraad strekt. Een reservatie is pas definitief als wij ze bevestigen.</p>
         </>
       )}
 
-      {open && (
-        <div className="sheet-achtergrond" onClick={(e) => e.target === e.currentTarget && setOpen(null)}>
-          <div className="sheet" role="dialog" aria-modal="true">
-            <div className="sheet-greep" />
-            <div className="sheet-kop">
-              <div className="sheet-titel">{open.soort === "kaart" ? open.k.naam : open.a.naam}</div>
-              <button className="rond-knop" onClick={() => setOpen(null)} aria-label="Sluiten">✕</button>
-            </div>
-            <div className="sheet-inhoud">
-              <Detail it={open} />
-              {data?.instagram ? (
-                <button className="knop groot" onClick={() => void reserveer(open)}>Reserveer via Instagram</button>
-              ) : (
-                <p className="zacht">Interesse? Vraag ernaar aan onze stand.</p>
-              )}
-              {melding && <p className="klant-melding">{melding}</p>}
-            </div>
-          </div>
-        </div>
-      )}
+      <Voet ig={ig} />
+
+      {open && <Detail g={open} ig={ig} onSluit={() => setOpen(null)} />}
+      {data && <Eend ig={ig} verborgen={!!open} />}
     </div>
   );
 }
 
-function KlantTegel({ it, i, onOpen }: { it: Item; i: number; onOpen: () => void }) {
-  if (it.soort === "artikel") {
-    return (
-      <button className="tegel artikel-tegel" style={{ ["--i" as string]: Math.min(i, 24) }} onClick={onOpen}>
-        <div className={`artikel-vlak ${it.a.soort === "eigen product" ? "bindr" : "sealed"}`}><span className="artikel-glyph">{it.a.soort === "eigen product" ? "B" : "✦"}</span></div>
-        <div className="tegel-info">
-          <div className="tegel-naam">{it.a.naam}</div>
-          <div className="tegel-set">{it.a.soort === "eigen product" ? "Bind'r" : "Sealed"}</div>
-          <div className="tegel-onder"><span className="hartje">♥ {euro(it.a.prijs)}</span></div>
-        </div>
-      </button>
-    );
-  }
-  const k = it.k;
+// ── Tegels en detail ─────────────────────────────────────────────────────────
+
+function KlantTegel({ g, i, onOpen }: { g: Groep<Stuk>; i: number; onOpen: () => void }) {
+  const s = g.eerste;
+  const n = aantalVan(g);
+  const nieuw = isNieuw(s);
+  const holo = s.bron === "kaart" && s.prijs >= 50;
   return (
-    <button className={`tegel${k.prijs >= 50 ? " holo" : ""}`} style={{ ["--i" as string]: Math.min(i, 24) }} onClick={onOpen}>
-      <Foto src={k.afbeelding} alt={k.naam} />
+    <button className={`tegel${holo ? " holo" : ""}${s.bron === "artikel" ? " artikel-tegel" : ""}`} style={{ ["--i" as string]: Math.min(i, 24) }} onClick={onOpen} {...kantel}
+      aria-label={`${s.naam}, ${euro(s.prijs)}${n > 1 ? `, ${n} stuks` : ""}`}>
+      {s.bron === "artikel"
+        ? <div className={`artikel-vlak ${s.soort === "eigen product" ? "bindr" : "sealed"}`}><span className="artikel-glyph">{s.soort === "eigen product" ? "B" : "✦"}</span><span className="glans" /></div>
+        : <Foto src={s.afbeelding} alt={s.naam} />}
+      {n > 1 && <span className="aantal-merk" aria-hidden="true">×{n}</span>}
+      {nieuw && <span className="nieuw-merk">Nieuw</span>}
       <div className="tegel-info">
-        <div className="tegel-naam">{k.naam}</div>
-        <div className="tegel-set">{[k.set_code, k.nummer].filter(Boolean).join(" ") || (k.soort === "eigen product" ? "Bind'r" : "")}</div>
-        <span className="badges">
-          {k.soort === "slab" ? <span className="badge">{[k.grader, k.grade].filter(Boolean).join(" ")}</span> : k.conditie && <span className="badge">{k.conditie}</span>}
-          {k.taal !== "EN" && k.soort !== "eigen product" && <span className="badge taal">{k.taal.startsWith("CN") ? "CN" : k.taal}</span>}
-        </span>
-        <div className="tegel-onder"><span className="hartje">♥ {euro(k.prijs)}</span></div>
+        <div className="tegel-naam">{s.naam}</div>
+        <div className="tegel-set">{s.bron === "artikel" ? (s.soort === "eigen product" ? "Bind'r" : "Sealed") : [s.set_code, s.nummer].filter(Boolean).join(" ") || (s.soort === "eigen product" ? "Bind'r" : "")}</div>
+        {s.bron === "kaart" && (
+          <span className="badges">
+            {s.soort === "slab" ? <span className="badge">{[s.grader, s.grade].filter(Boolean).join(" ") || "Graded"}</span> : s.conditie && <span className="badge">{s.conditie}</span>}
+            {s.taal !== "EN" && s.soort !== "eigen product" && <span className="badge taal">{s.taal.startsWith("CN") ? "CN" : s.taal}</span>}
+            {s.variant === "reverse holo" && <span className="badge">RH</span>}
+          </span>
+        )}
+        <div className="tegel-onder"><Prijs p={s.prijs} /></div>
       </div>
     </button>
   );
@@ -231,40 +340,141 @@ function KlantTegel({ it, i, onOpen }: { it: Item; i: number; onOpen: () => void
 function Foto({ src, alt, groot = false }: { src: string | null; alt: string; groot?: boolean }) {
   return (
     <div className="foto">
-      {src && <img src={groot ? src.replace("/low.webp", "/high.webp") : src} alt={alt} loading="lazy" onLoad={(e) => e.currentTarget.classList.add("geladen")} onError={(e) => { e.currentTarget.style.display = "none"; }} />}
+      {src && <img src={groot ? src.replace("/low.webp", "/high.webp") : src} alt={alt} loading="lazy" decoding="async" onLoad={(e) => e.currentTarget.classList.add("geladen")} onError={(e) => { e.currentTarget.style.display = "none"; }} />}
       <span className="foto-reserve">{alt.slice(0, 1)}</span>
+      <span className="glans" />
     </div>
   );
 }
 
-function Detail({ it }: { it: Item }) {
-  if (it.soort === "artikel") {
-    return (
-      <div className="klant-detail">
-        <dl className="gegevens">
-          <dt>Prijs</dt><dd><strong>{euro(it.a.prijs)}</strong></dd>
-          <dt>Soort</dt><dd>{it.a.soort === "eigen product" ? "Bind'r-product" : "Sealed"}</dd>
-          <dt>Beschikbaar</dt><dd>{it.a.aantal > 5 ? "ja" : `nog ${it.a.aantal}`}</dd>
-        </dl>
-      </div>
-    );
-  }
-  const k = it.k;
+function Detail({ g, ig, onSluit }: { g: Groep<Stuk>; ig: string; onSluit: () => void }) {
+  const s = g.eerste;
+  const n = aantalVan(g);
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onSluit();
+    window.addEventListener("keydown", esc);
+    document.body.classList.add("geen-scroll");
+    return () => { window.removeEventListener("keydown", esc); document.body.classList.remove("geen-scroll"); };
+  }, [onSluit]);
   return (
-    <div className="klant-detail">
-      <div className="klant-detail-foto"><Foto src={k.afbeelding} alt={k.naam} groot /></div>
-      <div className="hartje groot">♥ {euro(k.prijs)}</div>
-      {k.naam_origineel && <p className="naam-origineel">{k.naam_origineel}</p>}
-      <dl className="gegevens">
-        {k.set_naam && <><dt>Set</dt><dd>{k.set_naam}</dd></>}
-        {(k.set_code || k.nummer) && <><dt>Nummer</dt><dd>{[k.set_code, k.nummer].filter(Boolean).join(" ")}</dd></>}
-        {k.soort === "slab" ? <><dt>Grade</dt><dd>{[k.grader, k.grade].filter(Boolean).join(" ")}</dd></> : k.conditie && <><dt>Conditie</dt><dd>{CONDITIE[k.conditie] ?? k.conditie}</dd></>}
-        {k.soort !== "eigen product" && <><dt>Taal</dt><dd>{taalNaam(k.taal)}</dd></>}
-        {k.variant && k.variant !== "normaal" && <><dt>Variant</dt><dd>{k.variant}</dd></>}
-        <dt>Referentie</dt><dd className="code">{toonCode(k.code)}</dd>
-      </dl>
+    <div className="sheet-achtergrond" onClick={(e) => e.target === e.currentTarget && onSluit()}>
+      <div className="sheet klant-sheet" role="dialog" aria-modal="true" aria-label={s.naam}>
+        <div className="sheet-greep" />
+        <div className="sheet-kop">
+          <div className="sheet-titel">{s.naam}</div>
+          <button className="rond-knop" onClick={onSluit} aria-label="Sluiten">✕</button>
+        </div>
+        <div className="sheet-inhoud">
+          <div className="klant-detail">
+            {s.bron === "kaart" ? (
+              <div className={`klant-detail-foto${s.prijs >= 50 ? " holo" : ""}`} {...kantel}><Foto src={s.afbeelding} alt={s.naam} groot /></div>
+            ) : (
+              <div className="klant-detail-foto"><div className={`artikel-vlak ${s.soort === "eigen product" ? "bindr" : "sealed"}`}><span className="artikel-glyph">{s.soort === "eigen product" ? "B" : "✦"}</span></div></div>
+            )}
+            <div className="detail-prijsrij">
+              <Prijs p={s.prijs} groot />
+              {n > 1 && <span className="aantal-label">{n} beschikbaar</span>}
+              {isNieuw(s) && <span className="nieuw-label">Nieuw binnen</span>}
+            </div>
+            {s.naam_origineel && <p className="naam-origineel">{s.naam_origineel}</p>}
+            <dl className="gegevens">
+              {s.bron === "artikel" ? (
+                <>
+                  <dt>Soort</dt><dd>{s.soort === "eigen product" ? "Bind'r-product" : "Sealed"}</dd>
+                  <dt>Beschikbaar</dt><dd>{n > 5 ? "ja" : `nog ${n}`}</dd>
+                </>
+              ) : (
+                <>
+                  {s.set_naam && <><dt>Set</dt><dd>{s.set_naam}</dd></>}
+                  {(s.set_code || s.nummer) && <><dt>Nummer</dt><dd>{[s.set_code, s.nummer].filter(Boolean).join(" ")}</dd></>}
+                  {s.soort === "slab" ? <><dt>Grade</dt><dd>{[s.grader, s.grade].filter(Boolean).join(" ")}</dd></> : s.conditie && <><dt>Conditie</dt><dd>{CONDITIE[s.conditie] ?? s.conditie}</dd></>}
+                  {s.soort !== "eigen product" && <><dt>Taal</dt><dd>{taalNaam(s.taal)}</dd></>}
+                  {s.variant && s.variant !== "normaal" && <><dt>Variant</dt><dd>{s.variant}</dd></>}
+                </>
+              )}
+            </dl>
+            <div className="klant-vraag">
+              <p>Interesse? Kom langs aan onze stand, of stuur ons een berichtje.</p>
+              <a className="knop groot ig-knop" href={igBericht(ig)} target="_blank" rel="noreferrer"><IgIcoon /> Bericht op Instagram</a>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
+
+function Prijs({ p, groot = false }: { p: number; groot?: boolean }) {
+  return (
+    <span className={`hartje${groot ? " groot" : ""}`}>
+      <svg width={groot ? 18 : 13} height={groot ? 18 : 13} viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z" /></svg>
+      {euro(p)}
+    </span>
+  );
+}
+
+// ── Instagram: onderaan de pagina en de eend ─────────────────────────────────
+
+function Voet({ ig }: { ig: string }) {
+  return (
+    <footer className="klant-voet">
+      <a className="ig-blok" href={igProfiel(ig)} target="_blank" rel="noreferrer">
+        <span className="ig-blok-icoon"><IgIcoon maat={28} /></span>
+        <span className="ig-blok-tekst">
+          <strong>Volg ons op Instagram</strong>
+          <span>Onze nieuwste custom binders, lasergravures en kaarten. @{ig}</span>
+        </span>
+        <span className="ig-blok-pijl" aria-hidden="true">→</span>
+      </a>
+      <img src="../img/logo-woord.png" alt="Bind'r" className="voet-logo" width={120} height={53} />
+      <p>Collectibles · Crafts · 3D prints</p>
+      <p className="zacht">Prijzen in euro, zolang de voorraad strekt.</p>
+    </footer>
+  );
+}
+
+const EEND_SLEUTEL = "bindr-eend-v1";
+
+function Eend({ ig, verborgen }: { ig: string; verborgen: boolean }) {
+  const [toon, setToon] = useState(false);
+  const [weg, setWeg] = useState(() => {
+    try {
+      const t = Number(localStorage.getItem(EEND_SLEUTEL) || 0);
+      return Date.now() - t < 3 * 86400000;
+    } catch { return false; }
+  });
+  useEffect(() => {
+    if (weg) return;
+    const timer = setTimeout(() => setToon(true), 9000);
+    const scroll = () => { if (window.scrollY > 900) setToon(true); };
+    window.addEventListener("scroll", scroll, { passive: true });
+    return () => { clearTimeout(timer); window.removeEventListener("scroll", scroll); };
+  }, [weg]);
+  if (weg || !toon || verborgen) return null;
+  const sluit = () => {
+    try { localStorage.setItem(EEND_SLEUTEL, String(Date.now())); } catch { /* privé-modus */ }
+    setWeg(true);
+  };
+  return (
+    <aside className="eend-popup" aria-label="Instagram">
+      <a className="eend-ballon" href={igProfiel(ig)} target="_blank" rel="noreferrer" onClick={sluit}>
+        Heb je onze recente binders al gezien?
+        <span>Kijk op Instagram <IgIcoon maat={14} /></span>
+      </a>
+      <button className="eend-sluit" onClick={sluit} aria-label="Sluiten">✕</button>
+      <img className="eend-beeld" src="../img/eend.png" alt="" width={96} height={96} />
+    </aside>
+  );
+}
+
+// ── Kleine iconen ────────────────────────────────────────────────────────────
+
+function Svg({ maat = 20, children }: { maat?: number; children: ReactNode }) {
+  return <svg width={maat} height={maat} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>;
+}
+const IgIcoon = ({ maat = 20 }: { maat?: number }) => <Svg maat={maat}><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><circle cx="12" cy="12" r="4" /><path d="M17 7h.01" /></Svg>;
+const ZoekIcoon = () => <Svg maat={18}><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></Svg>;
+const SorteerIcoon = () => <Svg maat={18}><path d="M7 4v16M3.5 16.5 7 20l3.5-3.5M17 20V4M13.5 7.5 17 4l3.5 3.5" /></Svg>;
+const Sparkel = () => <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2c.6 4.6 2.4 7.4 10 10-7.6 2.6-9.4 5.4-10 10-.6-4.6-2.4-7.4-10-10 7.6-2.6 9.4-5.4 10-10Z" /></svg>;
 
 createRoot(document.getElementById("app")!).render(<Catalogus />);

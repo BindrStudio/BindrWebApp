@@ -18,16 +18,13 @@ const SOORT_NAAM: Record<Transactie["soort"], string> = { verkoop: "Verkoop", ru
 export function BeursStart({ onSluit }: { onSluit: () => void }) {
   const s = useApp();
   const st = stand(s);
-  const [v, setV] = useState({ naam: "", datum: vandaag(), standgeld: "", startkas: "" });
+  const [v, setV] = useState({ naam: "", datum: vandaag(), startkas: "" });
   const kas = getal(v.startkas);
   return (
     <Sheet titel="Beurs starten" onSluit={onSluit}>
       <div className="formulier">
         <Veld label="Naam"><input value={v.naam} onChange={(e) => setV({ ...v, naam: e.target.value })} placeholder="bv. Beurs Gent" autoFocus /></Veld>
-        <div className="twee">
-          <Veld label="Datum"><input type="date" value={v.datum} onChange={(e) => setV({ ...v, datum: e.target.value })} /></Veld>
-          <Veld label="Standgeld (€)"><input inputMode="decimal" value={v.standgeld} onChange={(e) => setV({ ...v, standgeld: e.target.value })} /></Veld>
-        </div>
+        <Veld label="Datum"><input type="date" value={v.datum} onChange={(e) => setV({ ...v, datum: e.target.value })} /></Veld>
         <Veld label="Startbedrag in de cashkoffer (€)" hint="Tel het geld in de koffer en vul het exacte bedrag in.">
           <input inputMode="decimal" value={v.startkas} onChange={(e) => setV({ ...v, startkas: e.target.value })} placeholder="150" />
         </Veld>
@@ -37,7 +34,7 @@ export function BeursStart({ onSluit }: { onSluit: () => void }) {
         </div>
         <button className="knop groot" disabled={kas == null || kas < 0} onClick={() => {
           try {
-            startBeurs({ naam: v.naam || `Beurs ${datumKort(v.datum)}`, datum: v.datum, standgeld: getal(v.standgeld), startkas: kas! });
+            startBeurs({ naam: v.naam || `Beurs ${datumKort(v.datum)}`, datum: v.datum, startkas: kas! });
             onSluit();
           } catch (e) { meld((e as Error).message, "fout"); }
         }}>Beurs starten</button>
@@ -233,7 +230,7 @@ export function BeursRapport({ id }: { id: string }) {
   const tr = s.transacties.filter((t) => t.beurs_id === b.id);
   const c = beursCijfers(b, tr);
   const einde = b.stand_einde ?? (b.status === "actief" ? stand(s) : null);
-  const resultaat = Math.round((c.omzet - c.uitbetaald - (b.standgeld ?? 0)) * 100) / 100;
+  const resultaat = Math.round((c.omzet - c.uitbetaald) * 100) / 100;
   const verschil = b.getelde_kas != null ? Math.round((b.getelde_kas - c.kasVerwacht) * 100) / 100 : null;
   return (
     <Sheet titel={b.naam} onSluit={sluit} vol>
@@ -243,8 +240,7 @@ export function BeursRapport({ id }: { id: string }) {
         <Cijfer label="Cash" waarde={euro(c.cash)} />
         <Cijfer label="SumUp" waarde={euro(c.sumup)} />
         <Cijfer label="Uitbetaald" waarde={euro(c.uitbetaald)} sub="inkoop, bijbetalen, retour" />
-        <Cijfer label="Standgeld" waarde={euro(b.standgeld)} />
-        <Cijfer label="Resultaat" waarde={euro(resultaat)} sub="omzet − uitbetaald − standgeld" nadruk />
+        <Cijfer label="Resultaat" waarde={euro(resultaat)} sub="omzet − uitbetaald" nadruk />
         <Cijfer label="Korting gegeven" waarde={euro(c.korting)} />
         <Cijfer label="Marge" waarde={c.marge == null ? "–" : euro(c.marge)} sub="op verkochte kaarten met aankoopprijs" />
       </div>

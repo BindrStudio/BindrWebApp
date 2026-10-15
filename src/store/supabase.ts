@@ -2,6 +2,7 @@
 import { SUPABASE_KEY, SUPABASE_URL } from "../config";
 import type { Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Transactie } from "../types";
 import { Fout, type Alles, type Backend, type Beheerder } from "./backend";
+import { schoonArtikel, schoonExemplaar } from "../lib/exemplaar";
 
 const SESSIE_SLEUTEL = "bindr-sessie-v1";
 const PAGINA = 1000;
@@ -152,7 +153,7 @@ export class SupabaseBackend implements Backend {
       fase2(this.alles<Beurs>("beurzen", "datum.desc")),
       fase2(this.alles<Transactie>("transacties", "tijd.asc")),
     ]);
-    return { exemplaren, artikelen, beurzen, transacties: transacties.map(getallen) };
+    return { exemplaren: exemplaren.map(schoonExemplaar), artikelen: artikelen.map(schoonArtikel), beurzen, transacties: transacties.map(getallen) };
   }
 
   laadBeheerders() {

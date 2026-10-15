@@ -16,12 +16,14 @@ import { printLabels, printerNaam, verbindPrinter, ontkoppelPrinter } from "./li
 import { laadCatalogus } from "./lib/catalog";
 import { laadOcr } from "./lib/ocr";
 import { uuid } from "./lib/uuid";
-import { inVoorraad, standaardArtikel, standaardExemplaar } from "./lib/exemplaar";
+import { inVoorraad, metVitrineSinds, schoonArtikel, schoonExemplaar, standaardArtikel, standaardExemplaar } from "./lib/exemplaar";
 import {
   aanvaardConflict, losConflictOp, maakOngedaan, nieuweRetour, nieuweTransactie, pasToe, pasTotaalAan, stand,
   type Betaling,
 } from "./lib/kassa";
 import { toonCode } from "./lib/code";
+import { pasBodToe } from "./lib/bod";
+import { INSTAGRAM } from "./config";
 
 export interface Toast {
   id: number;
@@ -103,7 +105,7 @@ let state: State = {
   teWijzigen: new Map(),
   prijscheckOp: null,
   instellingen: leesJson(INSTELLINGEN, STANDAARD_INSTELLINGEN),
-  instagram: "",
+  instagram: INSTAGRAM,
   toasts: [],
   online: typeof navigator === "undefined" ? true : navigator.onLine,
   wachtrij: 0,
@@ -338,7 +340,7 @@ async function gebruik(backend: Backend) {
     if (kopie) {
       const gids = await laadPrijsgids();
       zet({
-        exemplaren: kopie.exemplaren, artikelen: kopie.artikelen ?? [], beurzen: kopie.beurzen ?? [], transacties: kopie.transacties ?? [],
+        exemplaren: kopie.exemplaren.map(schoonExemplaar), artikelen: (kopie.artikelen ?? []).map(schoonArtikel), beurzen: kopie.beurzen ?? [], transacties: kopie.transacties ?? [],
         gids, fase: "klaar", online: false,
       });
       meld("Geen verbinding: je werkt met de voorraad op dit toestel. Wijzigingen gaan door zodra er internet is.", "info", undefined, 7000);
@@ -351,9 +353,15 @@ async function gebruik(backend: Backend) {
 
 function pasGedeeldToe(g: Record<string, unknown>) {
   const pr = g.prijsregels as Partial<Instellingen> | undefined;
-  const deel: Partial<State> = { instagram: typeof g.instagram === "string" ? g.instagram : "" };
+  const deel: Partial<State> = { instagram: typeof g.instagram === "string" && g.instagram ? g.instagram : INSTAGRAM };
   if (pr && Array.isArray(pr.drempels)) {
-    const i = { ...state.instellingen, drempels: pr.drempels, conditiefactoren: pr.conditiefactoren ?? state.instellingen.conditiefactoren, nakijkenAfwijking: pr.nakijkenAfwijking ?? state.instellingen.nakijkenAfwijking };
+    const i = {
+      ...state.instellingen, drempels: pr.drempels,
+      conditiefactoren: pr.conditiefactoren ?? state.instellingen.conditiefactoren,
+      nakijkenAfwijking: pr.nakijkenAfwijking ?? state.instellingen.nakijkenAfwijking,
+      inkoopPct: typeof pr.inkoopPct === "number" ? pr.inkoopPct : state.instellingen.inkoopPct,
+      ruilPct: typeof pr.ruilPct === "number" ? pr.ruilPct : state.instellingen.ruilPct,
+    };
     schrijf(INSTELLINGEN, i);
     deel.instellingen = i;
   }
@@ -427,7 +435,7 @@ export function voegToe(rijen: NieuwExemplaar[]): Exemplaar[] {
 export function wijzig(id: string, wijziging: Partial<Exemplaar>, melding?: string, ongedaan = false): Exemplaar | undefined {
   const oud = state.exemplaren.find((e) => e.id === id);
   if (!oud) return;
-  const nieuw = { ...oud, ...wijziging, gewijzigd_op: new Date().toISOString() };
+  const nieuw = metVitrineSinds(oud, { ...oud, ...wijziging, gewijzigd_op: new Date().toISOString() });
   vervang([nieuw]);
   inRij({ soort: "exemplaarWijzig", id, wijziging });
   if (melding) {
@@ -440,7 +448,7 @@ export function wijzig(id: string, wijziging: Partial<Exemplaar>, melding?: stri
 export function wijzigVeel(ids: string[], wijziging: Partial<Exemplaar>) {
   if (!ids.length) return;
   const set = new Set(ids);
-  zet({ exemplaren: state.exemplaren.map((e) => (set.has(e.id) ? { ...e, ...wijziging } : e)) });
+  zet({ exemplaren: state.exemplaren.map((e) => (set.has(e.id) ? metVitrineSinds(e, { ...e, ...wijziging }) : e)) });
   inRij({ soort: "exemplarenWijzig", ids, wijziging });
 }
 
@@ -464,7 +472,12 @@ export async function importeerTestset() {
   try {
     const { exemplaren, artikelen } = await laadTestset();
     const bestaand = new Set(state.exemplaren.map((e) => e.code));
-    const nieuw = exemplaren.filter((e) => !bestaand.has(e.code));
+    let nieuw = exemplaren.filter((e) => !bestaand.has(e.code));
+    // In de demo: "in de catalogus sinds" = de datum van het hartje, zodat "Nieuw binnen" klopt.
+    // (Niet naar de echte database: die zet dat zelf.)
+    if (state.backend.soort === "demo") {
+      nieuw = nieuw.map((e) => (e.opslag === "vitrine" && e.hartjesdatum ? { ...e, vitrine_sinds: `${e.hartjesdatum}T12:00:00.000Z` } : e));
+    }
     const ex = nieuw.length ? voegToe(nieuw) : [];
     let art = 0;
     if (!state.artikelen.length) for (const a of artikelen) { voegArtikelToe(a); art++; }
@@ -579,9 +592,9 @@ export function zetInstellingen(i: Partial<Instellingen>) {
   const nieuw = { ...state.instellingen, ...i };
   schrijf(INSTELLINGEN, nieuw);
   zet({ instellingen: nieuw });
-  if ("drempels" in i || "conditiefactoren" in i || "nakijkenAfwijking" in i) {
-    const { drempels, conditiefactoren, nakijkenAfwijking } = nieuw;
-    inRij({ soort: "instelling", sleutel: "prijsregels", waarde: { drempels, conditiefactoren, nakijkenAfwijking } });
+  if ("drempels" in i || "conditiefactoren" in i || "nakijkenAfwijking" in i || "inkoopPct" in i || "ruilPct" in i) {
+    const { drempels, conditiefactoren, nakijkenAfwijking, inkoopPct, ruilPct } = nieuw;
+    inRij({ soort: "instelling", sleutel: "prijsregels", waarde: { drempels, conditiefactoren, nakijkenAfwijking, inkoopPct, ruilPct } });
   }
 }
 
@@ -631,11 +644,11 @@ export function zetBezig(b: string | null) { zet({ bezig: b }); }
 // ── Beurs ────────────────────────────────────────────────────────────────────
 export const actieveBeurs = (s: State = state) => s.beurzen.find((b) => b.status === "actief") ?? null;
 
-export function startBeurs(gegevens: { naam: string; datum: string; standgeld: number | null; startkas: number }): Beurs {
+export function startBeurs(gegevens: { naam: string; datum: string; startkas: number }): Beurs {
   const al = actieveBeurs();
   if (al) throw new Error(`${al.naam} is nog bezig. Sluit die eerst af.`);
   const b: Beurs = {
-    id: uuid(), naam: gegevens.naam.trim() || `Beurs ${gegevens.datum}`, datum: gegevens.datum, standgeld: gegevens.standgeld,
+    id: uuid(), naam: gegevens.naam.trim() || `Beurs ${gegevens.datum}`, datum: gegevens.datum, standgeld: null,
     startkas: gegevens.startkas, status: "actief", gestart_op: new Date().toISOString(), afgesloten_op: null,
     getelde_kas: null, sumup_bevestigd: false, stand_start: stand(state), stand_einde: null, opmerking: null,
   };
@@ -685,6 +698,10 @@ export function verwijderRegel(i: number) {
 }
 export function totaalAanpassen(richting: "uit" | "in", totaal: number) {
   zetRegels(pasTotaalAan(state.mandje.regels, richting, totaal));
+}
+/** Eén bod voor alle kaarten van de klant met een marktprijs (verdeeld volgens die prijs). */
+export function bodToepassen(bod: number) {
+  zetRegels(pasBodToe(state.mandje.regels, bod));
 }
 export function leegMandje() {
   zetRegels([]);

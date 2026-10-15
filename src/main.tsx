@@ -1,8 +1,10 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { meld } from "./state";
+import { laadLabelLogo } from "./lib/label";
 
 createRoot(document.getElementById("app")!).render(<App />);
+void laadLabelLogo(); // het logo voor op de labels alvast klaarzetten
 
 // Offline werken en snel opstarten: de service worker bewaart de app, de catalogus en kaartfoto's.
 if ("serviceWorker" in navigator && location.protocol === "https:") {

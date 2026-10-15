@@ -7,7 +7,7 @@ import { laadTestset } from "../src/lib/testset";
 import { standaardArtikel, standaardExemplaar } from "../src/lib/exemplaar";
 import {
   beursCijfers, losConflictOp, maakOngedaan, nieuweRetour, nieuweTransactie, pasToe, pasTotaalAan,
-  regelArtikelIn, regelArtikelUit, regelIn, regelUit, stand, type Betaling, type Voorraad,
+  regelArtikelUit, regelIn, regelUit, stand, type Betaling, type Voorraad,
 } from "../src/lib/kassa";
 import { nieuweCode } from "../src/lib/code";
 import { uuid } from "../src/lib/uuid";
@@ -102,8 +102,6 @@ test("testcase beursdag: kassa, voorraad en samenvatting", async () => {
   // F. Inkopen
   boek([1, 2, 3, 4, 5].map((i) => regelIn(nieuweKaart(`Inkoop ${i}`), [6, 5, 5, 4, 4][i - 1], 8)), cash(-24));
   boek([regelIn(nieuweKaart("Inkoop LP", { conditie: "LP" }), 30, 48)], cash(-30));
-  boek([regelArtikelIn(art("Bulkkaarten"), 50, 5)], cash(-5));
-  assert.equal(art("Bulkkaarten").aantal, 350);
   boek([regelIn(nieuweKaart("Chinese kaart", { taal: "CN-T" }), 8)], cash(-8));
   const inkoopLp = v.exemplaren.find((e) => e.naam === "Inkoop LP")!;
   assert.equal(inkoopLp.aankoopprijs, 30);
@@ -111,8 +109,7 @@ test("testcase beursdag: kassa, voorraad en samenvatting", async () => {
   assert.equal(inkoopLp.label_status, "te printen");
 
   // G. Uitzonderingen
-  assert.equal(ex("XS7-6TS").status, "gereserveerd");
-  boek([regelUit(ex("XS7-6TS"))], cash(13)); // G2: reservatie opgehaald
+  boek([regelUit(ex("XS7-6TS"))], cash(13)); // G2: gewone verkoop (reserveren bestaat niet meer)
   const g3 = boek([regelUit(ex("C99-983"))], cash(18));
   const terug = maakOngedaan(v, g3); // G3: binnen 5 seconden ongedaan
   v = terug.voorraad;
@@ -145,7 +142,7 @@ test("testcase beursdag: kassa, voorraad en samenvatting", async () => {
 
   // H. Afsluiting
   const c = beursCijfers(beurs, transacties);
-  assert.equal(c.kasVerwacht, 344, "cash in de cashkoffer");
+  assert.equal(c.kasVerwacht, 349, "cash in de cashkoffer");
   assert.equal(c.sumup, 595, "SumUp");
   assert.equal(c.verkocht, 18);
   assert.equal(c.weggeruild, 4);

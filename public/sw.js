@@ -1,6 +1,6 @@
 // Service worker: de app start ook zonder (goed) internet op de beurs.
 // VERSIE wordt bij elke build aangepast door scripts/build.mjs.
-const VERSIE = "9d46b09110";
+const VERSIE = "d8133b394f";
 const APP = `bindr-app-${VERSIE}`;
 const DATA = "bindr-data-v1";
 const FOTOS = "bindr-fotos-v1";
@@ -10,7 +10,7 @@ const MAX_FOTOS = 1500;
 const SCHIL = [
   "./", "index.html", "app.js", "styles.css", "manifest.webmanifest",
   "vendor/qrcode.js", "vendor/jsQR.js", "vendor/niimbot.js",
-  "img/logo.png", "img/eend.png", "img/favicon.png", "img/icon-192.png",
+  "img/logo.png", "img/logo-woord.png", "img/logo-zwart.png", "img/eend.png", "img/favicon.png", "img/icon-192.png",
 ];
 
 self.addEventListener("install", (e) => {

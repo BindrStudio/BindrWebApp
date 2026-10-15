@@ -1,6 +1,7 @@
 import { DATA } from "../config";
 
-// [trend, laagste, gem30, trendHolo, laagsteHolo, gem30Holo]
+// [trend, laagste, gem30, trendHolo, laagsteHolo, gem30Holo, gem1, gem7, gem1Holo, gem7Holo]
+// (gem1 en gem7 kunnen ontbreken in een oudere prijsgids.)
 export type PrijsRegel = (number | null)[];
 
 export interface Prijsgids {

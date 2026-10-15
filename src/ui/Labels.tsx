@@ -7,7 +7,7 @@ import { bluetoothMogelijk, huidigeMaat, isIphone } from "../lib/printer";
 import { Icoon, Leeg, Segment } from "./common";
 
 type Lijst = "te printen" | "geprint";
-const ACTIEF = (e: Exemplaar) => e.status === "in voorraad" || e.status === "gereserveerd";
+const ACTIEF = (e: Exemplaar) => e.status === "in voorraad";
 const BLUEFY = "https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055";
 
 export function Labels({ inSheet = false }: { inSheet?: boolean }) {

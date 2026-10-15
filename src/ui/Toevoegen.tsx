@@ -9,6 +9,7 @@ import { voorstelVoor } from "../lib/pricing";
 import { bestandNaarCanvas } from "../lib/camera";
 import { leesKaart } from "../lib/ocr";
 import { Icoon, KaartFoto, Kiezer, Segment, Sheet, Veld } from "./common";
+import { MarktBlok } from "./Markt";
 
 type Bron = "zoeken" | "foto" | "handmatig";
 
@@ -90,7 +91,7 @@ export function KiesKaart({ onKies, onHandmatig, metArtikel = true, handmatigTek
       )}
       {bron === "handmatig" && metArtikel && (
         <div className="blok">
-          <p>Sealed, 3D-prints of bulk die per aantal gaan, zonder eigen label?</p>
+          <p>Sealed of 3D-prints die per aantal gaan, zonder eigen label?</p>
           <button className="knop zacht" onClick={() => openArtikel(null)}>Artikel per aantal toevoegen</button>
         </div>
       )}
@@ -102,7 +103,7 @@ function Resultaten({ kaarten, onKies, scores }: { kaarten: CatalogusKaart[]; on
   const { exemplaren } = useApp();
   const aantal = useMemo(() => {
     const m = new Map<string, number>();
-    for (const e of exemplaren) if (e.kaart_id && (e.status === "in voorraad" || e.status === "gereserveerd")) m.set(e.kaart_id, (m.get(e.kaart_id) || 0) + 1);
+    for (const e of exemplaren) if (e.kaart_id && e.status === "in voorraad") m.set(e.kaart_id, (m.get(e.kaart_id) || 0) + 1);
     return m;
   }, [exemplaren]);
   return (
@@ -199,7 +200,7 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
     if (!prijsAangeraakt) setV((x) => ({ ...x, prijs: voorstel ? String(voorstel.voorstel) : "" }));
   }, [voorstel?.voorstel, prijsAangeraakt]);
 
-  const inVoorraad = kaart ? exemplaren.filter((e) => e.kaart_id === kaart.id && (e.status === "in voorraad" || e.status === "gereserveerd")).length : 0;
+  const inVoorraad = kaart ? exemplaren.filter((e) => e.kaart_id === kaart.id && e.status === "in voorraad").length : 0;
   const naamOrigineel = kaart?.catalogus === "asia" ? (v.taal.startsWith("CN") ? kaart.naamZhTw || kaart.naamZhCn || kaart.naamJa : kaart.naamJa || kaart.naamZhTw) || null : null;
 
   const bewaar = async () => {
@@ -219,7 +220,7 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
           set_naam: v.setNaam.trim() || null, set_code: v.setCode.trim() || null, nummer: v.nummer.trim() || null,
           taal: soort === "eigen product" ? "EN" : v.taal, conditie: soort === "kaart" ? v.conditie : null, variant: v.variant,
           grader: soort === "slab" ? v.grader.trim() || null : null, grade: soort === "slab" ? v.grade.trim() || null : null,
-          cardmarket_id: kaart?.cardmarket ?? null, opslag: v.opslag, status: "in voorraad", gereserveerd_voor: null,
+          cardmarket_id: kaart?.cardmarket ?? null, opslag: v.opslag, status: "in voorraad",
           verkoopprijs: prijs, prijs_handmatig: handmatigePrijs,
           hartjesprijs: v.opslag === "vitrine" ? prijs : null, hartjesdatum: v.opslag === "vitrine" ? vandaag() : null,
           aankoopprijs: getal(v.aankoopprijs), aankoopdatum: vandaag(), aankoopbron: v.aankoopbron.trim() || null,
@@ -271,6 +272,17 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
           )}
           <button className="tekstknop" onClick={onTerug}>Toch zoeken in de catalogus</button>
         </>
+      )}
+
+      {kaart && soort === "kaart" && (
+        <MarktBlok cardmarketId={kaart.cardmarket} variant={v.variant} taal={v.taal} setId={kaart.setId} catalogus={kaart.catalogus}>
+          {voorstel && (
+            <div className="voorstel-rij">
+              <span>Voorstel voor {v.conditie}{voorstel.factor !== 1 ? ` (${Math.round(voorstel.factor * 100)}% van de trend)` : ""}{voorstel.nakijken ? " · nakijken" : ""}</span>
+              <strong>{euro(voorstel.voorstel)}</strong>
+            </div>
+          )}
+        </MarktBlok>
       )}
 
       {soort === "kaart" && (

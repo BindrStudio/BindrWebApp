@@ -1,7 +1,7 @@
 // Labels printen op een Niimbot-printer via Web Bluetooth, met de open-source
 // driver in public/vendor/niimbot.js (MIT, github.com/iscarelli/niimbot-web-bluetooth).
 import type { Exemplaar } from "../types";
-import { labelDataUrl, maatVoor } from "./label";
+import { laadLabelLogo, labelDataUrl, maatVoor } from "./label";
 
 interface Model {
   label: string;
@@ -84,6 +84,7 @@ export async function printLabels(exemplaren: Exemplaar[], labelId: string, voor
   if (!verbonden) await verbindPrinter();
   const sleutel = verbonden!.sleutel;
   const { size, maat } = printMaat(sleutel, labelId);
+  await laadLabelLogo();
   const urls = exemplaren.map((ex) => labelDataUrl(ex, maat));
   const opts = { model: MODELLEN[sleutel], size, onProgress: voortgang };
   if (urls.length === 1) await window.Niimbot!.printImage(urls[0], opts);

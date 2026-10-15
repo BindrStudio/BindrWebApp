@@ -51,6 +51,59 @@ export function fotoUitVideo(video: HTMLVideoElement): HTMLCanvasElement {
   return c;
 }
 
+/**
+ * Neemt een foto van enkel het kaartkader in het midden van het beeld (zoals de hoekjes op het scherm).
+ * De video vult het vak met object-fit: cover, dus we rekenen terug naar de pixels van de camera.
+ * `breedte` is het deel van de breedte van het vak dat het kader inneemt.
+ */
+export function fotoUitKader(video: HTMLVideoElement, breedte = 0.72, marge = 0.06): HTMLCanvasElement {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const bw = video.clientWidth || vw, bh = video.clientHeight || vh;
+  const schaal = Math.max(bw / vw, bh / vh);
+  const offX = (vw * schaal - bw) / 2, offY = (vh * schaal - bh) / 2;
+  let fw = bw * breedte, fh = (fw * 88) / 63;
+  if (fh > bh) { fh = bh; fw = (fh * 63) / 88; }
+  fw *= 1 + marge; fh *= 1 + marge;
+  const sx = Math.max(0, ((bw - fw) / 2 + offX) / schaal), sy = Math.max(0, ((bh - fh) / 2 + offY) / schaal);
+  const sw = Math.min(vw - sx, fw / schaal), sh = Math.min(vh - sy, fh / schaal);
+  const c = document.createElement("canvas");
+  c.width = Math.round(sw);
+  c.height = Math.round(sh);
+  c.getContext("2d")!.drawImage(video, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  return c;
+}
+
+/** Een piepklein grijs beeldje (32 × 24) om te zien of de camera stilstaat en of er iets in beeld is. */
+const duimCanvas = typeof document !== "undefined" ? document.createElement("canvas") : null;
+export function duimnagel(video: HTMLVideoElement): Uint8Array | null {
+  if (!duimCanvas || video.readyState < 2) return null;
+  duimCanvas.width = 32;
+  duimCanvas.height = 24;
+  const ctx = duimCanvas.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(video, 0, 0, 32, 24);
+  const d = ctx.getImageData(0, 0, 32, 24).data;
+  const uit = new Uint8Array(32 * 24);
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) uit[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+  return uit;
+}
+
+/** Gemiddeld verschil tussen twee duimnagels (0 = identiek, 255 = alles anders). */
+export function beeldVerschil(a: Uint8Array | null, b: Uint8Array | null): number {
+  if (!a || !b || a.length !== b.length) return 255;
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]);
+  return s / a.length;
+}
+
+/** Hoeveel detail er in beeld is (spreiding van de grijswaarden); een lege tafel geeft weinig. */
+export function beeldDetail(a: Uint8Array | null): number {
+  if (!a) return 0;
+  let som = 0, kw = 0;
+  for (let i = 0; i < a.length; i++) { som += a[i]; kw += a[i] * a[i]; }
+  const m = som / a.length;
+  return Math.sqrt(Math.max(0, kw / a.length - m * m));
+}
+
 /** Leest een gekozen afbeeldingsbestand in een canvas (max. 1600 px). */
 export async function bestandNaarCanvas(file: File): Promise<HTMLCanvasElement> {
   const url = URL.createObjectURL(file);

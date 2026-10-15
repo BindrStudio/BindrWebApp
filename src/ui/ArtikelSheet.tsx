@@ -9,11 +9,10 @@ import { Icoon, Kiezer, Sheet, Veld } from "./common";
 const SOORTEN: { waarde: Artikel["soort"]; label: string }[] = [
   { waarde: "sealed", label: "Sealed" },
   { waarde: "eigen product", label: "Bind'r (binder, 3D-print)" },
-  { waarde: "bulk", label: "Bulk" },
   { waarde: "andere", label: "Andere" },
 ];
 
-/** Een artikel dat per aantal gaat: booster packs, ETB's, 3D-prints, bulk. */
+/** Een artikel dat per aantal gaat: booster packs, ETB's, 3D-prints. */
 export function ArtikelSheet({ id }: { id: string | null }) {
   const { artikelen } = useApp();
   const a = id ? artikelen.find((x) => x.id === id) : null;
@@ -59,7 +58,7 @@ export function ArtikelSheet({ id }: { id: string | null }) {
               <button type="button" onClick={() => setV({ ...v, aantal: v.aantal + 1 })}>+</button>
             </div>
           </Veld>
-          <Veld label="Prijs per stuk (€)" hint={v.soort === "bulk" ? "Leeg laten = prijs per deal" : undefined}>
+          <Veld label="Prijs per stuk (€)">
             <input inputMode="decimal" value={v.prijs} onChange={(e) => setV({ ...v, prijs: e.target.value })} />
           </Veld>
         </div>

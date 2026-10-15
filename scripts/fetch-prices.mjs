@@ -4,7 +4,8 @@
 //   node scripts/fetch-prices.mjs                 download van Cardmarket (GitHub Actions)
 //   node scripts/fetch-prices.mjs --uit <bestand> gebruik een al gedownloade price_guide_6.json
 //
-// Formaat: { datum, velden, p: { idProduct: [trend, laagste, gem30, trendHolo, laagsteHolo, gem30Holo] } }
+// Formaat: { datum, velden, p: { idProduct: [trend, laagste, gem30, trendHolo, laagsteHolo, gem30Holo, gem1, gem7, gem1Holo, gem7Holo] } }
+// (gem1 en gem7 staan achteraan, zodat oudere versies van de app het bestand nog kunnen lezen.)
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,12 +40,12 @@ if (!Array.isArray(rijen) || rijen.length < 1000) throw new Error("Onverwachte p
 const p = {};
 for (const r of rijen) {
   if (!ids.has(r.idProduct)) continue;
-  const regel = [r.trend, r.low, r.avg30, r["trend-holo"], r["low-holo"], r["avg30-holo"]].map(rond);
+  const regel = [r.trend, r.low, r.avg30, r["trend-holo"], r["low-holo"], r["avg30-holo"], r.avg1, r.avg7, r["avg1-holo"], r["avg7-holo"]].map(rond);
   while (regel.length && regel[regel.length - 1] == null) regel.pop();
   if (regel.length) p[r.idProduct] = regel;
 }
 
 const datum = String(gids.createdAt || new Date().toISOString()).slice(0, 10);
-const uit = { datum, velden: ["trend", "laagste", "gem30", "trendHolo", "laagsteHolo", "gem30Holo"], p };
+const uit = { datum, velden: ["trend", "laagste", "gem30", "trendHolo", "laagsteHolo", "gem30Holo", "gem1", "gem7", "gem1Holo", "gem7Holo"], p };
 await writeFile(UIT, JSON.stringify(uit));
 console.log(`prices.json: ${Object.keys(p).length} kaarten van ${rijen.length} producten, gids van ${datum}`);

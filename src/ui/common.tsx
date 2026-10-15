@@ -38,6 +38,9 @@ const PADEN: Record<string, ReactNode> = {
   instagram: <><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><circle cx="12" cy="12" r="4" /><path d="M17 7h.01" /></>,
   geld: <><rect x="2.5" y="6.5" width="19" height="11" rx="1.5" /><circle cx="12" cy="12" r="2.5" /><path d="M6 9.5v5M18 9.5v5" /></>,
   kaartje: <><rect x="2.5" y="5.5" width="19" height="13" rx="2" /><path d="M2.5 10h19M6 15h4" /></>,
+  sorteer: <path d="M7 4v16M3.5 16.5 7 20l3.5-3.5M17 20V4M13.5 7.5 17 4l3.5 3.5" />,
+  link: <><path d="M14 5h5v5M19 5l-8 8" /><path d="M17 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 4 18.5v-10A1.5 1.5 0 0 1 5.5 7H10" /></>,
+  tag: <><path d="M3.5 12.2V5a1.5 1.5 0 0 1 1.5-1.5h7.2l8.3 8.3a1.5 1.5 0 0 1 0 2.1l-6.9 6.9a1.5 1.5 0 0 1-2.1 0l-8-8.6Z" /><circle cx="8" cy="8" r="1.4" /></>,
 };
 
 export function Icoon({ naam, maat = 22, className }: { naam: keyof typeof PADEN | string; maat?: number; className?: string }) {
@@ -110,7 +113,6 @@ export function Badges({ ex }: { ex: Exemplaar }) {
       {ex.soort === "slab" ? <span className="badge">{[ex.grader, ex.grade].filter(Boolean).join(" ") || "slab"}</span> : ex.conditie && <span className="badge">{ex.conditie}</span>}
       {ex.taal !== "EN" && ex.soort !== "eigen product" && <span className="badge taal">{ex.taal.startsWith("CN") ? "CN" : ex.taal}</span>}
       {ex.variant === "reverse holo" && <span className="badge">RH</span>}
-      {ex.status === "gereserveerd" && <span className="badge geel">gereserveerd</span>}
     </span>
   );
 }

@@ -10,6 +10,8 @@ import { huidigeMaat } from "../lib/printer";
 import { Badges, Hartje, Icoon, KaartFoto, Kiezer, Sheet, Veld } from "./common";
 import { MandjeActie } from "./MandjeActie";
 import { PLAATS } from "../lib/categorie";
+import { setIdVan } from "../lib/weergave";
+import { MarktBlok } from "./Markt";
 
 export function ExemplaarSheet({ id }: { id: string }) {
   const { exemplaren, gids, instellingen, teWijzigen, printer } = useApp();
@@ -18,7 +20,7 @@ export function ExemplaarSheet({ id }: { id: string }) {
   if (!ex) return null;
   const voorstel = voorstelVoor(ex, gids, instellingen);
   const wijzigNodig = teWijzigen.get(ex.id);
-  const duplicaten = exemplaren.filter((e) => e.id !== ex.id && ex.kaart_id && e.kaart_id === ex.kaart_id && (e.status === "in voorraad" || e.status === "gereserveerd"));
+  const duplicaten = exemplaren.filter((e) => e.id !== ex.id && ex.kaart_id && e.kaart_id === ex.kaart_id && e.status === "in voorraad");
 
   return (
     <Sheet titel={<><span className="code">{toonCode(ex.code)}</span></>} onSluit={sluit}
@@ -50,32 +52,15 @@ export function ExemplaarSheet({ id }: { id: string }) {
 
       <HartjeBlok ex={ex} voorstelPrijs={wijzigNodig?.nieuw ?? voorstel?.voorstel ?? null} />
 
-      <section className="blok">
-        <h3>Cardmarket</h3>
-        {voorstel ? (
-          <div className="prijsrij">
-            <Stat label="Trend" waarde={euro(voorstel.trend)} />
-            <Stat label="Laagste" waarde={euro(voorstel.laagste)} />
-            <Stat label="Gem. 30 d" waarde={euro(voorstel.gem30)} />
-            <Stat label="Voorstel" waarde={euro(voorstel.voorstel)} nadruk />
+      <MarktBlok cardmarketId={ex.cardmarket_id} variant={ex.variant} taal={ex.taal} setId={ex.kaart_id ? setIdVan(ex) : null} catalogus={ex.catalogus} soort={ex.soort}>
+        {voorstel && (
+          <div className="voorstel-rij">
+            <span>Voorstel voor {ex.conditie ?? "NM"}{voorstel.factor !== 1 ? ` (${Math.round(voorstel.factor * 100)}%)` : ""}</span>
+            <strong>{euro(voorstel.voorstel)}</strong>
           </div>
-        ) : (
-          <p className="zacht">
-            {ex.soort !== "kaart" ? "Slabs en eigen producten prijs je zelf." :
-              !ex.cardmarket_id ? "Geen Cardmarket-koppeling voor deze kaart: prijs zelf." :
-              !["EN", "JP"].includes(ex.taal) ? "De prijsgids geeft geen prijs per taal: prijs deze kaart zelf." :
-              "Nog geen prijs in de gids voor deze kaart."}
-          </p>
         )}
         {voorstel?.nakijken && <p className="nakijken">Trend en 30-dagengemiddelde wijken sterk af: even nakijken.</p>}
-        {voorstel && voorstel.factor !== 1 && <p className="zacht">Voorstel met conditie {ex.conditie} ({Math.round(voorstel.factor * 100)}%).</p>}
-        {gids && <p className="zacht klein">Prijsgids van {datumKort(gids.datum)}{voorstel?.holo ? " · holo-prijs" : ""}</p>}
-        {ex.cardmarket_id && (
-          <a className="link" href={`https://www.cardmarket.com/en/Pokemon/Products?idProduct=${ex.cardmarket_id}`} target="_blank" rel="noreferrer">
-            Bekijk op Cardmarket <Icoon naam="pijlRechts" maat={14} />
-          </a>
-        )}
-      </section>
+      </MarktBlok>
 
       <LabelBlok ex={ex} printer={printer} />
 
@@ -86,7 +71,6 @@ export function ExemplaarSheet({ id }: { id: string }) {
             <dt>Prijs</dt><dd>{euro(ex.aankoopprijs)}</dd>
             <dt>Datum</dt><dd>{datumKort(ex.aankoopdatum)}</dd>
             <dt>Bron</dt><dd>{ex.aankoopbron || "–"}</dd>
-            {ex.status === "gereserveerd" && <><dt>Gereserveerd</dt><dd>{ex.gereserveerd_voor || "ja"}</dd></>}
             {ex.opmerking && <><dt>Opmerking</dt><dd>{ex.opmerking}</dd></>}
           </dl>
         </section>
@@ -116,10 +100,6 @@ export function ExemplaarSheet({ id }: { id: string }) {
       </div>
     </Sheet>
   );
-}
-
-function Stat({ label, waarde, nadruk }: { label: string; waarde: string; nadruk?: boolean }) {
-  return <div className={`stat${nadruk ? " nadruk" : ""}`}><span>{label}</span><strong>{waarde}</strong></div>;
 }
 
 function OpslagKnop({ ex }: { ex: Exemplaar }) {
@@ -220,14 +200,13 @@ function Bewerk({ ex }: { ex: Exemplaar }) {
   const [v, setV] = useState({
     naam: ex.naam, conditie: ex.conditie || "NM", taal: ex.taal, variant: ex.variant,
     aankoopprijs: ex.aankoopprijs?.toString() ?? "", aankoopbron: ex.aankoopbron ?? "",
-    opmerking: ex.opmerking ?? "", gereserveerd: ex.status === "gereserveerd", gereserveerd_voor: ex.gereserveerd_voor ?? "",
+    opmerking: ex.opmerking ?? "",
     verkoopprijs: ex.verkoopprijs?.toString() ?? "",
   });
   const bewaar = () => {
     void wijzig(ex.id, {
       naam: v.naam.trim() || ex.naam, conditie: v.conditie, taal: v.taal, variant: v.variant,
       aankoopprijs: getal(v.aankoopprijs), aankoopbron: v.aankoopbron.trim() || null, opmerking: v.opmerking.trim() || null,
-      status: v.gereserveerd ? "gereserveerd" : ex.status === "gereserveerd" ? "in voorraad" : ex.status, gereserveerd_voor: v.gereserveerd ? v.gereserveerd_voor.trim() || null : null,
       ...(ex.opslag === "stockdoos" ? { verkoopprijs: getal(v.verkoopprijs) } : {}),
     }, "Wijzigingen bewaard", true);
   };
@@ -245,11 +224,6 @@ function Bewerk({ ex }: { ex: Exemplaar }) {
       {ex.opslag === "stockdoos" && <Veld label="Waarde / verkoopprijs (€)"><input inputMode="decimal" value={v.verkoopprijs} onChange={(e) => setV({ ...v, verkoopprijs: e.target.value })} /></Veld>}
       <Veld label="Aankoopprijs (€)"><input inputMode="decimal" value={v.aankoopprijs} onChange={(e) => setV({ ...v, aankoopprijs: e.target.value })} /></Veld>
       <Veld label="Aankoopbron"><input value={v.aankoopbron} onChange={(e) => setV({ ...v, aankoopbron: e.target.value })} placeholder="beurs, particulier, ruil…" /></Veld>
-      <label className="schakel">
-        <input type="checkbox" checked={v.gereserveerd} onChange={(e) => setV({ ...v, gereserveerd: e.target.checked })} />
-        <span>Gereserveerd</span>
-      </label>
-      {v.gereserveerd && <Veld label="Voor wie (bv. Instagram-naam)"><input value={v.gereserveerd_voor} onChange={(e) => setV({ ...v, gereserveerd_voor: e.target.value })} /></Veld>}
       <Veld label="Opmerking"><textarea rows={2} value={v.opmerking} onChange={(e) => setV({ ...v, opmerking: e.target.value })} /></Veld>
       <button className="knop" onClick={bewaar}>Bewaar</button>
     </section>
@@ -258,7 +232,7 @@ function Bewerk({ ex }: { ex: Exemplaar }) {
 
 function UitVoorraad({ ex }: { ex: Exemplaar }) {
   const [open, setOpen] = useState(false);
-  if (ex.status !== "in voorraad" && ex.status !== "gereserveerd") return null;
+  if (ex.status !== "in voorraad") return null;
   if (!open) return <button className="knop zacht rood" onClick={() => setOpen(true)}><Icoon naam="uit" maat={18} /> Uit voorraad</button>;
   return (
     <div className="uit-keuze">

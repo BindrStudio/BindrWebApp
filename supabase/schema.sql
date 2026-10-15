@@ -50,8 +50,8 @@ create table if not exists public.exemplaren (
   cardmarket_id    integer,
   opslag           text not null default 'stockdoos' check (opslag in ('vitrine', 'stockdoos')),
   status           text not null default 'in voorraad'
-                     check (status in ('in voorraad', 'gereserveerd', 'verkocht', 'geruild', 'weg')),
-  gereserveerd_voor text,
+                     check (status in ('in voorraad', 'verkocht', 'geruild', 'weg')),
+  gereserveerd_voor text,               -- niet meer gebruikt (reserveren is geschrapt)
   verkoopprijs     numeric(10, 2),
   prijs_handmatig  boolean not null default false,
   hartjesprijs     numeric(10, 2),       -- de prijs op het hartje vooraan
@@ -72,15 +72,22 @@ create table if not exists public.exemplaren (
 alter table public.exemplaren add column if not exists afbeelding text;
 alter table public.exemplaren add column if not exists transactie_id uuid;      -- verkoop of ruil waarmee het wegging
 alter table public.exemplaren add column if not exists afgeboekt_op timestamptz;
+alter table public.exemplaren add column if not exists vitrine_sinds timestamptz; -- sinds wanneer in de catalogus
+
+-- Reserveren bestaat niet meer: wat nog gereserveerd stond, ligt gewoon in voorraad.
+update public.exemplaren set status = 'in voorraad', gereserveerd_voor = null where status = 'gereserveerd';
+alter table public.exemplaren drop constraint if exists exemplaren_status_check;
+alter table public.exemplaren add constraint exemplaren_status_check
+  check (status in ('in voorraad', 'verkocht', 'geruild', 'weg'));
 
 create index if not exists exemplaren_kaart_idx  on public.exemplaren (kaart_id);
 create index if not exists exemplaren_status_idx on public.exemplaren (status, opslag);
 
--- ── Artikelen: wat per aantal gaat (booster packs, 3D-prints, bulk) ──────────
+-- ── Artikelen: wat per aantal gaat (booster packs, 3D-prints) ───────────────
 create table if not exists public.artikelen (
   id            uuid primary key default gen_random_uuid(),
   naam          text not null,
-  soort         text not null default 'sealed' check (soort in ('sealed', 'eigen product', 'bulk', 'andere')),
+  soort         text not null default 'sealed' check (soort in ('sealed', 'eigen product', 'andere')),
   aantal        integer not null default 0 check (aantal >= 0),
   prijs         numeric(10, 2),
   opslag        text not null default 'vitrine' check (opslag in ('vitrine', 'stockdoos')),
@@ -90,12 +97,20 @@ create table if not exists public.artikelen (
   gewijzigd_op  timestamptz not null default now()
 );
 
+-- Bulk bestaat niet meer.
+update public.artikelen set soort = 'andere' where soort = 'bulk';
+alter table public.artikelen drop constraint if exists artikelen_soort_check;
+alter table public.artikelen add constraint artikelen_soort_check check (soort in ('sealed', 'eigen product', 'andere'));
+
 -- ── Instellingen die de drie beheerders delen (drempels, conditiefactoren) ───
 create table if not exists public.instellingen (
   sleutel  text primary key,
   waarde   jsonb not null,
   gewijzigd_op timestamptz not null default now()
 );
+
+-- Standaard: ons Instagram-account (de klantenpagina linkt ernaar).
+insert into public.instellingen (sleutel, waarde) values ('instagram', '"bindrstudio"') on conflict (sleutel) do nothing;
 
 -- ── Logboek: wie deed wat en wanneer ─────────────────────────────────────────
 create table if not exists public.logboek (
@@ -194,6 +209,29 @@ begin
   end if;
 end;
 $$;
+
+-- Sinds wanneer ligt een exemplaar in de catalogus? Voor "Nieuw" op de klantenpagina.
+create or replace function public.zet_vitrine_sinds()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.opslag = 'vitrine' and (tg_op = 'INSERT' or old.opslag is distinct from 'vitrine') then
+    new.vitrine_sinds := now();
+  elsif new.opslag <> 'vitrine' then
+    new.vitrine_sinds := null;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists exemplaren_vitrine_sinds on public.exemplaren;
+create trigger exemplaren_vitrine_sinds before insert or update on public.exemplaren
+  for each row execute function public.zet_vitrine_sinds();
+
+update public.exemplaren
+   set vitrine_sinds = coalesce(hartjesdatum::timestamptz, aangemaakt_op)
+ where opslag = 'vitrine' and vitrine_sinds is null;
 
 drop trigger if exists exemplaren_gewijzigd on public.exemplaren;
 create trigger exemplaren_gewijzigd before update on public.exemplaren
@@ -314,7 +352,7 @@ begin
         select * into e from public.exemplaren where id = (r->>'exemplaar_id')::uuid for update;
         if not found then
           conflicten := conflicten || jsonb_build_object('exemplaar_id', r->>'exemplaar_id', 'reden', 'onbekend exemplaar');
-        elsif e.status not in ('in voorraad', 'gereserveerd') then
+        elsif e.status <> 'in voorraad' then
           conflicten := conflicten || jsonb_build_object('exemplaar_id', r->>'exemplaar_id', 'reden', 'al ' || e.status);
         else
           update public.exemplaren
@@ -389,7 +427,9 @@ begin
     n := coalesce((r->>'aantal')::integer, 1);
     if t.soort = 'retour' then
       if r->>'exemplaar_id' is not null then
-        update public.exemplaren set status = coalesce(r->>'vorige_status', 'verkocht'), afgeboekt_op = t.tijd
+        update public.exemplaren
+           set status = case when r->>'vorige_status' in ('verkocht', 'geruild', 'weg') then r->>'vorige_status' else 'verkocht' end,
+               afgeboekt_op = t.tijd
          where id = (r->>'exemplaar_id')::uuid;
       elsif r->>'artikel_id' is not null then
         update public.artikelen set aantal = greatest(0, aantal - n) where id = (r->>'artikel_id')::uuid;
@@ -397,8 +437,7 @@ begin
     elsif r->>'richting' = 'uit' then
       if r->>'exemplaar_id' is not null and not (r->>'exemplaar_id' = any (in_conflict)) then
         update public.exemplaren
-           set status = case when gereserveerd_voor is not null then 'gereserveerd' else 'in voorraad' end,
-               transactie_id = null, afgeboekt_op = null
+           set status = 'in voorraad', transactie_id = null, afgeboekt_op = null
          where id = (r->>'exemplaar_id')::uuid and transactie_id = tid;
       elsif r->>'artikel_id' is not null then
         update public.artikelen set aantal = aantal + n where id = (r->>'artikel_id')::uuid;
@@ -437,7 +476,7 @@ begin
   if not found then
     raise exception 'Dat exemplaar bestaat niet';
   end if;
-  if e.status not in ('in voorraad', 'gereserveerd') then
+  if e.status <> 'in voorraad' then
     raise exception 'Dat exemplaar is ook al %', e.status;
   end if;
 
@@ -501,11 +540,11 @@ grant execute on function public.boek_transactie(jsonb), public.maak_ongedaan(uu
 -- ── Publieke catalogus (de klantenpagina) ────────────────────────────────────
 -- Weergaven met de rechten van de eigenaar: ze tonen enkel deze kolommen en enkel wat
 -- in de catalogus (vitrine) ligt, ook al kan de publieke sleutel de tabellen zelf niet lezen.
--- Nooit zichtbaar voor klanten: de vault (stockdoos), aankoopprijzen, reservaties, transacties.
+-- Nooit zichtbaar voor klanten: de vault (stockdoos), aankoopprijzen, transacties.
 create or replace view public.publieke_vitrine as
   select kaart_id, catalogus, afbeelding, soort, naam, set_naam, set_code, nummer, taal, conditie,
          variant, grader, grade, hartjesprijs as prijs,
-         code, naam_origineel, hartjesdatum as sinds
+         code, naam_origineel, hartjesdatum as sinds, vitrine_sinds as toegevoegd
     from public.exemplaren
    where opslag = 'vitrine' and status = 'in voorraad' and hartjesprijs is not null;
 
