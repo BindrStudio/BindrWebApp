@@ -154,13 +154,13 @@ function Catalogus() {
             </div>
             <div className="klant-zoekrij">
               <div className="zoekbalk">
-                <input value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek een Pokémon of set" inputMode="search" />
+                <input value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek een kaart" inputMode="search" />
               </div>
               <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sorteren">
-                <option value="prijs-hoog">Prijs: hoog naar laag</option>
-                <option value="prijs-laag">Prijs: laag naar hoog</option>
+                <option value="prijs-hoog">Duurste eerst</option>
+                <option value="prijs-laag">Goedkoopste eerst</option>
                 <option value="nieuw">Nieuwste eerst</option>
-                <option value="naam">Naam</option>
+                <option value="naam">Op naam</option>
               </select>
             </div>
           </div>
