@@ -161,15 +161,16 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
 
       {zichtbareCats.length > 1 && (
         <div className="categorieen" role="tablist">
-          <button className={cat === "alles" ? "aan" : ""} onClick={() => setCat("alles")}>Alles</button>
+          <button role="tab" aria-selected={cat === "alles"} className={cat === "alles" ? "aan" : ""} onClick={() => setCat("alles")}>Alles</button>
           {zichtbareCats.map((c) => (
-            <button key={c.id} className={cat === c.id ? "aan" : ""} onClick={() => setCat(cat === c.id ? "alles" : c.id)}>
+            <button key={c.id} role="tab" aria-selected={cat === c.id} className={cat === c.id ? "aan" : ""} onClick={() => setCat(cat === c.id ? "alles" : c.id)}>
               {c.label} <span>{telling[c.id]}</span>
             </button>
           ))}
         </div>
       )}
 
+      <div className="filterbalk">
       <div className="zoekrij">
         <div className="zoekbalk">
           <Icoon naam="zoek" maat={18} />
@@ -185,12 +186,6 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
       </div>
 
       <div className="chips">
-        {catalogus && teWijzigen.size > 0 && <FilterChip aan={filter === "wijzigen"} onClick={() => setFilter(filter === "wijzigen" ? "geen" : "wijzigen")} rood>Te wijzigen {teWijzigen.size}</FilterChip>}
-        {!catalogus && stijgers.size > 0 && <FilterChip aan={filter === "gestegen"} onClick={() => setFilter(filter === "gestegen" ? "geen" : "gestegen")}>Waarde gestegen {stijgers.size}</FilterChip>}
-        {nogTePlakken > 0 && <FilterChip aan={filter === "label"} onClick={() => setFilter(filter === "label" ? "geen" : "label")}>Label nog niet geplakt {nogTePlakken}</FilterChip>}
-        {SNELFILTERS.filter((f) => f.id !== "nieuw" || nieuwAantal > 0).map((f) => (
-          <FilterChip key={f.id} aan={snel.has(f.id)} onClick={() => wisselSnel(f.id)}>{f.id === "nieuw" ? `${catalogus ? "Nieuw binnen" : "Nieuw"} ${nieuwAantal}` : f.label}</FilterChip>
-        ))}
         {setLijst.length > 1 && (
           <label className={`chip setkeuze${set ? " aan" : ""}`}>
             <select value={set} onChange={(e) => setSet(e.target.value)} aria-label="Set">
@@ -199,6 +194,13 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
             </select>
           </label>
         )}
+        {catalogus && teWijzigen.size > 0 && <FilterChip aan={filter === "wijzigen"} onClick={() => setFilter(filter === "wijzigen" ? "geen" : "wijzigen")} rood>Te wijzigen {teWijzigen.size}</FilterChip>}
+        {!catalogus && stijgers.size > 0 && <FilterChip aan={filter === "gestegen"} onClick={() => setFilter(filter === "gestegen" ? "geen" : "gestegen")}>Waarde gestegen {stijgers.size}</FilterChip>}
+        {nogTePlakken > 0 && <FilterChip aan={filter === "label"} onClick={() => setFilter(filter === "label" ? "geen" : "label")}>Label nog niet geplakt {nogTePlakken}</FilterChip>}
+        {SNELFILTERS.filter((f) => f.id !== "nieuw" || nieuwAantal > 0).map((f) => (
+          <FilterChip key={f.id} aan={snel.has(f.id)} onClick={() => wisselSnel(f.id)}>{f.id === "nieuw" ? `${catalogus ? "Nieuw binnen" : "Nieuw"} ${nieuwAantal}` : f.label}</FilterChip>
+        ))}
+      </div>
       </div>
 
       {lijst.length === 0 ? (
@@ -235,7 +237,7 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
 }
 
 function FilterChip({ aan, onClick, children, rood }: { aan: boolean; onClick: () => void; children: React.ReactNode; rood?: boolean }) {
-  return <button className={`chip${aan ? " aan" : ""}${rood ? " rood" : ""}`} onClick={onClick}>{children}</button>;
+  return <button className={`chip${aan ? " aan" : ""}${rood ? " rood" : ""}`} aria-pressed={aan} onClick={onClick}>{children}</button>;
 }
 
 export function Tegel({ ex, i, band, vault, aantal = 1, labelOpen }: { ex: Exemplaar; i: number; band?: TeWijzigen; vault?: boolean; aantal?: number; labelOpen?: boolean }) {

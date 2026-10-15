@@ -32,14 +32,19 @@ export function procentVan(bod: number, waarde: number): number {
 }
 
 /**
- * Ronde bedragen in de buurt van het exacte bod: naar beneden en naar boven op 5 (of 10 boven
- * de 200 euro), en op de hele euro. 70% van 183 = 128,10 geeft 125, 128 en 130.
+ * Ronde bedragen in de buurt van het exacte bod. Onder 20 euro op de hele en halve euro,
+ * tot 200 euro op 5, daarboven op 10. 70% van 183 = 128,10 geeft 125, 128 en 130.
+ * Nooit meer dan `max` (de marktwaarde zelf): boven 100% bieden doen we niet per ongeluk.
  */
-export function bodVoorstellen(exact: number): number[] {
+export function bodVoorstellen(exact: number, max = Infinity): number[] {
   if (!(exact > 0)) return [];
-  const stap = exact >= 200 ? 10 : 5;
-  const kandidaten = [Math.floor(exact / stap) * stap, Math.floor(exact), Math.round(exact), Math.ceil(exact / stap) * stap];
-  const uniek = [...new Set(kandidaten.filter((x) => x > 0))];
+  const kandidaten = exact < 20
+    ? [Math.floor(exact), Math.floor(exact) + 0.5, Math.ceil(exact)]
+    : (() => {
+      const stap = exact >= 200 ? 10 : 5;
+      return [Math.floor(exact / stap) * stap, Math.floor(exact), Math.round(exact), Math.ceil(exact / stap) * stap];
+    })();
+  const uniek = [...new Set(kandidaten.filter((x) => x > 0 && x <= max))];
   return uniek.sort((a, b) => Math.abs(a - exact) - Math.abs(b - exact)).slice(0, 3).sort((a, b) => a - b);
 }
 

@@ -64,7 +64,7 @@ function fouten(page) {
       await sheet().getByRole("button", { name: "In het mandje" }).click();
       await wacht(150);
     }
-    await sheet().getByRole("button", { name: "Klaar", exact: true }).click();
+    await sheet().getByRole("button", { name: /^Klaar/ }).last().click();
   }
   async function prijs(naam, bedrag) {
     const r = page.locator(".regel", { hasText: naam });
@@ -225,7 +225,7 @@ function fouten(page) {
     await sheet().getByRole("button", { name: "In het mandje" }).click();
     await wacht(200);
   }
-  await sheet().getByRole("button", { name: "Klaar", exact: true }).click();
+  await sheet().getByRole("button", { name: /^Klaar/ }).last().click();
   const paneel = page.locator(".bod-paneel");
   await paneel.waitFor();
   assert.match(await paneel.innerText(), /70% van/);

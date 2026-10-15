@@ -54,7 +54,9 @@ test("bod: 70% van 183 = 128,10 → voorstellen 125, 128, 130; verdeeld op de ce
   assert.deepEqual(bodVoorstellen(128.1), [125, 128, 130]);
   assert.deepEqual(bodVoorstellen(146.4), [145, 146, 150]);
   assert.deepEqual(bodVoorstellen(1023.4), [1020, 1023, 1030]);
-  assert.deepEqual(bodVoorstellen(3.5), [3, 4, 5]);
+  assert.deepEqual(bodVoorstellen(3.5), [3, 3.5, 4]);
+  assert.deepEqual(bodVoorstellen(7.17), [7, 7.5, 8]);
+  assert.deepEqual(bodVoorstellen(9.8, 9.9), [9, 9.5], "nooit boven de marktwaarde");
   const regels: Regel[] = [
     { richting: "uit", naam: "Onze kaart", prijs: 50, exemplaar_id: "x" },
     { richting: "in", naam: "A", prijs: 0, referentie: 100 },

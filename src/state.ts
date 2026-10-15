@@ -133,9 +133,10 @@ export const huidig = () => state;
 
 // ── Meldingen ────────────────────────────────────────────────────────────────
 let toastId = 1;
-export function meld(tekst: string, soort: Toast["soort"] = "ok", actie?: Toast["actie"], ms = 4200) {
+export function meld(tekst: string, soort: Toast["soort"] = "ok", actie?: Toast["actie"], ms = 2800) {
+  // Eén melding tegelijk, bovenaan: een nieuwe vervangt de vorige, zodat ze nooit knoppen afdekken.
   const t: Toast = { id: toastId++, tekst, soort, actie };
-  zet({ toasts: [...state.toasts, t].slice(-3) });
+  zet({ toasts: [t] });
   setTimeout(() => zet({ toasts: state.toasts.filter((x) => x.id !== t.id) }), actie ? Math.max(ms, 5500) : ms);
 }
 export function sluitToast(id: number) {
@@ -330,6 +331,8 @@ async function gebruik(backend: Backend) {
       backend.laadAlles(), laadPrijsgids(), backend.laadBeheerders().catch(() => []), backend.laadInstellingen().catch(() => ({})),
     ]);
     zet({ ...alles, gids, beheerders: Object.fromEntries(beheerders.map((b) => [b.user_id, b.naam])), fase: "klaar" });
+    // Loopt er een beurs? Dan opent de app op de kassa (tenzij een ander tabblad gevraagd werd).
+    if (typeof location !== "undefined" && !location.hash && alles.beurzen.some((b) => b.status === "actief")) zet({ tab: "kassa" });
     pasGedeeldToe(gedeeld);
     bewaarKopieLater();
     if ((backend as { schemaOud?: boolean }).schemaOud) {
@@ -706,6 +709,13 @@ export function bodToepassen(bod: number) {
 export function leegMandje() {
   zetRegels([]);
 }
+/** Het mandje leegmaken met een knop om het terug te zetten (in plaats van een vraag vooraf). */
+export function mandjeLegen() {
+  const vorige = state.mandje.regels;
+  if (!vorige.length) return;
+  zetRegels([]);
+  meld("Mandje leeggemaakt", "info", { label: "Terugzetten", doe: () => zetRegels(vorige) }, 5000);
+}
 
 /** Boekt een transactie: meteen op dit toestel, daarna via de wachtrij naar de server. */
 function boek(t: Transactie): Transactie {
@@ -720,17 +730,9 @@ export function afrekenen(b: Betaling, opmerking: string | null = null): Transac
   const beurs = actieveBeurs();
   const t = boek(nieuweTransactie(state.mandje.regels, b, beurs?.id ?? null, opmerking));
   leegMandje();
+  // Het scherm "Verkocht" toont zelf het bedrag en de knop Ongedaan maken; enkel een conflict krijgt een melding.
   if (t.status === "conflict") meld("Let op: niet alles kon afgeboekt worden. Bekijk de transactie.", "fout", { label: "Bekijk", doe: () => openTransactie(t.id) }, 8000);
-  else meld(woordVoor(t), "ok", { label: "Ongedaan maken", doe: () => ongedaanMaken(t.id) }, 5500);
   return t;
-}
-
-function woordVoor(t: Transactie) {
-  const bedrag = Math.abs(t.totaal).toLocaleString("nl-BE", { style: "currency", currency: "EUR" });
-  if (t.soort === "verkoop") return `Verkocht voor ${bedrag}`;
-  if (t.soort === "inkoop") return `Ingekocht voor ${bedrag}`;
-  if (t.soort === "retour") return `Retour: ${bedrag} terug`;
-  return t.totaal > 0 ? `Ruil, klant betaalde ${bedrag}` : t.totaal < 0 ? `Ruil, wij betaalden ${bedrag}` : "Ruil zonder geld";
 }
 
 export function ongedaanMaken(id: string) {

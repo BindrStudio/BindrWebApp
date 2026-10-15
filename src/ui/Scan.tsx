@@ -240,14 +240,16 @@ export function Scanner({ gepauzeerd = false, onExemplaar, onFoto, compact = fal
       </div>
 
       <div className="scanner-knoppen">
-        <button className="rond-knop groot" onClick={() => galerij.current?.click()} aria-label="Foto uit de galerij" title="Foto uit de galerij"><Icoon naam="kaartje" maat={20} /></button>
+        <button className="rond-knop groot" onClick={() => galerij.current?.click()} aria-label="Foto uit de galerij" title="Foto uit de galerij"><Icoon naam="foto" maat={20} /></button>
         <div className="code-rij typ-code">
           <Icoon naam="toetsen" maat={18} />
           <input className="code-veld klein" value={code} onChange={(e) => typ(e.target.value)} placeholder="Of typ de code" maxLength={9}
             autoCapitalize="characters" autoCorrect="off" spellCheck={false} aria-label="Code typen" />
         </div>
-        <button className="sluiter klein" disabled={!klaar || bezig} aria-label="Foto van de kaart nemen" title="Foto van de kaart nemen"
-          onClick={() => video.current && void herkenFoto(fotoUitKader(video.current), true)}><span /></button>
+        {fout ? <span /> : (
+          <button className="sluiter klein" disabled={!klaar || bezig} aria-label="Foto van de kaart nemen" title="Foto van de kaart nemen"
+            onClick={() => video.current && void herkenFoto(fotoUitKader(video.current), true)}><span /></button>
+        )}
       </div>
       <input ref={galerij} type="file" accept="image/*" hidden
         onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void herkenFoto(await bestandNaarCanvas(f), true); }} />
@@ -362,9 +364,11 @@ function ScanLijst({ items }: { items: LijstItem[] }) {
         ))}
       </ul>
       {teKoop.length > 0 && (
-        <button className="knop groot" onClick={allesInMandje}>
-          <Icoon naam="mandje" maat={20} /> {teKoop.length === 1 ? "In het mandje" : `Alle ${teKoop.length} in het mandje`} · {euro(waarde)}
-        </button>
+        <div className="scan-actie">
+          <button className="knop groot" onClick={allesInMandje}>
+            <Icoon naam="mandje" maat={20} /> {teKoop.length === 1 ? "In het mandje" : `Alle ${teKoop.length} in het mandje`} · {euro(waarde)}
+          </button>
+        </div>
       )}
     </section>
   );

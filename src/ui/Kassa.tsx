@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  actieveBeurs, afrekenen, bodToepassen, huidig, inMandje, leegMandje, meld, ongedaanMaken, openTransactie, print, totaalAanpassen,
+  actieveBeurs, afrekenen, bodToepassen, huidig, inMandje, mandjeLegen, meld, ongedaanMaken, openTransactie, print, totaalAanpassen,
   useApp, verwijderRegel, wijzigRegel,
 } from "../state";
 import type { Artikel, CatalogusKaart, Exemplaar, Regel, Transactie } from "../types";
@@ -33,6 +33,10 @@ export function Kassa() {
   const binnen = regels.map((r, i) => ({ r, i })).filter((x) => x.r.richting === "in");
   const n = netto(regels);
   const sluit = () => setPaneel(null);
+  const naKlantKaarten = () => {
+    sluit();
+    setTimeout(() => document.querySelector(".bod-paneel")?.scrollIntoView({ behavior: "smooth", block: "center" }), 120);
+  };
 
   return (
     <div className="scherm kassa">
@@ -55,7 +59,7 @@ export function Kassa() {
           <section className="mandje-kant">
             <div className="kant-kop">
               <h2>Wij geven</h2>
-              {regels.length > 0 && <button className="tekstknop klein" onClick={() => { if (confirm("Het mandje leegmaken?")) leegMandje(); }}>Leegmaken</button>}
+              {regels.length > 0 && <button className="tekstknop klein" onClick={mandjeLegen}>Leegmaken</button>}
             </div>
             {uit.length === 0 && <p className="zacht klein kant-leeg">Scan het label achteraan de toploader, of zoek de kaart.</p>}
             {uit.map(({ r, i }) => <RegelRij key={i} r={r} i={i} />)}
@@ -83,6 +87,7 @@ export function Kassa() {
 
           {regels.length > 0 ? (
             <div className="afreken-balk">
+              <button className="rond-knop groot zee" onClick={() => setPaneel("scan")} aria-label="Nog een kaart scannen" title="Nog een kaart scannen"><Icoon naam="scan" /></button>
               <div className="netto">
                 <span>{n > 0 ? "Klant betaalt" : n < 0 ? "Wij betalen" : binnen.length && uit.length ? "Ruil" : "Totaal"}</span>
                 <strong>{n === 0 && binnen.length && uit.length ? "zonder geld" : euro(Math.abs(n))}</strong>
@@ -98,7 +103,7 @@ export function Kassa() {
       {paneel === "scan" && <KassaScanner onSluit={sluit} />}
       {paneel === "zoek" && <VoorraadZoeker onSluit={sluit} />}
       {paneel === "artikel" && <ArtikelKiezer onSluit={sluit} />}
-      {paneel === "klantkaart" && <KlantKaart onSluit={sluit} />}
+      {paneel === "klantkaart" && <KlantKaart onSluit={naKlantKaarten} />}
       {paneel === "afrekenen" && <Afrekenen onSluit={sluit} onKlaar={(t, w) => { sluit(); setKlaar({ t, wisselgeld: w }); }} />}
       {paneel === "start" && <BeursStart onSluit={sluit} />}
       {paneel === "afsluiten" && beurs && <BeursAfsluiten beurs={beurs} onSluit={sluit} />}
@@ -128,7 +133,7 @@ function BeursBalk({ onStart, onAfsluiten }: { onStart: () => void; onAfsluiten:
       <div className="beurs-cijfer"><span>SumUp</span><strong>{euro(cijfers.sumup)}</strong></div>
       <div className="beurs-cijfer"><span>Verkocht</span><strong>{cijfers.verkocht}</strong></div>
       {cijfers.conflicten > 0 && <span className="badge rood-badge">{cijfers.conflicten} conflict</span>}
-      <button className="knop zacht klein" onClick={onAfsluiten}>Afsluiten</button>
+      <button className="tekstknop klein afsluit-knop" onClick={onAfsluiten}>Afsluiten</button>
     </div>
   );
 }
@@ -233,7 +238,7 @@ function BodPaneel({ ruil }: { ruil: boolean }) {
   const m = marktwaarde(mandje.regels);
   const pct = soort === "ruil" ? instellingen.ruilPct : instellingen.inkoopPct;
   const exact = Math.round(m.totaal * pct) / 100;
-  const voorstellen = bodVoorstellen(exact);
+  const voorstellen = bodVoorstellen(exact, m.totaal);
   const eigenBedrag = getal(eigen);
   const gekozen = m.bod > 0;
   const kies = (bod: number) => {
@@ -305,8 +310,7 @@ function KassaScanner({ onSluit }: { onSluit: () => void }) {
     setFoto(null);
     if (inVoorraad(actueel) && actueel.opslag === "vitrine") {
       inMandje(regelUit(actueel));
-      tril(40);
-      meld(`${actueel.naam} · ${euro(actueel.hartjesprijs)}`, "ok", undefined, 2000);
+      tril(40); // de lijst "Net toegevoegd" toont het al: geen extra melding
     } else {
       setVraag(actueel); // vault of al weg: eerst een vraag
     }
@@ -328,7 +332,7 @@ function KassaScanner({ onSluit }: { onSluit: () => void }) {
       {vraag && (
         <div className="blok">
           <strong>{vraag.naam} <span className="code">{toonCode(vraag.code)}</span></strong>
-          <MandjeActie key={vraag.id} ex={vraag} stil vraagMeteen onAnnuleer={() => setVraag(null)} naToevoegen={() => { setVraag(null); meld("In het mandje", "ok", undefined, 2000); }} />
+          <MandjeActie key={vraag.id} ex={vraag} stil vraagMeteen onAnnuleer={() => setVraag(null)} naToevoegen={() => setVraag(null)} />
           <button className="tekstknop" onClick={() => setVraag(null)}>Verder scannen</button>
         </div>
       )}
@@ -337,10 +341,12 @@ function KassaScanner({ onSluit }: { onSluit: () => void }) {
       {recent.length > 0 && (
         <div className="recent-mandje">
           <span className="zacht klein">Net toegevoegd</span>
-          {recent.map((r, i) => <div key={i} className="recent-regel"><Icoon naam="check" maat={14} /> {r.naam} <span className="rechts">{euro(r.prijs)}</span></div>)}
+          {recent.map((r, i) => <div key={`${r.exemplaar_id ?? r.artikel_id}-${i}`} className="recent-regel"><Icoon naam="check" maat={14} /> {r.naam} <span className="rechts">{euro(r.prijs)}</span></div>)}
         </div>
       )}
-      <button className="knop groot" onClick={onSluit}>Klaar</button>
+      <div className="sheet-actie">
+        <button className="knop groot" onClick={onSluit}>Klaar{mandje.regels.length ? ` · ${euro(totaalUit(mandje.regels))}` : ""}</button>
+      </div>
     </Sheet>
   );
 }
@@ -448,6 +454,9 @@ function ArtikelKiezer({ onSluit }: { onSluit: () => void }) {
 const vorigeKlantKaart = { taal: "EN", conditie: "NM" };
 
 function KlantKaart({ onSluit }: { onSluit: () => void }) {
+  const { mandje } = useApp();
+  const start = useRef(mandje.regels.filter((r) => r.richting === "in").length);
+  const erbij = mandje.regels.filter((r) => r.richting === "in").length - start.current;
   const [kaart, setKaart] = useState<CatalogusKaart | null>(null);
   const [handmatig, setHandmatig] = useState(false);
   const [teller, setTeller] = useState(0);
@@ -455,9 +464,13 @@ function KlantKaart({ onSluit }: { onSluit: () => void }) {
   return (
     <Sheet titel={kaart || handmatig ? "Kaart van de klant" : "Welke kaart brengt de klant?"} onSluit={onSluit} vol>
       {kaart || handmatig
-        ? <KlantKaartDetails key={teller} kaart={kaart} onTerug={reset} onKlaar={() => { reset(); meld("Kaart van de klant toegevoegd", "ok", undefined, 1800); }} />
+        ? <KlantKaartDetails key={teller} kaart={kaart} onTerug={reset} onKlaar={() => { reset(); meld("Kaart van de klant toegevoegd. Volgende kaart, of Klaar.", "ok", undefined, 1800); }} />
         : <KiesKaart onKies={setKaart} onHandmatig={() => setHandmatig(true)} metArtikel={false} handmatigTekst="Staat de kaart niet in de catalogus? Vul dan zelf naam, set en nummer in." />}
-      <button className="tekstknop" onClick={onSluit}>Klaar</button>
+      {!(kaart || handmatig) && (
+        <div className="sheet-actie">
+          <button className="knop groot" onClick={onSluit}>Klaar{erbij > 0 ? ` · ${erbij} ${erbij === 1 ? "kaart" : "kaarten"}` : ""}</button>
+        </div>
+      )}
     </Sheet>
   );
 }
@@ -539,8 +552,10 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart 
       <Veld label="Ruilwaarde of inkoopprijs (€)" hint="Leeg laten is het makkelijkst: in het mandje kies je daarna één bod voor alle kaarten samen.">
         <input inputMode="decimal" value={v.waarde} onChange={(e) => setV({ ...v, waarde: e.target.value })} placeholder="bv. 15" />
       </Veld>
-      <button className="knop groot" onClick={toevoegen}><Icoon naam="plus" maat={18} /> In het mandje</button>
       <p className="zacht klein">De kaart krijgt na het afrekenen een eigen code en label, en komt in de vault tot jullie er een hartje op zetten.</p>
+      <div className="sheet-actie">
+        <button className="knop groot" onClick={toevoegen}><Icoon naam="plus" maat={18} /> In het mandje</button>
+      </div>
     </div>
   );
 }

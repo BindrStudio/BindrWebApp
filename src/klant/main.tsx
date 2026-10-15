@@ -116,6 +116,21 @@ function Catalogus() {
   const [open, setOpen] = useState<Groep<Stuk> | null>(null);
   const demo = useMemo(laadDemo, []);
   const lijstRef = useRef<HTMLDivElement>(null);
+  const [zoekFocus, setZoekFocus] = useState(false);
+
+  // De bovenbalk schuift weg als je naar beneden scrolt en komt terug als je omhoog scrolt.
+  const [balkWeg, setBalkWeg] = useState(false);
+  useEffect(() => {
+    let vorige = window.scrollY;
+    const scroll = () => {
+      const y = window.scrollY;
+      if (Math.abs(y - vorige) < 8) return;
+      setBalkWeg(y > vorige && y > 160);
+      vorige = y;
+    };
+    window.addEventListener("scroll", scroll, { passive: true });
+    return () => window.removeEventListener("scroll", scroll);
+  }, []);
 
   useEffect(() => {
     fetch("../data/sets.json").then((r) => (r.ok ? r.json() : null)).then(setSets).catch(() => setSets(null));
@@ -139,6 +154,9 @@ function Catalogus() {
     return t;
   }, [stukken]);
   const nieuwAantal = useMemo(() => stukken.filter((s) => isNieuw(s)).length, [stukken]);
+  // Drie mooie kaarten voor de waaier in het welkomstblok (de duurste met een foto).
+  const waaier = useMemo(() => stukken.filter((s) => s.bron === "kaart" && s.afbeelding && s.soort === "kaart")
+    .sort((a, b) => b.prijs - a.prijs).slice(0, 3), [stukken]);
 
   // Sets die in de catalogus voorkomen, nieuwste eerst.
   const setLijst = useMemo(() => {
@@ -179,7 +197,7 @@ function Catalogus() {
   ));
 
   return (
-    <div className="klant">
+    <div className={`klant${balkWeg ? " balk-weg" : ""}`}>
       <header className="klant-balk">
         <a href="#" className="klant-merk" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); }} aria-label="Bind'r, naar boven">
           <img src="../img/logo-woord.png" alt="Bind'r" width={150} height={66} />
@@ -204,8 +222,13 @@ function Catalogus() {
           </div>
         </div>
         <div className="held-beeld" aria-hidden="true">
+          {waaier.length === 3 && (
+            <div className="waaier">
+              {waaier.map((k, i) => <img key={k.id} className={`w${i}`} src={k.afbeelding!} alt="" loading="lazy" onLoad={(e) => e.currentTarget.classList.add("geladen")} onError={(e) => { e.currentTarget.style.display = "none"; }} />)}
+            </div>
+          )}
           <span className="held-bel" />
-          <img src="../img/eend.png" alt="" width={180} height={180} />
+          <img className="held-eend" src="../img/eend.png" alt="" width={180} height={180} />
           <span className="held-ster s1"><Sparkel /></span>
           <span className="held-ster s2"><Sparkel /></span>
           <span className="held-ster s3"><Sparkel /></span>
@@ -222,19 +245,24 @@ function Catalogus() {
       </section>
 
       {fout && <p className="klant-fout">{fout}</p>}
-      {!data && !fout && <div className="laadbalk klant-laden"><span /></div>}
+      {!data && !fout && (
+        <div className="raster laad-raster" aria-label="Catalogus laden">
+          {Array.from({ length: 6 }, (_, i) => <div key={i} className="tegel laad-tegel" style={{ ["--i" as string]: i }}><div className="foto" /><span /><span /></div>)}
+        </div>
+      )}
 
       {data && (
         <>
           <div className="klant-zoekrij" ref={lijstRef}>
             <div className="zoekbalk">
               <ZoekIcoon />
-              <input value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek een kaart of set" inputMode="search" aria-label="Zoeken" />
+              <input value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek een kaart of set" inputMode="search" aria-label="Zoeken"
+                onFocus={() => setZoekFocus(true)} onBlur={() => setZoekFocus(false)} />
               {zoek && <button className="wis" onClick={() => setZoek("")} aria-label="Wissen">✕</button>}
             </div>
-            <label className="sorteer">
-              <span className="verborgen">Sorteren</span>
+            <label className="sorteer" title="Sorteren">
               <SorteerIcoon />
+              <span className="sorteer-tekst">{SORTERINGEN.find((x) => x.id === sort)?.label}</span>
               <select value={sort} onChange={(e) => setSort(e.target.value as Sortering)} aria-label="Sorteren">
                 {SORTERINGEN.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
               </select>
@@ -250,11 +278,6 @@ function Catalogus() {
               ))}
             </div>
             <div className="chips" aria-label="Filters">
-              {SNELFILTERS.map((f) => (
-                <button key={f.id} className={`chip schakelchip${filters.has(f.id) ? " aan" : ""}`} aria-pressed={filters.has(f.id)} onClick={() => wissel(f.id)}>
-                  <span className="schakelbol" aria-hidden="true" />{f.label}
-                </button>
-              ))}
               {setLijst.length > 1 && (
                 <label className={`chip setkeuze${set ? " aan" : ""}`}>
                   <select value={set} onChange={(e) => setSet(e.target.value)} aria-label="Set">
@@ -263,9 +286,14 @@ function Catalogus() {
                   </select>
                 </label>
               )}
+              {SNELFILTERS.map((f) => (
+                <button key={f.id} className={`chip schakelchip${filters.has(f.id) ? " aan" : ""}`} aria-pressed={filters.has(f.id)} onClick={() => wissel(f.id)}>
+                  <span className="schakelbol" aria-hidden="true" />{f.label}
+                </button>
+              ))}
             </div>
             <div className="klant-resultaat">
-              <span>{groepen.reduce((s, g) => s + aantalVan(g), 0)} {groepen.length === 1 && aantalVan(groepen[0]) === 1 ? "item" : "items"}</span>
+              <span>{groepen.reduce((s, g) => s + aantalVan(g), 0)} {groepen.length === 1 && aantalVan(groepen[0]) === 1 ? "item" : "items"} · {SORTERINGEN.find((x) => x.id === sort)?.label.toLowerCase()}</span>
               {actief > 0 && <button className="tekstknop klein" onClick={wisAlles}>Wis filters</button>}
             </div>
           </div>
@@ -273,8 +301,16 @@ function Catalogus() {
           {!groepen.length ? (
             <div className="klant-leeg">
               <img src="../img/eend.png" alt="" width={96} height={96} />
-              <p>{stukken.length ? "Niets gevonden met deze filters." : "De catalogus is nog leeg. Kom zeker eens langs op de beurs!"}</p>
-              {actief > 0 && <button className="knop zacht" onClick={wisAlles}>Wis filters</button>}
+              <p>{stukken.length ? "Niets gevonden met deze filters. Haal er een weg:" : "De catalogus is nog leeg. Kom zeker eens langs op de beurs!"}</p>
+              {actief > 0 && (
+                <div className="actieve-filters">
+                  {zoek.trim() && <button className="chip aan" onClick={() => setZoek("")}>"{zoek.trim()}" ✕</button>}
+                  {cat !== "alles" && <button className="chip aan" onClick={() => setCat("alles")}>{CATS.find((c) => c.id === cat)?.label} ✕</button>}
+                  {set && <button className="chip aan" onClick={() => setSet("")}>{setLijst.find((x) => x.id === set)?.naam ?? set} ✕</button>}
+                  {[...filters].map((f) => <button key={f} className="chip aan" onClick={() => wissel(f)}>{SNELFILTERS.find((x) => x.id === f)?.label} ✕</button>)}
+                </div>
+              )}
+              {actief > 1 && <button className="knop zacht" onClick={wisAlles}>Wis alle filters</button>}
             </div>
           ) : sort === "set" ? (
             <div className="set-groepen">
@@ -301,7 +337,7 @@ function Catalogus() {
       <Voet ig={ig} />
 
       {open && <Detail g={open} ig={ig} onSluit={() => setOpen(null)} />}
-      {data && <Eend ig={ig} verborgen={!!open} />}
+      {data && <Eend ig={ig} verborgen={!!open || zoekFocus || !groepen.length} />}
     </div>
   );
 }
@@ -324,14 +360,14 @@ function KlantTegel({ g, i, onOpen }: { g: Groep<Stuk>; i: number; onOpen: () =>
       <div className="tegel-info">
         <div className="tegel-naam">{s.naam}</div>
         <div className="tegel-set">{s.bron === "artikel" ? (s.soort === "eigen product" ? "Bind'r" : "Sealed") : [s.set_code, s.nummer].filter(Boolean).join(" ") || (s.soort === "eigen product" ? "Bind'r" : "")}</div>
-        {s.bron === "kaart" && (
+        <div className="tegel-onder">
           <span className="badges">
-            {s.soort === "slab" ? <span className="badge">{[s.grader, s.grade].filter(Boolean).join(" ") || "Graded"}</span> : s.conditie && <span className="badge">{s.conditie}</span>}
-            {s.taal !== "EN" && s.soort !== "eigen product" && <span className="badge taal">{s.taal.startsWith("CN") ? "CN" : s.taal}</span>}
+            {s.bron === "kaart" && (s.soort === "slab" ? <span className="badge">{[s.grader, s.grade].filter(Boolean).join(" ") || "Graded"}</span> : s.conditie && <span className="badge">{s.conditie}</span>)}
+            {s.bron === "kaart" && s.taal !== "EN" && s.soort !== "eigen product" && <span className="badge taal">{s.taal.startsWith("CN") ? "CN" : s.taal}</span>}
             {s.variant === "reverse holo" && <span className="badge">RH</span>}
           </span>
-        )}
-        <div className="tegel-onder"><Prijs p={s.prijs} /></div>
+          <Prijs p={s.prijs} />
+        </div>
       </div>
     </button>
   );
@@ -366,11 +402,14 @@ function Detail({ g, ig, onSluit }: { g: Groep<Stuk>; ig: string; onSluit: () =>
         </div>
         <div className="sheet-inhoud">
           <div className="klant-detail">
+            <div className="klant-detail-links">
             {s.bron === "kaart" ? (
               <div className={`klant-detail-foto${s.prijs >= 50 ? " holo" : ""}`} {...kantel}><Foto src={s.afbeelding} alt={s.naam} groot /></div>
             ) : (
               <div className="klant-detail-foto"><div className={`artikel-vlak ${s.soort === "eigen product" ? "bindr" : "sealed"}`}><span className="artikel-glyph">{s.soort === "eigen product" ? "B" : "✦"}</span></div></div>
             )}
+            </div>
+            <div className="klant-detail-rechts">
             <div className="detail-prijsrij">
               <Prijs p={s.prijs} groot />
               {n > 1 && <span className="aantal-label">{n} beschikbaar</span>}
@@ -393,11 +432,13 @@ function Detail({ g, ig, onSluit }: { g: Groep<Stuk>; ig: string; onSluit: () =>
                 </>
               )}
             </dl>
-            <div className="klant-vraag">
-              <p>Interesse? Kom langs aan onze stand, of stuur ons een berichtje.</p>
-              <a className="knop groot ig-knop" href={igBericht(ig)} target="_blank" rel="noreferrer"><IgIcoon /> Bericht op Instagram</a>
+            <p className="klant-vraag">Interesse? Kom langs aan onze stand, of stuur ons een berichtje op Instagram.</p>
             </div>
           </div>
+        </div>
+        <div className="klant-detail-balk">
+          <Prijs p={s.prijs} groot />
+          <a className="knop ig-knop" href={igBericht(ig)} target="_blank" rel="noreferrer"><IgIcoon /> Bericht op Instagram</a>
         </div>
       </div>
     </div>
@@ -437,32 +478,49 @@ const EEND_SLEUTEL = "bindr-eend-v1";
 
 function Eend({ ig, verborgen }: { ig: string; verborgen: boolean }) {
   const [toon, setToon] = useState(false);
+  const [open, setOpen] = useState(true);
   const [weg, setWeg] = useState(() => {
     try {
       const t = Number(localStorage.getItem(EEND_SLEUTEL) || 0);
       return Date.now() - t < 3 * 86400000;
     } catch { return false; }
   });
+  // Pas als de voet (Instagram) in beeld komt, of na 25 seconden rondkijken.
   useEffect(() => {
     if (weg) return;
-    const timer = setTimeout(() => setToon(true), 9000);
-    const scroll = () => { if (window.scrollY > 900) setToon(true); };
-    window.addEventListener("scroll", scroll, { passive: true });
-    return () => { clearTimeout(timer); window.removeEventListener("scroll", scroll); };
+    const timer = setTimeout(() => setToon(true), 25000);
+    const voet = document.querySelector(".klant-voet");
+    const kijker = voet && "IntersectionObserver" in window
+      ? new IntersectionObserver((e) => { if (e.some((x) => x.isIntersecting)) setToon(true); }, { rootMargin: "0px 0px 200px 0px" })
+      : null;
+    if (voet && kijker) kijker.observe(voet);
+    return () => { clearTimeout(timer); kijker?.disconnect(); };
   }, [weg]);
+  // Na 7 seconden klapt de ballon dicht: enkel de eend blijft, een tik opent hem opnieuw.
+  useEffect(() => {
+    if (!toon || !open) return;
+    const t = setTimeout(() => setOpen(false), 7000);
+    return () => clearTimeout(t);
+  }, [toon, open]);
   if (weg || !toon || verborgen) return null;
   const sluit = () => {
     try { localStorage.setItem(EEND_SLEUTEL, String(Date.now())); } catch { /* privé-modus */ }
     setWeg(true);
   };
   return (
-    <aside className="eend-popup" aria-label="Instagram">
-      <a className="eend-ballon" href={igProfiel(ig)} target="_blank" rel="noreferrer" onClick={sluit}>
-        Heb je onze recente binders al gezien?
-        <span>Kijk op Instagram <IgIcoon maat={14} /></span>
-      </a>
-      <button className="eend-sluit" onClick={sluit} aria-label="Sluiten">✕</button>
-      <img className="eend-beeld" src="../img/eend.png" alt="" width={96} height={96} />
+    <aside className={`eend-popup${open ? "" : " dicht"}`} aria-label="Instagram">
+      {open && (
+        <>
+          <a className="eend-ballon" href={igProfiel(ig)} target="_blank" rel="noreferrer" onClick={sluit}>
+            Heb je onze recente binders al gezien?
+            <span>Kijk op Instagram <IgIcoon maat={14} /></span>
+          </a>
+          <button className="eend-sluit" onClick={sluit} aria-label="Sluiten">✕</button>
+        </>
+      )}
+      <button className="eend-knop" onClick={() => setOpen(!open)} aria-label={open ? "Ballon dichtklappen" : "Wat zegt de eend?"}>
+        <img className="eend-beeld" src="../img/eend.png" alt="" width={96} height={96} />
+      </button>
     </aside>
   );
 }

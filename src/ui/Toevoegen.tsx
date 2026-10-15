@@ -324,9 +324,11 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
         <span>Label meteen printen</span>
       </label>
 
-      <button className="knop groot" disabled={bezig} onClick={bewaar}>
-        {bezig ? "Bezig…" : v.aantal > 1 ? `${v.aantal} exemplaren toevoegen` : "Toevoegen"}
-      </button>
+      <div className="sheet-actie">
+        <button className="knop groot" disabled={bezig} onClick={bewaar}>
+          {bezig ? "Bezig…" : v.aantal > 1 ? `${v.aantal} exemplaren toevoegen` : "Toevoegen"}{getal(v.prijs) != null && !bezig ? ` · ${euro(getal(v.prijs))}` : ""}
+        </button>
+      </div>
     </div>
   );
 }

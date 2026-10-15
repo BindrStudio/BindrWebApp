@@ -38,6 +38,7 @@ const PADEN: Record<string, ReactNode> = {
   instagram: <><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><circle cx="12" cy="12" r="4" /><path d="M17 7h.01" /></>,
   geld: <><rect x="2.5" y="6.5" width="19" height="11" rx="1.5" /><circle cx="12" cy="12" r="2.5" /><path d="M6 9.5v5M18 9.5v5" /></>,
   kaartje: <><rect x="2.5" y="5.5" width="19" height="13" rx="2" /><path d="M2.5 10h19M6 15h4" /></>,
+  foto: <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><circle cx="9" cy="10" r="1.8" /><path d="m4 17 5-5 4 4 2.5-2.5L20 17" /></>,
   sorteer: <path d="M7 4v16M3.5 16.5 7 20l3.5-3.5M17 20V4M13.5 7.5 17 4l3.5 3.5" />,
   link: <><path d="M14 5h5v5M19 5l-8 8" /><path d="M17 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 4 18.5v-10A1.5 1.5 0 0 1 5.5 7H10" /></>,
   tag: <><path d="M3.5 12.2V5a1.5 1.5 0 0 1 1.5-1.5h7.2l8.3 8.3a1.5 1.5 0 0 1 0 2.1l-6.9 6.9a1.5 1.5 0 0 1-2.1 0l-8-8.6Z" /><circle cx="8" cy="8" r="1.4" /></>,
@@ -52,20 +53,29 @@ export function Icoon({ naam, maat = 22, className }: { naam: keyof typeof PADEN
   );
 }
 
+let sheetNr = 0;
+
 export function Sheet({ titel, onSluit, children, vol = false, actie }: { titel?: ReactNode; onSluit: () => void; children: ReactNode; vol?: boolean; actie?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
+  const id = useRef(`sheet-titel-${++sheetNr}`);
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onSluit();
     window.addEventListener("keydown", esc);
     document.body.classList.add("geen-scroll");
     return () => { window.removeEventListener("keydown", esc); document.body.classList.remove("geen-scroll"); };
   }, [onSluit]);
+  // Focus naar de sheet bij openen (tenzij een veld zelf autofocus vraagt), en terug bij sluiten.
+  useEffect(() => {
+    const vorige = document.activeElement as HTMLElement | null;
+    if (!ref.current?.contains(document.activeElement)) ref.current?.focus({ preventScroll: true });
+    return () => { vorige?.focus?.({ preventScroll: true }); };
+  }, []);
   return (
     <div className="sheet-achtergrond" onClick={(e) => e.target === e.currentTarget && onSluit()}>
-      <div className={`sheet${vol ? " vol" : ""}`} ref={ref} role="dialog" aria-modal="true">
+      <div className={`sheet${vol ? " vol" : ""}`} ref={ref} role="dialog" aria-modal="true" aria-labelledby={id.current} tabIndex={-1}>
         <div className="sheet-greep" />
         <div className="sheet-kop">
-          <div className="sheet-titel">{titel}</div>
+          <div className="sheet-titel" id={id.current}>{titel}</div>
           {actie}
           <button className="rond-knop" onClick={onSluit} aria-label="Sluiten"><Icoon naam="kruis" maat={18} /></button>
         </div>
