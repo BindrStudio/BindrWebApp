@@ -1,0 +1,27 @@
+{
+  "name": "bindr-web-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bind'r Stock & Beurs App: voorraad, QR-labels en beursverkoop voor Pokémon-kaarten",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test.mjs",
+    "e2e": "node tests/e2e/walkthrough.cjs",
+    "serve": "python3 -m http.server 8080 --directory public",
+    "prijzen": "node scripts/fetch-prices.mjs"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "esbuild": "0.28.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "typescript": "6.0.3"
+  },
+  "overrides": {
+    "scheduler": "0.27.0"
+  }
+}

@@ -1,0 +1,35 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { fetchUitPublic } from "./helpers";
+import { herken, laadCatalogus, leesKenmerken, zoek } from "../src/lib/catalog";
+
+fetchUitPublic();
+
+test("kenmerken uit OCR-tekst", () => {
+  const k = leesKenmerken("Charizard V HP 220\nIllus. Ryota Murayama\n153/172 BRS ©2022");
+  assert.deepEqual(k.nummers[0], { nummer: "153", totaal: 172 });
+  assert.ok(k.codes.includes("BRS"));
+  assert.ok(k.woorden.includes("charizard"));
+});
+
+test("zoeken op set en nummer, nummer/totaal en naam", async () => {
+  const en = await laadCatalogus("en");
+  assert.equal(zoek(en, "BRS 153")[0]?.naam, "Charizard V");
+  assert.ok(zoek(en, "153/172").some((k) => k.naam === "Charizard V"));
+  assert.ok(zoek(en, "gengar vmax").length > 0);
+});
+
+test("Japans en Chinees terugvinden", async () => {
+  const asia = await laadCatalogus("asia");
+  assert.ok(zoek(asia, "ピカチュウ").length > 0, "Japans");
+  const zh = zoek(asia, "皮卡丘");
+  assert.ok(zh.length > 0, "Chinees");
+});
+
+test("foto van Charizard V (BRS 153) wordt zeker herkend", async () => {
+  const idx = [await laadCatalogus("en"), await laadCatalogus("asia")];
+  const r = herken(idx, "Charizard V HP220 ... 153/172 BRS");
+  assert.equal(r.kandidaten[0].kaart.naam, "Charizard V");
+  assert.equal(r.kandidaten[0].kaart.nummer, "153");
+  assert.ok(r.zeker);
+});

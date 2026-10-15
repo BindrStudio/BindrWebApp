@@ -1,0 +1,41 @@
+# Werkt elke week de kaartencatalogus bij uit de open TCGdex-database (nieuwe sets, Japans en Chinees).
+# De nachtelijke publicatie neemt de nieuwe catalogus daarna mee.
+name: Kaartencatalogus bijwerken
+
+on:
+  schedule:
+    - cron: "40 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  catalogus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: TCGdex-kaartendatabase ophalen
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/tcgdex/cards-database.git ../cards-database
+          git -C ../cards-database sparse-checkout set data data-asia
+
+      - name: Catalogus bouwen
+        run: node scripts/build-catalog.mjs ../cards-database public/data
+
+      - name: Opslaan als er iets veranderde
+        run: |
+          git config user.name "bindr-catalogus"
+          git config user.email "actions@users.noreply.github.com"
+          git add public/data/catalog-en.json public/data/catalog-asia.json
+          if git diff --staged --quiet; then
+            echo "Geen nieuwe kaarten"
+          else
+            git commit -m "Kaartencatalogus bijgewerkt"
+            git push
+          fi

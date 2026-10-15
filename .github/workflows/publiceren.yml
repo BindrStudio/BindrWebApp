@@ -1,0 +1,57 @@
+# Zet de app online op GitHub Pages, met elke nacht een verse Cardmarket-prijsgids.
+name: App publiceren
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Elke nacht om 03:20 UTC (05:20 Belgische zomertijd), na de nachtelijke update van Cardmarket.
+    - cron: "20 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  bouwen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cardmarket-prijsgids ophalen
+        run: node scripts/fetch-prices.mjs || echo "::warning::Prijsgids niet opgehaald; de vorige versie blijft online"
+
+      # Een gratis Supabase-project pauzeert na een week zonder verkeer. Eén vraag per nacht houdt het wakker.
+      - name: Supabase wakker houden
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        run: |
+          curl -fsS -o /dev/null \
+            "https://thnrmrvpkcrujxtwwqhy.supabase.co/rest/v1/publieke_vitrine?select=naam&limit=1" \
+            -H "apikey: sb_publishable_rFo0QZlgdsQTMOU7buKHJg_hMBrCSPV"
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  publiceren:
+    needs: bouwen
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - id: pages
+        uses: actions/deploy-pages@v4
