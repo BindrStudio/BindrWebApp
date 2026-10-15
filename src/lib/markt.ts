@@ -1,6 +1,7 @@
 // Wat de Cardmarket-prijsgids zegt over één kaart en over haar set: de prijzen,
 // of het stijgt of daalt (met een knipoog), en een link naar de goedkoopste
 // aanbiedingen in België en Nederland. Enkel de publieke prijsgids, geen scraping.
+import { KAART, kies, SET } from "./grapjes";
 import type { Prijsgids } from "./prices";
 import { prijsVoor } from "./pricing";
 
@@ -67,41 +68,14 @@ export function setTrend(cardmarketIds: number[], gids: Prijsgids | null): SetTr
   return { verandering, richting: richtingVan(verandering)!, kaarten: n };
 }
 
-const GRAPJES: Record<Richting, string[]> = {
-  "hard-op": [
-    "Deze kaart gebruikt Agility: de prijs schiet omhoog.",
-    "Hou ze goed vast, deze vliegt.",
-    "Stijgt sneller dan een Rayquaza naar de ozonlaag.",
-  ],
-  op: [
-    "Klimt gestaag, zoals een Snorlax die eindelijk opstaat.",
-    "Gaat rustig de goede kant op.",
-    "Een beetje Growth gebruikt: de prijs groeit.",
-  ],
-  stabiel: [
-    "Stabiel als een Onix.",
-    "Zo kalm als een slapende Snorlax.",
-    "Niets nieuws: de prijs ligt stil.",
-  ],
-  neer: [
-    "Zakt een beetje. Misschien nog even wachten met inkopen?",
-    "Gaat licht omlaag, zoals een Psyduck met hoofdpijn.",
-    "Een tikje lager dan vorige maand.",
-  ],
-  "hard-neer": [
-    "Deze kaart gebruikte Splash... en zakt hard.",
-    "Zakt als een Diglett onder de grond.",
-    "Vrije val: goedkoop inkopen, voorzichtig verkopen.",
-  ],
-};
-
 /** Altijd hetzelfde grapje voor dezelfde kaart, zodat het niet verspringt. */
 export function grapje(richting: Richting, sleutel: string | number): string {
-  const s = String(sleutel);
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  const lijst = GRAPJES[richting];
-  return lijst[h % lijst.length];
+  return kies(KAART[richting], sleutel);
+}
+
+/** Een grapje bij de trend van een hele set. */
+export function setGrapje(richting: Richting, sleutel: string): string {
+  return kies(SET[richting], sleutel);
 }
 
 export const RICHTING_TEKST: Record<Richting, string> = {

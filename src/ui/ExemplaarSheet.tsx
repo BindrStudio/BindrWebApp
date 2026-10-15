@@ -7,11 +7,12 @@ import { toonCode } from "../lib/code";
 import { voorstelVoor } from "../lib/pricing";
 import { labelDataUrl } from "../lib/label";
 import { huidigeMaat } from "../lib/printer";
-import { Badges, Hartje, Icoon, KaartFoto, Kiezer, Sheet, Veld } from "./common";
+import { Badges, Hartje, Icoon, KaartFoto, Kiezer, OnderAankoop, onderAankoop, Sheet, Veld } from "./common";
 import { MandjeActie } from "./MandjeActie";
 import { PLAATS } from "../lib/categorie";
 import { setIdVan } from "../lib/weergave";
 import { MarktBlok } from "./Markt";
+import { kantelVrij } from "../lib/kantel";
 
 export function ExemplaarSheet({ id }: { id: string }) {
   const { exemplaren, gids, instellingen, teWijzigen, printer } = useApp();
@@ -26,7 +27,12 @@ export function ExemplaarSheet({ id }: { id: string }) {
     <Sheet titel={<><span className="code">{toonCode(ex.code)}</span></>} onSluit={sluit}
       actie={<button className="tekstknop" onClick={() => setBewerk(!bewerk)}>{bewerk ? "Klaar" : "Bewerk"}</button>}>
       <div className="detail-kop">
-        <KaartFoto src={ex.afbeelding?.replace("/low.webp", "/high.webp") ?? null} alt={ex.naam} />
+        <div className={`detail-foto zweeft${((ex.opslag === "vitrine" ? ex.hartjesprijs : ex.verkoopprijs) ?? 0) >= 50 ? " holo" : ""}`}>
+          <div className="kantel-vlak" {...kantelVrij}>
+            <KaartFoto src={ex.afbeelding} kaart={ex} groot alt={ex.naam} />
+            <span className="glans" />
+          </div>
+        </div>
         <div className="detail-titel">
           <h2>{ex.naam}</h2>
           {ex.naam_origineel && <div className="naam-origineel">{ex.naam_origineel}</div>}
@@ -46,6 +52,7 @@ export function ExemplaarSheet({ id }: { id: string }) {
           <div>
             <strong>Nieuw hartje nodig: {euro(wijzigNodig.nieuw)}</strong>
             <span>Het huidige hartje ({euro(wijzigNodig.oud)}) dateert van {datumKort(ex.hartjesdatum)}.</span>
+            {onderAankoop(wijzigNodig.nieuw, ex.aankoopprijs) && <span className="onder-aankoop-tip">Let op: dat is onder de aankoopprijs ({euro(ex.aankoopprijs)}). Misschien beter even naar de vault.</span>}
           </div>
         </div>
       )}
@@ -104,21 +111,36 @@ export function ExemplaarSheet({ id }: { id: string }) {
 
 function OpslagKnop({ ex }: { ex: Exemplaar }) {
   const naarVitrine = ex.opslag === "stockdoos";
+  const [vraag, setVraag] = useState<number | null>(null);
+  useEffect(() => setVraag(null), [ex.id, ex.opslag]);
+  const naarCatalogus = (p: number | null) => {
+    if (ex.hartjesprijs == null) {
+      void wijzig(ex.id, { opslag: "vitrine", hartjesprijs: p, hartjesdatum: p != null ? new Date().toISOString().slice(0, 10) : null }, "Naar de catalogus. Schrijf het hartje en kijk de prijs na.", true);
+    } else {
+      void wijzig(ex.id, { opslag: "vitrine" }, "Naar de catalogus", true);
+    }
+  };
+  const klik = () => {
+    if (!naarVitrine) return void wijzig(ex.id, { opslag: "stockdoos" }, "Naar de vault", true);
+    const p = ex.hartjesprijs ?? ex.verkoopprijs ?? null;
+    if (onderAankoop(p, ex.aankoopprijs)) return setVraag(p);
+    naarCatalogus(p);
+  };
   return (
-    <button className={`plaats ${ex.opslag}`} onClick={() => {
-      if (naarVitrine && ex.hartjesprijs == null) {
-        const p = ex.verkoopprijs ?? null;
-        void wijzig(ex.id, { opslag: "vitrine", hartjesprijs: p, hartjesdatum: p != null ? new Date().toISOString().slice(0, 10) : null }, "Naar de catalogus. Schrijf het hartje en kijk de prijs na.", true);
-      } else {
-        void wijzig(ex.id, { opslag: naarVitrine ? "vitrine" : "stockdoos" }, naarVitrine ? "Naar de catalogus" : "Naar de vault", true);
-      }
-    }}>
-      <Icoon naam={ex.opslag === "vitrine" ? "vitrine" : "doos"} maat={18} />
-      <span className="plaats-tekst">
-        <strong>{PLAATS[ex.opslag].lang}</strong>
-        <span>{naarVitrine ? "Tik om naar de catalogus te verplaatsen" : "Tik om naar de vault te verplaatsen"}</span>
-      </span>
-    </button>
+    <>
+      <button className={`plaats ${ex.opslag}`} onClick={klik}>
+        <Icoon naam={ex.opslag === "vitrine" ? "vitrine" : "doos"} maat={18} />
+        <span className="plaats-tekst">
+          <strong>{PLAATS[ex.opslag].lang}</strong>
+          <span>{naarVitrine ? "Tik om naar de catalogus te verplaatsen" : "Tik om naar de vault te verplaatsen"}</span>
+        </span>
+      </button>
+      {vraag != null && (
+        <OnderAankoop prijs={vraag} aankoop={ex.aankoopprijs!} vaultTekst="Laat in de vault"
+          uitleg={`Jullie betaalden ${euro(ex.aankoopprijs)}. In de catalogus komt ze met dat hartje onder de aankoopprijs. Even laten liggen?`}
+          onVault={() => setVraag(null)} onToch={() => { setVraag(null); naarCatalogus(vraag); }} />
+      )}
+    </>
   );
 }
 
@@ -128,13 +150,28 @@ function HartjeBlok({ ex, voorstelPrijs }: { ex: Exemplaar; voorstelPrijs: numbe
   useEffect(() => { setOpen(false); setInvoer(""); }, [ex.id]);
   const leeftijd = dagenGeleden(ex.hartjesdatum);
   const vitrine = ex.opslag === "vitrine";
+  // Hartje onder de aankoopprijs? Eerst vragen of dat klopt, of de kaart beter naar de vault gaat.
+  const [twijfel, setTwijfel] = useState<{ prijs: number; handmatig: boolean } | null>(null);
+  useEffect(() => setTwijfel(null), [ex.id]);
+  const bewaar = (prijs: number, handmatig: boolean) => {
+    // In de vitrine hoort bij elke prijs een geschreven hartje; in de stockdoos enkel de verkoopprijs.
+    if (vitrine) void zetHartje(ex.id, prijs, handmatig);
+    else void wijzig(ex.id, { verkoopprijs: prijs, prijs_handmatig: handmatig }, `Verkoopprijs ${prijs} euro bewaard`, true);
+    setOpen(false);
+    setTwijfel(null);
+  };
   const opslaan = (handmatig: boolean) => {
     const p = getal(invoer);
     if (p == null || p < 0) return;
-    // In de vitrine hoort bij elke prijs een geschreven hartje; in de stockdoos enkel de verkoopprijs.
-    if (vitrine) void zetHartje(ex.id, Math.round(p), handmatig);
-    else void wijzig(ex.id, { verkoopprijs: Math.round(p), prijs_handmatig: handmatig }, `Verkoopprijs ${Math.round(p)} euro bewaard`, true);
+    const prijs = Math.round(p);
+    if (vitrine && onderAankoop(prijs, ex.aankoopprijs)) return setTwijfel({ prijs, handmatig });
+    bewaar(prijs, handmatig);
+  };
+  const naarVault = (prijs: number, handmatig: boolean) => {
+    void wijzig(ex.id, { opslag: "stockdoos", verkoopprijs: prijs, prijs_handmatig: handmatig },
+      "Naar de vault. Haal het hartje van de sleeve; ze wacht daar tot ze weer meer waard is.", true);
     setOpen(false);
+    setTwijfel(null);
   };
   return (
     <section className="blok hartje-blok">
@@ -151,7 +188,13 @@ function HartjeBlok({ ex, voorstelPrijs }: { ex: Exemplaar; voorstelPrijs: numbe
         </div>
         {!open && <button className="knop klein" onClick={() => { setInvoer(String(voorstelPrijs ?? ex.hartjesprijs ?? ex.verkoopprijs ?? "")); setOpen(true); }}>{vitrine ? "Nieuw hartje" : "Prijs wijzigen"}</button>}
       </div>
-      {open && (
+      {open && twijfel && (
+        <OnderAankoop prijs={twijfel.prijs} aankoop={ex.aankoopprijs!}
+          onVault={() => naarVault(twijfel.prijs, twijfel.handmatig)}
+          onToch={() => bewaar(twijfel.prijs, twijfel.handmatig)}
+          onAnders={() => setTwijfel(null)} />
+      )}
+      {open && !twijfel && (
         <div className="hartje-invoer">
           <div className="euro-invoer">
             <span>€</span>

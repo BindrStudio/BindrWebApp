@@ -130,7 +130,7 @@ export function vergelijkNummer(a: string | null, b: string | null): number {
 }
 
 /** Release van een set (jjjj-mm-dd), om sets van nieuw naar oud te tonen. */
-export type SetInfo = Record<string, [naam: string, code: string, release: string]>;
+export type SetInfo = Record<string, [naam: string, code: string, release: string, serie?: string, taal?: string]>;
 
 export function sorteer<T>(lijst: T[], s: Sortering, k: (t: T) => Toonbaar, sets: SetInfo | null = null): T[] {
   const tijd = (t: T) => { const x = k(t).toegevoegd; return x ? Date.parse(x.length === 10 ? x + "T00:00:00" : x) || 0 : 0; };

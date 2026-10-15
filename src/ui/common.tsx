@@ -1,4 +1,6 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { fotoBronnen, type FotoKaart } from "../lib/foto";
 import type { Exemplaar } from "../types";
 import { euro } from "../lib/format";
 
@@ -55,22 +57,30 @@ export function Icoon({ naam, maat = 22, className }: { naam: keyof typeof PADEN
 
 let sheetNr = 0;
 
+let openSheets = 0;
+
 export function Sheet({ titel, onSluit, children, vol = false, actie }: { titel?: ReactNode; onSluit: () => void; children: ReactNode; vol?: boolean; actie?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const id = useRef(`sheet-titel-${++sheetNr}`);
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onSluit();
     window.addEventListener("keydown", esc);
-    document.body.classList.add("geen-scroll");
-    return () => { window.removeEventListener("keydown", esc); document.body.classList.remove("geen-scroll"); };
+    return () => window.removeEventListener("keydown", esc);
   }, [onSluit]);
+  // Sheets kunnen op elkaar liggen: de pagina blijft vast tot de laatste dicht is.
+  useEffect(() => {
+    openSheets++;
+    document.body.classList.add("geen-scroll");
+    return () => { if (--openSheets <= 0) { openSheets = 0; document.body.classList.remove("geen-scroll"); } };
+  }, []);
   // Focus naar de sheet bij openen (tenzij een veld zelf autofocus vraagt), en terug bij sluiten.
   useEffect(() => {
     const vorige = document.activeElement as HTMLElement | null;
     if (!ref.current?.contains(document.activeElement)) ref.current?.focus({ preventScroll: true });
     return () => { vorige?.focus?.({ preventScroll: true }); };
   }, []);
-  return (
+  // Via een portaal naar <body>: een sheet in een sheet blijft zo gewoon over het hele scherm.
+  return createPortal(
     <div className="sheet-achtergrond" onClick={(e) => e.target === e.currentTarget && onSluit()}>
       <div className={`sheet${vol ? " vol" : ""}`} ref={ref} role="dialog" aria-modal="true" aria-labelledby={id.current} tabIndex={-1}>
         <div className="sheet-greep" />
@@ -81,7 +91,8 @@ export function Sheet({ titel, onSluit, children, vol = false, actie }: { titel?
         </div>
         <div className="sheet-inhoud">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -127,13 +138,21 @@ export function Badges({ ex }: { ex: Exemplaar }) {
   );
 }
 
-export function KaartFoto({ src, alt, klein = false }: { src: string | null; alt: string; klein?: boolean }) {
+/**
+ * Een kaartfoto. Met `kaart` probeert hij na TCGdex ook de reservebronnen (Limitless,
+ * pokemontcg.io); lukt niets, dan blijft de eerste letter van de naam staan.
+ */
+export function KaartFoto({ src, alt, klein = false, kaart, groot = false }: { src: string | null; alt: string; klein?: boolean; kaart?: FotoKaart; groot?: boolean }) {
+  const bronnen = useMemo(() => (kaart ? fotoBronnen({ ...kaart, afbeelding: src }, groot ? "groot" : "klein") : src ? [src] : []), [src, kaart?.set_code, kaart?.nummer, kaart?.kaart_id, groot]);
+  const [i, setI] = useState(0);
+  useEffect(() => setI(0), [bronnen]);
+  const bron = bronnen[i];
   return (
     <div className={`foto${klein ? " klein" : ""}`}>
-      {src ? (
-        <img src={src} alt={alt} loading="lazy" decoding="async"
+      {bron ? (
+        <img key={bron} src={bron} alt={alt} loading="lazy" decoding="async"
           onLoad={(e) => e.currentTarget.classList.add("geladen")}
-          onError={(e) => { e.currentTarget.style.display = "none"; }} />
+          onError={() => setI((x) => x + 1)} />
       ) : null}
       <span className="foto-reserve">{alt.slice(0, 1)}</span>
     </div>
@@ -175,5 +194,34 @@ export function QrBeeld({ tekst, maat = 240 }: { tekst: string; maat?: number })
       <rect width={n + 8} height={n + 8} fill="#fff" />
       <path d={d} fill="#000" />
     </svg>
+  );
+}
+
+/** Is dit hartje lager dan (of gelijk aan) wat we ervoor betaalden? */
+export const onderAankoop = (prijs: number | null | undefined, aankoop: number | null | undefined) =>
+  prijs != null && aankoop != null && aankoop > 0 && prijs <= aankoop;
+
+/**
+ * Waarschuwing vóór een hartje onder de aankoopprijs: misschien een tikfout, of beter
+ * om de kaart even mee te nemen in de vault tot ze weer meer waard is.
+ */
+export function OnderAankoop({ prijs, aankoop, onToch, onVault, onAnders, tochTekst, vaultTekst, uitleg }: {
+  prijs: number; aankoop: number; onToch: () => void; onVault?: () => void; onAnders?: () => void;
+  tochTekst?: string; vaultTekst?: string; uitleg?: string;
+}) {
+  const verlies = Math.round((aankoop - prijs) * 100) / 100;
+  return (
+    <div className="onder-aankoop" role="alertdialog" aria-label="Onder de aankoopprijs">
+      <div className="onder-aankoop-kop">
+        <Icoon naam="waarschuwing" maat={20} />
+        <strong>{verlies > 0 ? `${euro(prijs)} is ${euro(verlies)} minder dan jullie betaalden` : `${euro(prijs)} is precies de aankoopprijs`}</strong>
+      </div>
+      <p>{uitleg ?? `Aankoopprijs ${euro(aankoop)}. Klopt dat hartje, of is het slimmer om de kaart even in de vault te bewaren tot ze weer meer waard is?`}</p>
+      <div className="knoppenrij">
+        {onVault && <button className="knop" onClick={onVault}><Icoon naam="doos" maat={18} /> {vaultTekst ?? "Naar de vault"}</button>}
+        <button className="knop zacht" onClick={onToch}>{tochTekst ?? `Toch ${euro(prijs)}`}</button>
+        {onAnders && <button className="tekstknop" onClick={onAnders}>Andere prijs</button>}
+      </div>
+    </div>
   );
 }

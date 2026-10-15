@@ -36,6 +36,8 @@ export interface Exemplaar {
   transactie_id: string | null; // laatste verkoop of ruil waarmee het de voorraad verliet
   afgeboekt_op: string | null;
   vitrine_sinds?: string | null; // sinds wanneer het in de catalogus ligt (voor "Nieuw")
+  nieuw_hartje?: number | null;  // prijscheck: dit hartje moet erop (null = het hartje klopt)
+  omgeving_id?: string | null;   // Bind'r of Brent
   aangemaakt_op: string;
   gewijzigd_op: string;
 }
@@ -48,6 +50,7 @@ export interface Artikel {
   prijs: number | null;
   opslag: Opslag;
   opmerking: string | null;
+  omgeving_id?: string | null;
 }
 
 export type NieuwExemplaar = Partial<Exemplaar> & Pick<Exemplaar, "code" | "naam">;
@@ -76,6 +79,8 @@ export interface Beurs {
   stand_start: Stand | null;
   stand_einde: Stand | null;
   opmerking: string | null;
+  locatie?: string | null;
+  omgeving_id?: string | null;
 }
 
 export type TransactieSoort = "verkoop" | "ruil" | "inkoop" | "retour";
@@ -119,6 +124,23 @@ export interface Transactie {
   status: "ok" | "conflict" | "ongedaan";
   conflicten: Conflict[];
   opmerking: string | null;
+  omgeving_id?: string | null;
+}
+
+/** Een omgeving: Bind'r en Brent houden elk hun eigen stock, kassa en beurzen bij. */
+export interface Omgeving {
+  id: string;
+  naam: string;
+  volgorde: number;
+  zichtbaar_voor_klanten: boolean;
+}
+
+/** Wie is er nu bezig in de app (elk toestel meldt zich om de minuut). */
+export interface Aanwezig {
+  user_id: string;
+  omgeving_id: string | null;
+  scherm: string | null;
+  laatst: string;
 }
 export type NieuwArtikel = Partial<Artikel> & Pick<Artikel, "naam">;
 

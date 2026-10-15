@@ -1,23 +1,28 @@
 import { useState } from "react";
 import {
-  importeerTestset, logUit, offlineKlaarzetten, openOverzicht, synchroniseer, useApp, vernieuwPrijsgids, wisDemo, zetInstagram, zetInstellingen,
+  actieveOmgeving, importeerTestset, logUit, offlineKlaarzetten, openOverzicht, synchroniseer, useApp, vernieuwPrijsgids, wisDemo, wisselOmgeving,
+  zetInstagram, zetInstellingen, zetZichtbaarVoorKlanten,
 } from "../state";
+import { PinKiezen } from "./Login";
 import { APP_VERSIE, klantUrl } from "../config";
 import { datumKort, euro, getal } from "../lib/format";
 import { STANDAARD_INSTELLINGEN, type Drempel } from "../lib/pricing";
 import { Icoon, QrBeeld, Sheet } from "./common";
 
 export function Meer() {
-  const { backend, gids, exemplaren, instellingen, wachtrij, online } = useApp();
+  const s = useApp();
+  const { backend, gids, exemplaren, instellingen, wachtrij, online } = s;
   const demo = backend?.soort === "demo";
   const gebruiker = backend?.gebruiker();
+  const [pinOpen, setPinOpen] = useState(false);
+  const omg = actieveOmgeving(s);
 
   return (
     <div className="scherm meer">
       <header className="kop">
         <div>
           <h1>Meer</h1>
-          <p className="kop-sub">{demo ? "Demo op dit toestel" : gebruiker?.naam || gebruiker?.email}</p>
+          <p className="kop-sub">{demo ? "Demo op dit toestel" : gebruiker?.naam || gebruiker?.email}{omg ? ` · ${omg.naam}` : ""}</p>
         </div>
       </header>
 
@@ -25,8 +30,32 @@ export function Meer() {
         <Rij label={demo ? "Demomodus" : "Ingelogd als"} waarde={demo ? "gegevens blijven op dit toestel" : gebruiker?.email} />
         {!demo && <Rij label="Synchronisatie" waarde={wachtrij ? `${wachtrij} wijzigingen wachten${online ? "" : " op internet"}` : "alles is doorgestuurd"} />}
         {!demo && <button className="rij-knop" onClick={() => void synchroniseer()}><Icoon naam="vernieuw" maat={18} /> Nu synchroniseren</button>}
+        {!demo && <button className="rij-knop" onClick={() => setPinOpen(true)}><Icoon naam="slot" maat={18} /> Pincode wijzigen</button>}
         <button className="rij-knop" onClick={() => void logUit()}><Icoon naam="uit" maat={18} /> {demo ? "Demo verlaten" : "Uitloggen"}</button>
+        {!demo && <p className="groep-uitleg">Na 10 minuten zonder de app vraagt hij je pincode opnieuw. Uitloggen wist ook wat deze gsm over jou onthoudt.</p>}
       </Groep>
+      {pinOpen && (
+        <Sheet titel="Pincode wijzigen" onSluit={() => setPinOpen(false)}>
+          <PinKiezen inSheet onKlaar={() => setPinOpen(false)} />
+        </Sheet>
+      )}
+
+      {s.omgevingen.length > 0 && (
+        <Groep titel="Omgevingen">
+          <p className="groep-uitleg">Elke omgeving heeft een eigen catalogus, vault, kassa en beurzen. Wat aangevinkt staat, verschijnt samen op de klantenpagina.</p>
+          {s.omgevingen.map((o) => (
+            <div key={o.id} className="rij omgeving-rij">
+              <button className={`omgeving-wissel${o.id === s.omgeving ? " aan" : ""}`} onClick={() => wisselOmgeving(o.id)} disabled={o.id === s.omgeving}>
+                {o.id === s.omgeving ? <Icoon naam="check" maat={16} /> : <span className="leeg-bol" />} {o.naam}
+              </button>
+              <label className="schakel klein-schakel">
+                <span className="zacht klein">klantenpagina</span>
+                <input type="checkbox" checked={o.zichtbaar_voor_klanten} onChange={(e) => zetZichtbaarVoorKlanten(o.id, e.target.checked)} aria-label={`${o.naam} op de klantenpagina`} />
+              </label>
+            </div>
+          ))}
+        </Groep>
+      )}
 
       <Klantencatalogus />
 
@@ -172,7 +201,7 @@ function Klantencatalogus() {
   const bekijk = klantUrl(backend?.soort === "demo");
   return (
     <Groep titel="Klantencatalogus">
-      <p className="groep-uitleg">Een aparte pagina voor klanten, zonder login: enkel wat in de catalogus ligt, met foto, conditie en prijs, en een link naar onze Instagram.</p>
+      <p className="groep-uitleg">De pagina die klanten zien via onze link, zonder login: wat in de catalogus van de aangevinkte omgevingen ligt, met foto, conditie en prijs. Kaarten waarvan het hartje eerst moet wisselen, blijven verborgen tot het nieuwe hartje bewaard is. Rechtsboven staat de knop Beheer.</p>
       <a className="rij-knop" href={bekijk} target="_blank" rel="noreferrer"><Icoon naam="oog" maat={18} /> Bekijk als klant{backend?.soort === "demo" ? " (met de demo)" : ""}</a>
       <button className="rij-knop" onClick={() => setQr(true)}><Icoon naam="qr" maat={18} /> QR-code voor aan de stand</button>
       <div className="rij instagram-rij">

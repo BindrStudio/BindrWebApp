@@ -13,6 +13,8 @@ import {
   type Groep, type SetInfo, type Snelfilter, type Sortering, type Toonbaar,
 } from "../lib/weergave";
 import { Badges, Hartje, Icoon, KaartFoto, Leeg } from "./common";
+import { SetKiezer } from "../gedeeld/SetKiezer";
+import { setLogo } from "../lib/foto";
 
 type Filter = "geen" | "wijzigen" | "label" | "gestegen";
 type Item = { soort: "ex"; groep: Groep<Exemplaar>; t: Toonbaar } | { soort: "art"; art: Artikel; t: Toonbaar };
@@ -57,6 +59,8 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
   const [set, setSet] = useState("");
   const [sort, setSort] = useState<Sortering>("prijs-hoog");
   const [zoek, setZoek] = useState("");
+  // Alle hartjes bijgewerkt? Dan verdwijnt de chip "Te wijzigen": toon weer alles in plaats van een lege lijst.
+  useEffect(() => { if (filter === "wijzigen" && !teWijzigen.size) setFilter("geen"); }, [filter, teWijzigen]);
 
   const ex = useMemo(() => exemplaren.filter((e) => inVoorraad(e) && e.opslag === opslag), [exemplaren, opslag]);
   const art = useMemo(() => artikelen.filter((a) => a.opslag === opslag && (a.aantal > 0 || !catalogus)), [artikelen, opslag, catalogus]);
@@ -187,12 +191,7 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
 
       <div className="chips">
         {setLijst.length > 1 && (
-          <label className={`chip setkeuze${set ? " aan" : ""}`}>
-            <select value={set} onChange={(e) => setSet(e.target.value)} aria-label="Set">
-              <option value="">Alle sets</option>
-              {setLijst.map((x) => <option key={x.id} value={x.id}>{x.naam} ({x.aantal})</option>)}
-            </select>
-          </label>
+          <SetKiezer sets={setLijst.map((x) => ({ ...x, logo: setLogo(x.id, sets?.[x.id]), code: sets?.[x.id]?.[1] || null }))} gekozen={set} onKies={setSet} />
         )}
         {catalogus && teWijzigen.size > 0 && <FilterChip aan={filter === "wijzigen"} onClick={() => setFilter(filter === "wijzigen" ? "geen" : "wijzigen")} rood>Te wijzigen {teWijzigen.size}</FilterChip>}
         {!catalogus && stijgers.size > 0 && <FilterChip aan={filter === "gestegen"} onClick={() => setFilter(filter === "gestegen" ? "geen" : "gestegen")}>Waarde gestegen {stijgers.size}</FilterChip>}
@@ -252,7 +251,7 @@ export function Tegel({ ex, i, band, vault, aantal = 1, labelOpen }: { ex: Exemp
       {...kantel}
     >
       <div className="foto-vak">
-        <KaartFoto src={ex.afbeelding} alt={ex.naam} />
+        <KaartFoto src={ex.afbeelding} alt={ex.naam} kaart={ex} />
         <span className="glans" />
       </div>
       {aantal > 1 && <span className="aantal-merk" title={`${aantal} exemplaren`}>×{aantal}</span>}

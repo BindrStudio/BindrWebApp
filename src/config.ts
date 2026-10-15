@@ -3,7 +3,7 @@
 export const SUPABASE_URL = "https://thnrmrvpkcrujxtwwqhy.supabase.co";
 export const SUPABASE_KEY = "sb_publishable_rFo0QZlgdsQTMOU7buKHJg_hMBrCSPV";
 
-export const APP_VERSIE = "0.3.0";
+export const APP_VERSIE = "0.4.0";
 
 // Ons Instagram-account (de beheerders kunnen het wijzigen in Meer).
 export const INSTAGRAM = "bindrstudio";
@@ -19,6 +19,6 @@ export const DATA = {
 // Kaartfoto's van TCGdex (gratis CDN).
 export const TCGDEX_ASSETS = "https://assets.tcgdex.net";
 
-// De klantenpagina (enkel de catalogus, zonder beheer), relatief aan de app.
-export const KLANT_PAD = "catalogus/";
-export const klantUrl = (demo = false) => new URL(KLANT_PAD + (demo ? "?demo=1" : ""), location.href.split("#")[0]).href;
+// De klantenpagina staat op de hoofdlink (index.html); het beheer op beheer.html.
+export const BEHEER_PAD = "beheer.html";
+export const klantUrl = (demo = false) => new URL("./" + (demo ? "?demo=1" : ""), location.href.split("#")[0]).href;

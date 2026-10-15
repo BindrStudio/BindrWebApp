@@ -3,11 +3,12 @@
 // Wat herkend wordt, komt in een lijstje, zodat je meerdere kaarten na elkaar kunt nemen.
 // Elk exemplaar is uniek: twee keer hetzelfde scannen zet het niet twee keer in de lijst.
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { bevestigLabel, huidig, inMandje, meld, naarTab, openExemplaar, openToevoegen, useApp } from "../state";
+import { bevestigLabel, codeElders, huidig, inMandje, meld, naarTab, openExemplaar, openToevoegen, useApp, wisselOmgeving } from "../state";
 import type { CatalogusKaart, Exemplaar } from "../types";
 import { beeldDetail, beeldVerschil, bestandNaarCanvas, duimnagel, fotoUitKader, leesQr, startCamera, stopCamera, tril } from "../lib/camera";
 import { normaliseerCode, toonCode } from "../lib/code";
 import { afbeelding, herken, laadCatalogus } from "../lib/catalog";
+import { uitCatalogus } from "../lib/foto";
 import { laadOcr, leesKaart } from "../lib/ocr";
 import { regelUit } from "../lib/kassa";
 import { inVoorraad } from "../lib/exemplaar";
@@ -22,7 +23,12 @@ const AUTO_SLEUTEL = "bindr-autofoto-v1";
 export function verwerkCode(code: string): Exemplaar | null {
   const ex = huidig().exemplaren.find((e) => e.code === code);
   if (!ex) {
-    if (code === PROEFCODE) meld("Proeflabel gelezen: de QR-code werkt", "ok");
+    const elders = codeElders(code);
+    if (elders) {
+      const naar = elders.omgeving;
+      meld(`${elders.exemplaar.naam} ${toonCode(code)} hoort bij ${naar?.naam ?? "een andere omgeving"}`, "info",
+        naar ? { label: `Naar ${naar.naam}`, doe: () => wisselOmgeving(naar.id) } : undefined, 6000);
+    } else if (code === PROEFCODE) meld("Proeflabel gelezen: de QR-code werkt", "ok");
     else meld(`Code ${toonCode(code)} staat niet in de voorraad`, "fout");
     return null;
   }
@@ -379,7 +385,7 @@ function ExItem({ ex, via, inMandje: mand, onWeg }: { ex?: Exemplaar; via: Via; 
   return (
     <div className="scan-rij">
       <button className="scan-rij-knop" onClick={() => openExemplaar(ex.id)}>
-        <KaartFoto src={ex.afbeelding} alt={ex.naam} klein />
+        <KaartFoto src={ex.afbeelding} alt={ex.naam} klein kaart={ex} />
         <span className="res-tekst">
           <strong>{ex.naam}</strong>
           <span className="zacht"><span className="code">{toonCode(ex.code)}</span> · {[ex.set_code, ex.nummer].filter(Boolean).join(" ")}</span>
@@ -439,7 +445,7 @@ function KaartItem({ it, onWeg }: { it: Extract<LijstItem, { soort: "kaart" }>; 
         <div className="scan-keuzes">
           {it.kandidaten.slice(0, 5).map((k) => (
             <button key={k.id} className="scan-keuze" onClick={() => kiesKaart(k)}>
-              <KaartFoto src={afbeelding(k)} alt={k.naam} klein />
+              <KaartFoto src={afbeelding(k)} alt={k.naam} klein kaart={uitCatalogus(k)} />
               <span><strong>{k.naam}</strong><em>{k.setCode || k.setId} {k.nummer}</em></span>
             </button>
           ))}

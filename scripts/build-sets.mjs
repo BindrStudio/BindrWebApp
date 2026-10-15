@@ -1,4 +1,5 @@
-// Schrijft public/data/sets.json: per set de naam, de afkorting en de releasedatum.
+// Schrijft public/data/sets.json: per set de naam, de afkorting, de releasedatum, de reeks
+// en de taal (voor het logo op assets.tcgdex.net/<taal>/<reeks>/<set>/logo.png).
 // Klein bestand voor de klantenpagina (sorteren per set, nieuwste sets eerst),
 // zodat die de volledige kaartencatalogus niet hoeft te laden.
 //
@@ -12,11 +13,12 @@ const data = path.join(root, "public/data");
 const sets = {};
 
 const en = JSON.parse(await readFile(path.join(data, "catalog-en.json"), "utf8"));
-for (const [id, naam, code, , release] of en.sets) sets[id] = [naam, code || id, release || ""];
+for (const [id, naam, code, serie, release] of en.sets) sets[id] = [naam, code || id, release || "", serie || "", "en"];
 
 const asia = JSON.parse(await readFile(path.join(data, "catalog-asia.json"), "utf8"));
-for (const [id, ja, zhTw, zhCn, enNaam, , release] of asia.sets) {
-  if (!sets[id]) sets[id] = [enNaam || ja || zhTw || zhCn || id, id, release || ""];
+for (const [id, ja, zhTw, zhCn, enNaam, serie, release] of asia.sets) {
+  const taal = ja ? "ja" : zhTw ? "zh-tw" : "zh-cn";
+  if (!sets[id]) sets[id] = [enNaam || ja || zhTw || zhCn || id, id, release || "", serie || "", taal];
 }
 
 const gesorteerd = Object.fromEntries(Object.entries(sets).sort(([a], [b]) => a.localeCompare(b)));

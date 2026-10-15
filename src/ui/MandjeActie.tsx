@@ -4,7 +4,7 @@ import type { Exemplaar } from "../types";
 import { inVoorraad } from "../lib/exemplaar";
 import { regelUit } from "../lib/kassa";
 import { datumKort, euro, getal, vandaag } from "../lib/format";
-import { Icoon } from "./common";
+import { Icoon, OnderAankoop, onderAankoop } from "./common";
 
 /**
  * De knop "In het mandje" voor één exemplaar. Een kaart uit de vault krijgt eerst een hartje
@@ -14,7 +14,7 @@ export function MandjeActie({ ex, naToevoegen, onAnnuleer, stil = false, vraagMe
   ex: Exemplaar; naToevoegen?: () => void; onAnnuleer?: () => void; stil?: boolean; vraagMeteen?: boolean;
 }) {
   const { mandje } = useApp();
-  const [stap, setStap] = useState<null | "vault">(() =>
+  const [stap, setStap] = useState<null | "vault" | "verlies">(() =>
     vraagMeteen && inVoorraad(ex) && ex.opslag === "stockdoos" ? "vault" : null);
   const [hartje, setHartje] = useState(String(ex.hartjesprijs ?? ex.verkoopprijs ?? ""));
 
@@ -52,6 +52,23 @@ export function MandjeActie({ ex, naToevoegen, onAnnuleer, stil = false, vraagMe
     else voegToe();
   };
 
+  const naarCatalogusEnMandje = (prijs: number) => {
+    wijzig(ex.id, { opslag: "vitrine", hartjesprijs: prijs, hartjesdatum: vandaag(), verkoopprijs: prijs });
+    voegToe();
+  };
+
+  if (stap === "verlies") {
+    const prijs = Math.round(getal(hartje) ?? 0);
+    return (
+      <OnderAankoop prijs={prijs} aankoop={ex.aankoopprijs!} vaultTekst="Laat in de vault"
+        uitleg={`Jullie betaalden ${euro(ex.aankoopprijs)}. Verkopen aan ${euro(prijs)} kost geld; misschien beter even laten liggen.`}
+        tochTekst={`Toch verkopen aan ${euro(prijs)}`}
+        onVault={() => { setStap(null); onAnnuleer?.(); }}
+        onToch={() => naarCatalogusEnMandje(prijs)}
+        onAnders={() => setStap("vault")} />
+    );
+  }
+
   if (stap === "vault") {
     const p = getal(hartje);
     return (
@@ -61,8 +78,8 @@ export function MandjeActie({ ex, naToevoegen, onAnnuleer, stil = false, vraagMe
         <div className="knoppenrij">
           <button className="knop" disabled={p == null || p <= 0} onClick={() => {
             const prijs = Math.round(p!);
-            wijzig(ex.id, { opslag: "vitrine", hartjesprijs: prijs, hartjesdatum: vandaag(), verkoopprijs: prijs });
-            voegToe();
+            if (onderAankoop(prijs, ex.aankoopprijs)) return setStap("verlies");
+            naarCatalogusEnMandje(prijs);
           }}>Naar catalogus en in het mandje</button>
           <button className="knop zacht" onClick={() => { setStap(null); onAnnuleer?.(); }}>Annuleer</button>
         </div>

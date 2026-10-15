@@ -4,13 +4,15 @@
 // werkt) en gaat daarna via een wachtrij naar de server. Lukt dat niet door een
 // netwerkfout, dan blijft ze in de wachtrij tot er weer verbinding is.
 import { useSyncExternalStore } from "react";
-import { isNetwerkFout, type Backend } from "./store/backend";
+import { isNetwerkFout, type Alles, type Backend, type PrijsMarkering } from "./store/backend";
 import { DemoBackend } from "./store/demo";
 import { SupabaseBackend } from "./store/supabase";
-import type { Artikel, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Regel, Transactie } from "./types";
+import type { Aanwezig, Artikel, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Transactie } from "./types";
+import { bewaarPin, controleerPin, isVergrendeld, leesPin, markeerActief, wisPin, VERGRENDEL_NA_MS } from "./lib/pin";
 import { laadPrijsgids, type Prijsgids } from "./lib/prices";
 import { prijscheck, STANDAARD_INSTELLINGEN, type Instellingen, type TeWijzigen } from "./lib/pricing";
 import { vandaag } from "./lib/format";
+import { HARTJES_OK, kies } from "./lib/grapjes";
 import { laadTestset } from "./lib/testset";
 import { printLabels, printerNaam, verbindPrinter, ontkoppelPrinter } from "./lib/printer";
 import { laadCatalogus } from "./lib/catalog";
@@ -49,7 +51,8 @@ export interface Mandje {
 }
 
 export interface State {
-  fase: "start" | "login" | "laden" | "klaar";
+  // slot = vergrendeld (pincode ingeven), pin = een pincode kiezen
+  fase: "start" | "login" | "slot" | "pin" | "laden" | "klaar";
   backend: Backend | null;
   exemplaren: Exemplaar[];
   artikelen: Artikel[];
@@ -69,12 +72,17 @@ export interface State {
   open: Open;
   tab: Tab;
   mandje: Mandje;
+  omgevingen: Omgeving[];
+  omgeving: string | null;  // de omgeving waarin je nu werkt (Bind'r of Brent)
+  aanwezig: Aanwezig[];     // wie er de laatste minuten bezig was
 }
 
 const MODUS = "bindr-modus";
-const PRIJSCHECK = "bindr-prijscheck-v1";
+const PRIJSCHECK = "bindr-prijscheck-v2";
 const INSTELLINGEN = "bindr-instellingen-v1";
 const MANDJE = "bindr-mandje-v1";
+const OMGEVING = "bindr-omgeving-v1";
+const mandjeSleutel = (omgeving: string | null) => (omgeving ? `bindr-mandje-v2-${omgeving}` : MANDJE);
 
 function leesJson<T>(sleutel: string, standaard: T): T {
   try {
@@ -114,14 +122,100 @@ let state: State = {
   open: null,
   tab: beginTab(),
   mandje: leesJson<Mandje>(MANDJE, { regels: [] }),
+  omgevingen: [],
+  omgeving: null,
+  aanwezig: [],
 };
+
+/** Welke hartjes moeten wisselen: wat de laatste prijscheck markeerde (gedeeld via de database). */
+function teWijzigenUit(exemplaren: Exemplaar[]): Map<string, TeWijzigen> {
+  const m = new Map<string, TeWijzigen>();
+  for (const e of exemplaren) {
+    if (e.nieuw_hartje == null || e.opslag !== "vitrine" || !inVoorraad(e) || e.hartjesprijs == null || e.prijs_handmatig) continue;
+    if (e.nieuw_hartje === e.hartjesprijs) continue;
+    m.set(e.id, { id: e.id, oud: e.hartjesprijs, nieuw: e.nieuw_hartje, richting: e.nieuw_hartje > e.hartjesprijs ? "op" : "neer" });
+  }
+  return m;
+}
 
 const luisteraars = new Set<() => void>();
 function zet(deel: Partial<State>) {
+  if ("exemplaren" in deel && deel.exemplaren) deel = { ...deel, teWijzigen: teWijzigenUit(deel.exemplaren) };
   state = { ...state, ...deel };
   if ("exemplaren" in deel || "artikelen" in deel || "beurzen" in deel || "transacties" in deel) bewaarKopieLater();
-  if ("mandje" in deel) schrijf(MANDJE, state.mandje);
+  if ("mandje" in deel) schrijf(mandjeSleutel(state.omgeving), state.mandje);
   luisteraars.forEach((l) => l());
+}
+
+// ── Omgevingen: de rijen van de andere omgevingen staan apart ────────────────
+// De schermen werken enkel met de actieve omgeving (state.exemplaren enz.). Wat bij een
+// andere omgeving hoort, bewaren we hier, zodat wisselen en de kopie op het toestel kloppen.
+let buiten: Alles = { exemplaren: [], artikelen: [], beurzen: [], transacties: [] };
+
+function hoortHier(r: { omgeving_id?: string | null }, omgeving = state.omgeving): boolean {
+  if (!omgeving) return true;
+  return (r.omgeving_id ?? state.omgevingen[0]?.id ?? omgeving) === omgeving;
+}
+
+function splits(alles: Alles, omgeving = state.omgeving): Alles {
+  const hier = (r: { omgeving_id?: string | null }) => hoortHier(r, omgeving);
+  buiten = {
+    exemplaren: alles.exemplaren.filter((r) => !hier(r)),
+    artikelen: alles.artikelen.filter((r) => !hier(r)),
+    beurzen: alles.beurzen.filter((r) => !hier(r)),
+    transacties: alles.transacties.filter((r) => !hier(r)),
+  };
+  return {
+    exemplaren: alles.exemplaren.filter(hier),
+    artikelen: alles.artikelen.filter(hier),
+    beurzen: alles.beurzen.filter(hier),
+    transacties: alles.transacties.filter(hier),
+  };
+}
+
+function alleRijen(): Alles {
+  return {
+    exemplaren: [...state.exemplaren, ...buiten.exemplaren],
+    artikelen: [...state.artikelen, ...buiten.artikelen],
+    beurzen: [...state.beurzen, ...buiten.beurzen],
+    transacties: [...state.transacties, ...buiten.transacties],
+  };
+}
+
+/** Alle codes, ook van de andere omgevingen: een nieuwe code mag nergens al bestaan. */
+export function alleCodes(): Set<string> {
+  return new Set([...state.exemplaren, ...buiten.exemplaren].map((e) => e.code));
+}
+
+/** Een gescande code die bij een andere omgeving hoort. */
+export function codeElders(code: string): { exemplaar: Exemplaar; omgeving: Omgeving | undefined } | null {
+  const e = buiten.exemplaren.find((x) => x.code === code);
+  return e ? { exemplaar: e, omgeving: state.omgevingen.find((o) => o.id === e.omgeving_id) } : null;
+}
+
+export const actieveOmgeving = (s: State = state) => s.omgevingen.find((o) => o.id === s.omgeving) ?? null;
+
+const omgevingSleutel = (b: Backend) => `${OMGEVING}-${b.soort}-${b.gebruikerId() ?? "?"}`;
+
+/** Wissel van omgeving: een andere catalogus, vault, kassa en beurzen. */
+export function wisselOmgeving(id: string) {
+  if (id === state.omgeving || !state.omgevingen.some((o) => o.id === id)) return;
+  const alles = alleRijen();
+  schrijf(mandjeSleutel(state.omgeving), state.mandje);
+  const deel = splits(alles, id);
+  zet({ ...deel, omgeving: id, mandje: leesJson<Mandje>(mandjeSleutel(id), { regels: [] }), open: null });
+  if (state.backend) schrijf(omgevingSleutel(state.backend), id);
+  meld(`Je werkt nu in ${actieveOmgeving()?.naam ?? "de andere omgeving"}`, "info");
+  void meldAanwezig();
+}
+
+/** Een omgeving wel of niet tonen op de klantenpagina. */
+export function zetZichtbaarVoorKlanten(id: string, zichtbaar: boolean) {
+  const o = state.omgevingen.find((x) => x.id === id);
+  if (!o) return;
+  const nieuw = { ...o, zichtbaar_voor_klanten: zichtbaar };
+  zet({ omgevingen: state.omgevingen.map((x) => (x.id === id ? nieuw : x)) });
+  inRij({ soort: "omgeving", omgeving: nieuw });
 }
 export function useApp(): State {
   return useSyncExternalStore(
@@ -168,8 +262,7 @@ function bewaarKopieLater() {
   if (kopieTimer) clearTimeout(kopieTimer);
   kopieTimer = setTimeout(() => {
     schrijf(kopieSleutel(b), {
-      op: new Date().toISOString(),
-      exemplaren: state.exemplaren, artikelen: state.artikelen, beurzen: state.beurzen, transacties: state.transacties,
+      op: new Date().toISOString(), ...alleRijen(), omgevingen: state.omgevingen, omgeving: state.omgeving, serverTijd,
     });
   }, 800);
 }
@@ -190,11 +283,14 @@ type Op =
   | { soort: "artikelenNieuw"; rijen: NieuwArtikel[] }
   | { soort: "artikelWijzig"; id: string; wijziging: Partial<Artikel> }
   | { soort: "beurs"; beurs: Beurs }
+  | { soort: "beursWeg"; id: string }
   | { soort: "transactie"; t: Transactie }
   | { soort: "ongedaan"; id: string }
   | { soort: "conflictOplossen"; id: string; oud: string; nieuw: string }
   | { soort: "conflictAanvaarden"; id: string; item: string }
-  | { soort: "instelling"; sleutel: string; waarde: unknown };
+  | { soort: "instelling"; sleutel: string; waarde: unknown }
+  | { soort: "prijzen"; omgeving: string | null; lijst: PrijsMarkering[] }
+  | { soort: "omgeving"; omgeving: Omgeving };
 
 interface Wachtend { nr: number; op: Op }
 let rij: Wachtend[] = [];
@@ -225,10 +321,13 @@ async function voerUit(op: Op) {
     case "artikelenNieuw": await b.voegArtikelenToe(op.rijen); break;
     case "artikelWijzig": await b.wijzigArtikel(op.id, op.wijziging); break;
     case "beurs": await b.bewaarBeurs(op.beurs); break;
+    case "beursWeg": await b.verwijderBeurs(op.id); break;
     case "instelling": await b.bewaarInstelling(op.sleutel, op.waarde); break;
+    case "prijzen": await b.markeerPrijzen(op.omgeving, op.lijst); break;
+    case "omgeving": await b.bewaarOmgeving(op.omgeving); break;
     case "transactie": {
       const t = await b.boekTransactie(op.t);
-      const lokaal = state.transacties.find((x) => x.id === t.id);
+      const lokaal = state.transacties.find((x) => x.id === t.id) ?? buiten.transacties.find((x) => x.id === t.id);
       vervangTransactie({ ...lokaal, ...t });
       if (t.status === "conflict" && lokaal?.status !== "conflict") {
         meld("Conflict bij het doorsturen: een exemplaar was al weg. Kijk het na in de kassa.", "fout", { label: "Bekijk", doe: () => openTransactie(t.id) }, 9000);
@@ -262,6 +361,7 @@ export async function spoel(): Promise<boolean> {
         if (isNetwerkFout(e) || status === 401 || status === 403 || status === 404 || (status ?? 0) >= 500) {
           // Geen verbinding, sessie verlopen, database nog niet bijgewerkt of serverfout:
           // niets weggooien, later opnieuw proberen.
+          if (sessieVerlopen()) { naarLoginNaVerlopen(); gelukt = false; return false; }
           if (isNetwerkFout(e)) zet({ online: false });
           else if (!blokMelding) { blokMelding = true; fout(new Error(`Wijzigingen wachten: ${e instanceof Error ? e.message : String(e)}`)); }
           if (opnieuwTimer) clearTimeout(opnieuwTimer);
@@ -289,8 +389,31 @@ export async function spoel(): Promise<boolean> {
 }
 
 function vervangTransactie(t: Transactie) {
+  // Een transactie van een andere omgeving (geboekt vóór je wisselde) blijft daar.
+  if (buiten.transacties.some((x) => x.id === t.id)) {
+    buiten = { ...buiten, transacties: buiten.transacties.map((x) => (x.id === t.id ? { ...x, ...t } : x)) };
+    bewaarKopieLater();
+    return;
+  }
+  if (!hoortHier(t) && !state.transacties.some((x) => x.id === t.id)) {
+    buiten = { ...buiten, transacties: [...buiten.transacties, t] };
+    bewaarKopieLater();
+    return;
+  }
   const i = state.transacties.findIndex((x) => x.id === t.id);
   zet({ transacties: i < 0 ? [...state.transacties, t] : state.transacties.map((x) => (x.id === t.id ? t : x)) });
+}
+
+/** Werd de sessie op de server ingetrokken (bv. nieuwe pincode op een andere gsm)? */
+const sessieVerlopen = () => state.backend?.soort === "supabase" && (state.backend as SupabaseBackend).verlopen;
+
+/** Opnieuw inloggen; de wachtrij blijft op het toestel en gaat door na de login. */
+function naarLoginNaVerlopen() {
+  void state.backend?.logUit(); // de oude sessie van dit toestel opruimen
+  wisPin();
+  wachtend = null;
+  zet({ backend: null, fase: "login", open: null });
+  meld("Je sessie is verlopen. Log opnieuw in met je e-mail en pincode; wat nog moest doorgaan, blijft bewaard.", "fout", undefined, 9000);
 }
 
 // ── Start, login, demo ───────────────────────────────────────────────────────
@@ -300,50 +423,160 @@ export async function synchroniseer() {
 }
 
 let gestart = false;
+let wachtend: Backend | null = null; // ingelogd, maar nog vergrendeld of zonder pincode
+
 export async function start() {
   if (!gestart && typeof window !== "undefined") {
     gestart = true;
     window.addEventListener("online", () => { zet({ online: true }); void synchroniseer(); });
     window.addEventListener("offline", () => zet({ online: false }));
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible" && state.fase === "klaar") void synchroniseer();
-    });
-    setInterval(() => {
-      if (document.visibilityState === "visible" && state.fase === "klaar" && state.backend?.soort === "supabase") {
-        void synchroniseer();
+      if (document.visibilityState === "hidden") {
+        // Weg uit de app: de 10 minuten tellen vanaf nu (tenzij ze al voorbij waren).
+        if (state.fase === "klaar") { if (moetVergrendelen()) vergrendel(); else markeerActief(); }
+        return;
       }
-    }, 180000);
+      if (state.fase === "klaar" && moetVergrendelen()) return vergrendel();
+      if (state.fase === "klaar") void synchroniseer();
+    });
+    // Elke tik of toets telt als "bezig": pas na 10 minuten niets doen vraagt de app de pincode opnieuw.
+    let laatsteTik = 0;
+    const bezigMet = () => {
+      if (state.fase !== "klaar" || Date.now() - laatsteTik < 30000) return;
+      laatsteTik = Date.now();
+      markeerActief();
+    };
+    window.addEventListener("pointerdown", bezigMet, { passive: true });
+    window.addEventListener("keydown", bezigMet, { passive: true });
+    // Ook als de gsm open op tafel ligt: na 10 minuten zonder tik vergrendelen.
+    setInterval(() => { if (state.fase === "klaar" && moetVergrendelen()) vergrendel(); }, 30000);
+    // Samen werken: om de 30 seconden ophalen wat de anderen deden, om de minuut melden dat je er bent.
+    setInterval(() => {
+      if (document.visibilityState === "visible" && state.fase === "klaar" && state.backend?.soort === "supabase") void haalWijzigingen();
+    }, 30000);
+    setInterval(() => {
+      if (document.visibilityState === "visible" && state.fase === "klaar" && state.backend?.soort === "supabase") void meldAanwezig();
+    }, 60000);
   }
   const modus = localStorage.getItem(MODUS);
-  const backend = modus === "demo" ? new DemoBackend() : SupabaseBackend.herstel();
+  if (modus === "demo") return gebruik(new DemoBackend());
+  const backend = SupabaseBackend.herstel();
   if (!backend) return zet({ fase: "login" });
+  const pin = leesPin();
+  wachtend = backend;
+  laadRij(backend); // zodat uitloggen vanop het slotscherm weet wat er nog moet doorgaan
+  if (!pin || pin.user_id !== backend.gebruikerId()) return zet({ fase: "pin", backend: null });
+  if (isVergrendeld()) return zet({ fase: "slot", backend: null });
   await gebruik(backend);
 }
 
+// ── Pincode ──────────────────────────────────────────────────────────────────
+/** De pincode op dit toestel, enkel als ze van wie nu ingelogd is. */
+function eigenPin(b: Backend | null = state.backend ?? wachtend) {
+  const p = leesPin();
+  return p && b && p.user_id === b.gebruikerId() ? p : null;
+}
+
+const moetVergrendelen = () => state.backend?.soort === "supabase" && !!eigenPin() && isVergrendeld();
+
+function vergrendel() {
+  if (state.backend?.soort !== "supabase") return;
+  wachtend = state.backend;
+  zet({ fase: "slot", open: null });
+}
+
+/** De pincode op dit toestel: ontgrendelt de app (ook zonder internet). */
+export async function ontgrendel(pin: string): Promise<boolean> {
+  if (!eigenPin()) { await logUit(); return false; }
+  if (!(await controleerPin(pin))) return false;
+  markeerActief();
+  if (state.backend && state.exemplaren.length + state.artikelen.length + state.beurzen.length > 0) {
+    zet({ fase: "klaar" });
+    void synchroniseer();
+  } else if (wachtend) {
+    await gebruik(wachtend);
+  }
+  return true;
+}
+
+/** Inloggen met e-mail en pincode (de pincode is het wachtwoord van het account). */
+export async function logInMetPin(email: string, pin: string) {
+  const b = await SupabaseBackend.logIn(email, pin);
+  localStorage.setItem(MODUS, "supabase");
+  await bewaarPin(b.sessieInfo(), pin);
+  markeerActief();
+  await gebruik(b);
+}
+
+/** De eerste keer: met het oude wachtwoord inloggen, daarna een pincode kiezen. */
+export async function logInMetWachtwoord(email: string, wachtwoord: string) {
+  const b = await SupabaseBackend.logIn(email, wachtwoord);
+  localStorage.setItem(MODUS, "supabase");
+  if (!eigenPin(b)) wisPin(); // de pincode van iemand anders opent deze sessie niet
+  wachtend = b;
+  zet({ fase: "pin" });
+}
+
+/** Een nieuwe pincode instellen (online): wordt het wachtwoord van je account. */
+export async function kiesPincode(pin: string) {
+  const b = (state.backend?.soort === "supabase" ? state.backend : wachtend) as SupabaseBackend | null;
+  if (!b) throw new Error("Log eerst in");
+  await b.wijzigPincode(pin);
+  await bewaarPin(b.sessieInfo(), pin);
+  markeerActief();
+  if (state.fase === "klaar") meld("Nieuwe pincode bewaard");
+  else await gebruik(b);
+}
+
+/** Zonder pincode verder (enkel tot de volgende keer dat de app start). */
+export async function pincodeLater() {
+  if (wachtend) await gebruik(wachtend);
+}
+
+/** Wie dit toestel gebruikt (voor het slotscherm). */
+export const pinGebruiker = () => eigenPin();
+
 async function gebruik(backend: Backend) {
   zet({ backend, fase: "laden" });
+  wachtend = null;
   laadRij(backend);
-  const pc = leesJson<{ datum: string | null; items: TeWijzigen[] }>(PRIJSCHECK + backend.soort, { datum: null, items: [] });
-  zet({ teWijzigen: new Map(pc.items.map((t) => [t.id, t])), prijscheckOp: pc.datum });
+  zet({ prijscheckOp: leesJson<{ datum: string | null }>(PRIJSCHECK + backend.soort, { datum: null }).datum });
   try {
+    // Eerst de omgevingen: daaruit volgt ook welke versie van de database er draait.
+    const omgevingen = await backend.laadOmgevingen(); // een oude database (404) geeft [], andere fouten stoppen hier
+    const gekozen = (() => { try { return JSON.parse(localStorage.getItem(omgevingSleutel(backend)) || "null") as string | null; } catch { return null; } })();
+    const omgeving = omgevingen.find((o) => o.id === gekozen)?.id ?? omgevingen[0]?.id ?? null;
+    zet({ omgevingen, omgeving, mandje: leesMandje(omgeving, omgevingen) });
     await spoel();
     const [alles, gids, beheerders, gedeeld] = await Promise.all([
       backend.laadAlles(), laadPrijsgids(), backend.laadBeheerders().catch(() => []), backend.laadInstellingen().catch(() => ({})),
     ]);
-    zet({ ...alles, gids, beheerders: Object.fromEntries(beheerders.map((b) => [b.user_id, b.naam])), fase: "klaar" });
+    serverTijd = laatsteTijd(alles);
+    laatsteVolledig = Date.now();
+    zet({ ...splits(alles), gids, beheerders: Object.fromEntries(beheerders.map((b) => [b.user_id, b.naam])), fase: "klaar" });
     // Loopt er een beurs? Dan opent de app op de kassa (tenzij een ander tabblad gevraagd werd).
-    if (typeof location !== "undefined" && !location.hash && alles.beurzen.some((b) => b.status === "actief")) zet({ tab: "kassa" });
+    if (typeof location !== "undefined" && !location.hash && state.beurzen.some((b) => b.status === "actief")) zet({ tab: "kassa" });
     pasGedeeldToe(gedeeld);
     bewaarKopieLater();
+    void meldAanwezig();
     if ((backend as { schemaOud?: boolean }).schemaOud) {
       meld("De database is nog niet bijgewerkt voor de kassa. Voer supabase/schema.sql opnieuw uit in Supabase.", "fout", undefined, 15000);
+    } else if (backend.soort === "supabase" && (backend as SupabaseBackend).versie === 2) {
+      meld("De database is nog niet bijgewerkt voor omgevingen en pincodes. Voer supabase/schema.sql opnieuw uit in Supabase.", "fout", undefined, 15000);
     }
   } catch (e) {
     const kopie = backend.soort === "supabase" && isNetwerkFout(e) ? leesKopie(backend) : null;
     if (kopie) {
       const gids = await laadPrijsgids();
+      const omgevingen: Omgeving[] = kopie.omgevingen ?? [];
+      const omgeving: string | null = kopie.omgeving ?? omgevingen[0]?.id ?? null;
+      serverTijd = kopie.serverTijd ?? null;
+      zet({ omgevingen, omgeving, mandje: leesMandje(omgeving, omgevingen) });
       zet({
-        exemplaren: kopie.exemplaren.map(schoonExemplaar), artikelen: (kopie.artikelen ?? []).map(schoonArtikel), beurzen: kopie.beurzen ?? [], transacties: kopie.transacties ?? [],
+        ...splits({
+          exemplaren: kopie.exemplaren.map(schoonExemplaar), artikelen: (kopie.artikelen ?? []).map(schoonArtikel),
+          beurzen: kopie.beurzen ?? [], transacties: kopie.transacties ?? [],
+        }),
         gids, fase: "klaar", online: false,
       });
       meld("Geen verbinding: je werkt met de voorraad op dit toestel. Wijzigingen gaan door zodra er internet is.", "info", undefined, 7000);
@@ -352,6 +585,13 @@ async function gebruik(backend: Backend) {
     fout(e);
     zet({ fase: backend.soort === "demo" ? "klaar" : "login", backend: backend.soort === "demo" ? backend : null });
   }
+}
+
+/** Het mandje van een omgeving (het oude, gedeelde mandje gaat naar de eerste omgeving). */
+function leesMandje(omgeving: string | null, omgevingen: Omgeving[]): Mandje {
+  const eigen = leesJson<Mandje | null>(mandjeSleutel(omgeving), null);
+  if (eigen) return eigen;
+  return omgeving === omgevingen[0]?.id || !omgeving ? leesJson<Mandje>(MANDJE, { regels: [] }) : { regels: [] };
 }
 
 function pasGedeeldToe(g: Record<string, unknown>) {
@@ -371,6 +611,7 @@ function pasGedeeldToe(g: Record<string, unknown>) {
   zet(deel);
 }
 
+/** Enkel voor tests en de demo: inloggen met e-mail en wachtwoord zonder pincode-stap. */
 export async function logIn(email: string, wachtwoord: string) {
   const b = await SupabaseBackend.logIn(email, wachtwoord);
   localStorage.setItem(MODUS, "supabase");
@@ -383,29 +624,117 @@ export async function startDemo() {
 }
 
 export async function logUit() {
-  if (rij.length && !confirm(`Er wachten nog ${rij.length} wijzigingen op internet. Toch uitloggen? Dan gaan ze verloren.`)) return;
-  await state.backend?.logUit();
-  if (state.backend) localStorage.removeItem(rijSleutel(state.backend));
+  const b = state.backend ?? wachtend;
+  if (b?.soort === "demo" && rij.length && !confirm(`Er wachten nog ${rij.length} wijzigingen. Toch stoppen?`)) return;
+  if (b?.soort === "supabase" && rij.length
+    && !confirm(`Er wachten nog ${rij.length} wijzigingen op internet. Ze blijven op deze gsm en gaan door zodra jij hier weer inlogt. Toch uitloggen?`)) return;
+  await b?.logUit();
+  if (b?.soort === "demo") localStorage.removeItem(rijSleutel(b));
   rij = [];
+  // Het mandje van elke omgeving leegmaken: de volgende gebruiker begint met een leeg mandje.
+  try {
+    for (const k of Object.keys(localStorage)) if (k.startsWith("bindr-mandje-")) localStorage.removeItem(k);
+  } catch { /* */ }
+  buiten = { exemplaren: [], artikelen: [], beurzen: [], transacties: [] };
+  wachtend = null;
+  wisPin();
   localStorage.removeItem(MODUS);
-  zet({ backend: null, fase: "login", exemplaren: [], artikelen: [], beurzen: [], transacties: [], teWijzigen: new Map(), prijscheckOp: null, open: null, wachtrij: 0, mandje: { regels: [] } });
+  zet({
+    backend: null, fase: "login", exemplaren: [], artikelen: [], beurzen: [], transacties: [], teWijzigen: new Map(), prijscheckOp: null,
+    open: null, wachtrij: 0, mandje: { regels: [] }, omgevingen: [], omgeving: null, aanwezig: [],
+  });
+}
+
+// ── Samen werken: wijzigingen van de anderen en wie er bezig is ─────────────
+let serverTijd: string | null = null; // de laatste wijziging die we van de server kennen
+
+function laatsteTijd(a: Alles): string | null {
+  let m: string | null = null;
+  for (const lijst of [a.exemplaren, a.artikelen, a.beurzen, a.transacties] as { gewijzigd_op?: string | null }[][]) {
+    for (const r of lijst) if (r.gewijzigd_op && (!m || r.gewijzigd_op > m)) m = r.gewijzigd_op;
+  }
+  return m;
+}
+
+let laatsteVolledig = 0;
+
+/** Oude database (zonder kolom nieuw_hartje): de markeringen van de prijscheck blijven dan lokaal staan. */
+function behoudMarkering(alles: Alles): Alles {
+  const b = state.backend;
+  if (!b || b.soort !== "supabase" || (b as SupabaseBackend).versie !== 2) return alles;
+  const lokaal = new Map(alleRijen().exemplaren.filter((e) => e.nieuw_hartje != null).map((e) => [e.id, e.nieuw_hartje]));
+  if (!lokaal.size) return alles;
+  return { ...alles, exemplaren: alles.exemplaren.map((e) => (lokaal.has(e.id) && e.nieuw_hartje == null ? { ...e, nieuw_hartje: lokaal.get(e.id) } : e)) };
+}
+
+/** Haalt enkel op wat sinds de vorige keer veranderde; om de 5 minuten alles (ook wat verdween). */
+async function haalWijzigingen() {
+  const b = state.backend;
+  if (!b || rij.length) return;
+  if (!serverTijd || Date.now() - laatsteVolledig > 5 * 60000) return herlaad();
+  try {
+    // Een minuut overlap: een wijziging die net vóór de vorige keer begon maar later klaar was, valt er zo niet tussenuit.
+    const sinds = new Date(Date.parse(serverTijd) - 60000).toISOString();
+    const w = await b.laadWijzigingen(sinds);
+    if (!w) return; // oude database: enkel de volledige herlaad om de 5 minuten
+    if (rij.length) return;
+    const n = w.exemplaren.length + w.artikelen.length + w.beurzen.length + w.transacties.length;
+    if (!n) return;
+    const samen = <T extends { id: string }>(oud: T[], nieuw: T[]) => {
+      const per = new Map(nieuw.map((x) => [x.id, x]));
+      const uit = oud.map((x) => per.get(x.id) ?? x);
+      const bekend = new Set(oud.map((x) => x.id));
+      return [...uit, ...nieuw.filter((x) => !bekend.has(x.id))];
+    };
+    const alles = alleRijen();
+    serverTijd = laatsteTijd(w) ?? serverTijd;
+    zet({
+      ...splits({
+        exemplaren: samen(alles.exemplaren, w.exemplaren), artikelen: samen(alles.artikelen, w.artikelen),
+        beurzen: samen(alles.beurzen, w.beurzen), transacties: samen(alles.transacties, w.transacties),
+      }),
+      online: true,
+    });
+  } catch (e) {
+    if (sessieVerlopen()) naarLoginNaVerlopen();
+    else if (isNetwerkFout(e)) zet({ online: false });
+  }
+}
+
+/** Meldt dat je bezig bent (omgeving en scherm) en haalt op wie er nog bezig is. */
+export async function meldAanwezig() {
+  const b = state.backend;
+  if (!b || b.soort !== "supabase" || state.fase !== "klaar") return;
+  try {
+    const lijst = await b.meldAanwezig(state.omgeving, state.tab);
+    zet({ aanwezig: lijst });
+  } catch { /* niet erg: volgende keer */ }
 }
 
 /** Haalt de verse toestand van de server (bv. wat andere toestellen deden). Enkel als de wachtrij leeg is. */
 export async function herlaad() {
   if (!state.backend || rij.length) return;
   try {
-    const alles = await state.backend.laadAlles();
+    const [alles, omgevingen] = await Promise.all([state.backend.laadAlles(), state.backend.laadOmgevingen().catch(() => state.omgevingen)]);
     if (rij.length) return; // ondertussen iets gewijzigd: volgende keer
-    zet({ ...alles, online: true });
+    laatsteVolledig = Date.now();
+    serverTijd = laatsteTijd(alles);
+    if (omgevingen.length) {
+      // Pas nu omgevingen (de database werd net bijgewerkt)? Kies er dan een.
+      const omgeving = omgevingen.some((o) => o.id === state.omgeving) ? state.omgeving : omgevingen[0].id;
+      zet({ omgevingen, omgeving });
+    }
+    zet({ ...splits(behoudMarkering(alles)), online: true });
   } catch (e) {
-    if (isNetwerkFout(e)) zet({ online: false }); else fout(e);
+    if (sessieVerlopen()) naarLoginNaVerlopen();
+    else if (isNetwerkFout(e)) zet({ online: false }); else fout(e);
   }
 }
 
 export async function wisDemo() {
   DemoBackend.wis();
   localStorage.removeItem(PRIJSCHECK + "demo");
+  buiten = { exemplaren: [], artikelen: [], beurzen: [], transacties: [] };
   if (state.backend) localStorage.removeItem(rijSleutel(state.backend));
   rij = [];
   zet({ mandje: { regels: [] } });
@@ -421,13 +750,13 @@ function vervang(nieuw: Exemplaar[]) {
 /** Voegt exemplaren toe (meteen zichtbaar; de server volgt via de wachtrij). */
 export function voegToe(rijen: NieuwExemplaar[]): Exemplaar[] {
   if (!state.backend) throw new Error("Niet ingelogd");
-  const codes = new Set(state.exemplaren.map((e) => e.code));
+  const codes = alleCodes();
   for (const r of rijen) {
     if (codes.has(r.code)) throw new Error(`Code ${toonCode(r.code)} bestaat al`);
     codes.add(r.code);
   }
   const nu = new Date().toISOString();
-  const metId = rijen.map((r) => ({ ...r, id: r.id ?? uuid() }));
+  const metId = rijen.map((r) => ({ ...r, id: r.id ?? uuid(), ...(state.omgeving ? { omgeving_id: state.omgeving } : {}) }));
   const nieuw = metId.map((r) => standaardExemplaar(r, nu));
   zet({ exemplaren: [...state.exemplaren, ...nieuw] });
   inRij({ soort: "exemplarenNieuw", rijen: metId });
@@ -438,6 +767,8 @@ export function voegToe(rijen: NieuwExemplaar[]): Exemplaar[] {
 export function wijzig(id: string, wijziging: Partial<Exemplaar>, melding?: string, ongedaan = false): Exemplaar | undefined {
   const oud = state.exemplaren.find((e) => e.id === id);
   if (!oud) return;
+  // Naar de vault: dan moet er ook geen nieuw hartje meer op.
+  if (wijziging.opslag === "stockdoos" && oud.nieuw_hartje != null) wijziging = { ...wijziging, nieuw_hartje: null };
   const nieuw = metVitrineSinds(oud, { ...oud, ...wijziging, gewijzigd_op: new Date().toISOString() });
   vervang([nieuw]);
   inRij({ soort: "exemplaarWijzig", id, wijziging });
@@ -457,7 +788,7 @@ export function wijzigVeel(ids: string[], wijziging: Partial<Exemplaar>) {
 
 // ── Artikelen ────────────────────────────────────────────────────────────────
 export function voegArtikelToe(r: NieuwArtikel): Artikel {
-  const a = standaardArtikel({ ...r, id: r.id ?? uuid() });
+  const a = standaardArtikel({ ...r, id: r.id ?? uuid(), ...(state.omgeving ? { omgeving_id: state.omgeving } : {}) });
   zet({ artikelen: [...state.artikelen, a] });
   inRij({ soort: "artikelenNieuw", rijen: [a] });
   return a;
@@ -489,11 +820,6 @@ export async function importeerTestset() {
 }
 
 // ── Prijzen nakijken ─────────────────────────────────────────────────────────
-function bewaarPrijscheck(m: Map<string, TeWijzigen>, datum: string | null) {
-  if (!state.backend) return;
-  schrijf(PRIJSCHECK + state.backend.soort, { datum, items: [...m.values()] });
-}
-
 export async function doePrijscheck(): Promise<TeWijzigen[]> {
   zet({ bezig: "Prijzen nakijken…" });
   try {
@@ -503,10 +829,19 @@ export async function doePrijscheck(): Promise<TeWijzigen[]> {
       return [];
     }
     const lijst = prijscheck(state.exemplaren, gids, state.instellingen);
-    const m = new Map(lijst.map((t) => [t.id, t]));
-    zet({ gids, teWijzigen: m, prijscheckOp: vandaag() });
-    bewaarPrijscheck(m, vandaag());
-    meld(lijst.length ? `${lijst.length} hartjes moeten wisselen` : "Alle hartjes zijn nog goed", lijst.length ? "info" : "ok");
+    // Het resultaat gaat naar de database: zo zien alle toestellen dezelfde lijst, en de
+    // klantenpagina verbergt kaarten tot hun nieuwe hartje erop zit.
+    const per = new Map(lijst.map((t) => [t.id, t.nieuw]));
+    zet({
+      gids, prijscheckOp: vandaag(),
+      exemplaren: state.exemplaren.map((e) => {
+        const n = per.get(e.id) ?? null;
+        return (e.nieuw_hartje ?? null) === n ? e : { ...e, nieuw_hartje: n };
+      }),
+    });
+    if (state.backend) schrijf(PRIJSCHECK + state.backend.soort, { datum: vandaag() });
+    inRij({ soort: "prijzen", omgeving: state.omgeving, lijst: lijst.map((t) => ({ id: t.id, nieuw: t.nieuw })) });
+    meld(lijst.length ? `${lijst.length} ${lijst.length === 1 ? "hartje moet" : "hartjes moeten"} wisselen` : kies(HARTJES_OK), lijst.length ? "info" : "ok");
     return lijst;
   } finally { zet({ bezig: null }); }
 }
@@ -522,15 +857,9 @@ export async function vernieuwPrijsgids() {
 
 /** Nieuw hartje geschreven: prijs en datum bewaren, de kaart stopt met oplichten. */
 export function zetHartje(id: string, prijs: number, handmatig?: boolean) {
-  const w: Partial<Exemplaar> = { hartjesprijs: prijs, hartjesdatum: vandaag(), verkoopprijs: prijs };
+  const w: Partial<Exemplaar> = { hartjesprijs: prijs, hartjesdatum: vandaag(), verkoopprijs: prijs, nieuw_hartje: null };
   if (handmatig !== undefined) w.prijs_handmatig = handmatig;
-  const ok = wijzig(id, w, `Hartje van ${prijs} euro bewaard`, true);
-  if (ok && state.teWijzigen.has(id)) {
-    const m = new Map(state.teWijzigen);
-    m.delete(id);
-    zet({ teWijzigen: m });
-    bewaarPrijscheck(m, state.prijscheckOp);
-  }
+  wijzig(id, w, `Hartje van ${prijs} euro bewaard`, true);
 }
 
 // ── Labels ───────────────────────────────────────────────────────────────────
@@ -647,18 +976,43 @@ export function zetBezig(b: string | null) { zet({ bezig: b }); }
 // ── Beurs ────────────────────────────────────────────────────────────────────
 export const actieveBeurs = (s: State = state) => s.beurzen.find((b) => b.status === "actief") ?? null;
 
-export function startBeurs(gegevens: { naam: string; datum: string; startkas: number }): Beurs {
+export function startBeurs(gegevens: { naam: string; datum: string; startkas: number; locatie?: string | null; geplandId?: string | null }): Beurs {
   const al = actieveBeurs();
   if (al) throw new Error(`${al.naam} is nog bezig. Sluit die eerst af.`);
+  const gepland = gegevens.geplandId ? state.beurzen.find((x) => x.id === gegevens.geplandId) : null;
   const b: Beurs = {
-    id: uuid(), naam: gegevens.naam.trim() || `Beurs ${gegevens.datum}`, datum: gegevens.datum, standgeld: null,
+    ...(gepland ?? {}),
+    id: gepland?.id ?? uuid(), naam: gegevens.naam.trim() || `Beurs ${gegevens.datum}`, datum: gegevens.datum, standgeld: null,
     startkas: gegevens.startkas, status: "actief", gestart_op: new Date().toISOString(), afgesloten_op: null,
-    getelde_kas: null, sumup_bevestigd: false, stand_start: stand(state), stand_einde: null, opmerking: null,
+    getelde_kas: null, sumup_bevestigd: false, stand_start: stand(state), stand_einde: null, opmerking: gepland?.opmerking ?? null,
+    locatie: gegevens.locatie ?? gepland?.locatie ?? null, omgeving_id: state.omgeving,
   };
-  zet({ beurzen: [b, ...state.beurzen] });
+  zet({ beurzen: gepland ? state.beurzen.map((x) => (x.id === b.id ? b : x)) : [b, ...state.beurzen] });
   inRij({ soort: "beurs", beurs: b });
   meld(`${b.naam} gestart met ${gegevens.startkas} euro in de cashkoffer`);
   return b;
+}
+
+/** Een beurs alvast plannen: klanten zien ze bij "komende beurzen". */
+export function planBeurs(gegevens: { naam: string; datum: string; locatie: string | null }): Beurs {
+  const b: Beurs = {
+    id: uuid(), naam: gegevens.naam.trim() || `Beurs ${gegevens.datum}`, datum: gegevens.datum, standgeld: null, startkas: null,
+    status: "gepland", gestart_op: null, afgesloten_op: null, getelde_kas: null, sumup_bevestigd: false, stand_start: null,
+    stand_einde: null, opmerking: null, locatie: gegevens.locatie?.trim() || null, omgeving_id: state.omgeving,
+  };
+  zet({ beurzen: [b, ...state.beurzen] });
+  inRij({ soort: "beurs", beurs: b });
+  meld(`${b.naam} gepland`);
+  return b;
+}
+
+/** Een geplande beurs schrappen (gaat ze toch niet door). */
+export function schrapBeurs(id: string) {
+  const b = state.beurzen.find((x) => x.id === id);
+  if (!b || b.status !== "gepland") return;
+  zet({ beurzen: state.beurzen.filter((x) => x.id !== id) });
+  inRij({ soort: "beursWeg", id });
+  meld(`${b.naam} geschrapt`);
 }
 
 export function sluitBeurs(b: Beurs, geteld: { getelde_kas: number | null; sumup_bevestigd: boolean }): Beurs {
@@ -719,7 +1073,7 @@ export function mandjeLegen() {
 
 /** Boekt een transactie: meteen op dit toestel, daarna via de wachtrij naar de server. */
 function boek(t: Transactie): Transactie {
-  const r = pasToe(state, { ...t, beheerder: state.backend?.gebruikerId() ?? null });
+  const r = pasToe(state, { ...t, beheerder: state.backend?.gebruikerId() ?? null, omgeving_id: state.omgeving ?? t.omgeving_id ?? null });
   zet({ exemplaren: r.voorraad.exemplaren, artikelen: r.voorraad.artikelen, transacties: [...state.transacties, r.transactie] });
   inRij({ soort: "transactie", t: r.transactie });
   return r.transactie;

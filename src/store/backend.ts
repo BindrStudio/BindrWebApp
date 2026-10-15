@@ -1,4 +1,4 @@
-import type { Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Transactie } from "../types";
+import type { Aanwezig, Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Transactie } from "../types";
 
 export interface Beheerder {
   user_id: string;
@@ -12,12 +12,21 @@ export interface Alles {
   transacties: Transactie[];
 }
 
+/** Een prijscheck: welke hartjes moeten wisselen (de rest klopt). */
+export interface PrijsMarkering { id: string; nieuw: number }
+
 /** Waar de gegevens zitten: Supabase (echte voorraad) of de demo op dit toestel. */
 export interface Backend {
   soort: "supabase" | "demo";
   gebruiker(): Gebruiker;
   gebruikerId(): string | null;
   laadAlles(): Promise<Alles>;
+  /** Enkel wat sinds `sinds` (tijd van de server) veranderde; null als dat niet kan. */
+  laadWijzigingen(sinds: string): Promise<Alles | null>;
+  laadOmgevingen(): Promise<Omgeving[]>;
+  bewaarOmgeving(o: Omgeving): Promise<void>;
+  meldAanwezig(omgevingId: string | null, scherm: string): Promise<Aanwezig[]>;
+  markeerPrijzen(omgevingId: string | null, lijst: PrijsMarkering[]): Promise<void>;
   laadBeheerders(): Promise<Beheerder[]>;
   laadInstellingen(): Promise<Record<string, unknown>>;
   bewaarInstelling(sleutel: string, waarde: unknown): Promise<void>;
@@ -29,10 +38,15 @@ export interface Backend {
   wijzigArtikel(id: string, wijziging: Partial<Artikel>): Promise<Artikel>;
 
   bewaarBeurs(b: Beurs): Promise<Beurs>;
+  /** Een geplande beurs schrappen (enkel zolang ze niet gestart is). */
+  verwijderBeurs(id: string): Promise<void>;
   boekTransactie(t: Transactie): Promise<Transactie>;
   maakOngedaan(id: string): Promise<Transactie>;
   losConflictOp(id: string, oud: string, nieuw: string): Promise<Transactie>;
   aanvaardConflict(id: string, item: string): Promise<Transactie>;
+
+  /** Het wachtwoord (de pincode) van de ingelogde beheerder wijzigen. */
+  wijzigPincode(pin: string): Promise<void>;
 
   logUit(): Promise<void>;
 }

@@ -4,9 +4,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { INSTAGRAM, SUPABASE_KEY, SUPABASE_URL } from "../config";
+
+// De pagina staat op de hoofdlink (index.html) en, voor oude links, op /catalogus/.
+// Afbeeldingen en gegevens zoeken we relatief aan dit script (catalogus/app.js).
+const BASIS = new URL("../", import.meta.url).href;
 import { TALEN } from "../types";
 import { euro } from "../lib/format";
-import { kantel } from "../lib/kantel";
+import { kantel, kantelVrij } from "../lib/kantel";
+import { fotoBronnen, setLogo, type FotoKaart } from "../lib/foto";
+import { SetKiezer } from "../gedeeld/SetKiezer";
 import {
   groepeer, groepSleutel, isNieuw, pastFilters, pastZoek, perSet, SNELFILTERS, SORTERINGEN, setIdVan, sorteer, zoekTekst, zoekWoorden,
   type Groep, type SetInfo, type Snelfilter, type Sortering, type Toonbaar,
@@ -30,6 +36,7 @@ interface VitrineRij {
   grader: string | null;
   grade: string | null;
   prijs: number | string;
+  catalogus?: "en" | "asia" | null;
   sinds: string | null;       // datum van het hartje
   toegevoegd?: string | null; // sinds wanneer in de catalogus (nieuwer schema)
 }
@@ -41,7 +48,10 @@ interface Stuk extends Toonbaar {
   bron: "kaart" | "artikel";
   afbeelding: string | null;
   aantal: number;
+  catalogus?: "en" | "asia" | null;
 }
+
+interface KomendeBeurs { naam: string; datum: string; locatie: string | null }
 
 type Cat = "alles" | "singles" | "slabs" | "sealed" | "bindr";
 const CATS: { id: Cat; label: string }[] = [
@@ -60,6 +70,7 @@ function vanKaart(k: VitrineRij): Stuk {
     id: k.code, bron: "kaart", kaart_id: k.kaart_id, soort: k.soort, naam: k.naam, naam_origineel: k.naam_origineel,
     set_naam: k.set_naam, set_code: k.set_code, nummer: k.nummer, taal: k.taal, conditie: k.conditie, variant: k.variant || "normaal",
     grader: k.grader, grade: k.grade, prijs: Number(k.prijs), toegevoegd: k.toegevoegd ?? k.sinds, afbeelding: k.afbeelding, aantal: 1,
+    catalogus: k.catalogus ?? null,
   };
 }
 function vanArtikel(a: ArtikelRij): Stuk {
@@ -76,23 +87,31 @@ async function haal<T>(pad: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-interface Data { stukken: Stuk[]; instagram: string }
+interface Data { stukken: Stuk[]; instagram: string; beurzen: KomendeBeurs[] }
 
 /** Met ?demo=1 toont de pagina de demo van dit toestel (om te kijken hoe klanten het zien). */
 function laadDemo(): Data | null {
   if (!new URLSearchParams(location.search).has("demo")) return null;
   try {
     const d = JSON.parse(localStorage.getItem("bindr-demo-v1") || "null");
-    if (!d) return { stukken: [], instagram: INSTAGRAM };
-    type DemoEx = VitrineRij & { opslag: string; status: string; hartjesprijs: number | null; hartjesdatum: string | null; vitrine_sinds?: string | null };
+    if (!d) return { stukken: [], instagram: INSTAGRAM, beurzen: [] };
+    // Zoals de publieke weergaven: enkel aangevinkte omgevingen, en geen kaarten waarvan het hartje moet wisselen.
+    const zichtbaar = new Set(((d.omgevingen ?? []) as { id: string; zichtbaar_voor_klanten: boolean }[]).filter((o) => o.zichtbaar_voor_klanten).map((o) => o.id));
+    const toon = (r: { omgeving_id?: string | null }) => !zichtbaar.size || !r.omgeving_id || zichtbaar.has(r.omgeving_id);
+    type DemoEx = VitrineRij & { opslag: string; status: string; hartjesprijs: number | null; hartjesdatum: string | null; vitrine_sinds?: string | null; nieuw_hartje?: number | null; omgeving_id?: string | null };
     const kaarten = (d.exemplaren as DemoEx[])
-      .filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null)
+      .filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null && e.nieuw_hartje == null && toon(e))
       .map((e) => vanKaart({ ...e, prijs: e.hartjesprijs!, sinds: e.hartjesdatum, toegevoegd: e.vitrine_sinds ?? e.hartjesdatum }));
-    const artikelen = (d.artikelen as (ArtikelRij & { opslag: string })[])
-      .filter((a) => a.opslag === "vitrine" && a.aantal > 0 && a.prijs != null)
+    const artikelen = (d.artikelen as (ArtikelRij & { opslag: string; omgeving_id?: string | null })[])
+      .filter((a) => a.opslag === "vitrine" && a.aantal > 0 && a.prijs != null && toon(a))
       .map(vanArtikel);
     const ig = d.instellingen?.instagram;
-    return { stukken: [...kaarten, ...artikelen], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM };
+    const vandaag = new Date().toISOString().slice(0, 10);
+    const beurzen = ((d.beurzen ?? []) as (KomendeBeurs & { status: string; omgeving_id?: string | null })[])
+      .filter((b) => (b.status === "gepland" || b.status === "actief") && b.datum >= vandaag && toon(b))
+      .map((b) => ({ naam: b.naam, datum: b.datum, locatie: b.locatie ?? null }))
+      .sort((a, b) => a.datum.localeCompare(b.datum));
+    return { stukken: [...kaarten, ...artikelen], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, beurzen };
   } catch {
     return null;
   }
@@ -100,7 +119,6 @@ function laadDemo(): Data | null {
 
 const aantalVan = (g: Groep<Stuk>) => g.items.reduce((s, x) => s + x.aantal, 0);
 const igProfiel = (ig: string) => `https://www.instagram.com/${encodeURIComponent(ig)}/`;
-const igBericht = (ig: string) => `https://ig.me/m/${encodeURIComponent(ig)}`;
 
 // ── De pagina ────────────────────────────────────────────────────────────────
 
@@ -133,20 +151,22 @@ function Catalogus() {
   }, []);
 
   useEffect(() => {
-    fetch("../data/sets.json").then((r) => (r.ok ? r.json() : null)).then(setSets).catch(() => setSets(null));
+    fetch(`${BASIS}data/sets.json`).then((r) => (r.ok ? r.json() : null)).then(setSets).catch(() => setSets(null));
     if (demo) { setData(demo); return; }
     Promise.all([
       haal<VitrineRij[]>("publieke_vitrine?select=*"),
       haal<ArtikelRij[]>("publieke_artikelen?select=*").catch(() => []),
       haal<{ sleutel: string; waarde: unknown }[]>("publieke_instellingen?select=*").catch(() => []),
-    ]).then(([kaarten, artikelen, inst]) => {
+      haal<KomendeBeurs[]>("publieke_beurzen?select=*").catch(() => []),
+    ]).then(([kaarten, artikelen, inst, beurzen]) => {
       const ig = inst.find((x) => x.sleutel === "instagram")?.waarde;
-      setData({ stukken: [...kaarten.map(vanKaart), ...artikelen.map(vanArtikel)], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM });
+      setData({ stukken: [...kaarten.map(vanKaart), ...artikelen.map(vanArtikel)], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, beurzen });
     }).catch(() => setFout("De catalogus kon niet geladen worden. Probeer het straks opnieuw."));
   }, [demo]);
 
   const stukken = data?.stukken ?? [];
   const ig = data?.instagram ?? INSTAGRAM;
+  const beurzen = data?.beurzen ?? [];
 
   const telling = useMemo(() => {
     const t: Partial<Record<Cat, number>> = {};
@@ -200,11 +220,16 @@ function Catalogus() {
     <div className={`klant${balkWeg ? " balk-weg" : ""}`}>
       <header className="klant-balk">
         <a href="#" className="klant-merk" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); }} aria-label="Bind'r, naar boven">
-          <img src="../img/logo-woord.png" alt="Bind'r" width={150} height={66} />
+          <img src={`${BASIS}img/logo-woord.png`} alt="Bind'r" width={150} height={66} />
         </a>
-        <a className="klant-ig-knop" href={igProfiel(ig)} target="_blank" rel="noreferrer">
-          <IgIcoon /> <span>@{ig}</span>
-        </a>
+        <div className="klant-balk-rechts">
+          <a className="klant-ig-knop" href={igProfiel(ig)} target="_blank" rel="noreferrer" aria-label={`Instagram @${ig}`}>
+            <IgIcoon /> <span>@{ig}</span>
+          </a>
+          <a className="klant-beheer-knop" href={`${BASIS}beheer.html`} title="Beheer (enkel voor Bind'r)">
+            <SlotIcoon /> <span>Beheer</span>
+          </a>
+        </div>
       </header>
 
       <section className="klant-held">
@@ -228,7 +253,7 @@ function Catalogus() {
             </div>
           )}
           <span className="held-bel" />
-          <img className="held-eend" src="../img/eend.png" alt="" width={180} height={180} />
+          <img className="held-eend" src={`${BASIS}img/eend.png`} alt="" width={180} height={180} />
           <span className="held-ster s1"><Sparkel /></span>
           <span className="held-ster s2"><Sparkel /></span>
           <span className="held-ster s3"><Sparkel /></span>
@@ -279,12 +304,7 @@ function Catalogus() {
             </div>
             <div className="chips" aria-label="Filters">
               {setLijst.length > 1 && (
-                <label className={`chip setkeuze${set ? " aan" : ""}`}>
-                  <select value={set} onChange={(e) => setSet(e.target.value)} aria-label="Set">
-                    <option value="">Alle sets</option>
-                    {setLijst.map((s) => <option key={s.id} value={s.id}>{s.naam} ({s.aantal})</option>)}
-                  </select>
-                </label>
+                <SetKiezer sets={setLijst.map((x) => ({ ...x, logo: setLogo(x.id, sets?.[x.id]), code: sets?.[x.id]?.[1] || null }))} gekozen={set} onKies={setSet} />
               )}
               {SNELFILTERS.map((f) => (
                 <button key={f.id} className={`chip schakelchip${filters.has(f.id) ? " aan" : ""}`} aria-pressed={filters.has(f.id)} onClick={() => wissel(f.id)}>
@@ -300,7 +320,7 @@ function Catalogus() {
 
           {!groepen.length ? (
             <div className="klant-leeg">
-              <img src="../img/eend.png" alt="" width={96} height={96} />
+              <img src={`${BASIS}img/eend.png`} alt="" width={96} height={96} />
               <p>{stukken.length ? "Niets gevonden met deze filters. Haal er een weg:" : "De catalogus is nog leeg. Kom zeker eens langs op de beurs!"}</p>
               {actief > 0 && (
                 <div className="actieve-filters">
@@ -334,9 +354,9 @@ function Catalogus() {
         </>
       )}
 
-      <Voet ig={ig} />
+      <Voet ig={ig} beurzen={beurzen} />
 
-      {open && <Detail g={open} ig={ig} onSluit={() => setOpen(null)} />}
+      {open && <Detail g={open} beurzen={beurzen} onSluit={() => setOpen(null)} />}
       {data && <Eend ig={ig} verborgen={!!open || zoekFocus || !groepen.length} />}
     </div>
   );
@@ -354,7 +374,7 @@ function KlantTegel({ g, i, onOpen }: { g: Groep<Stuk>; i: number; onOpen: () =>
       aria-label={`${s.naam}, ${euro(s.prijs)}${n > 1 ? `, ${n} stuks` : ""}`}>
       {s.bron === "artikel"
         ? <div className={`artikel-vlak ${s.soort === "eigen product" ? "bindr" : "sealed"}`}><span className="artikel-glyph">{s.soort === "eigen product" ? "B" : "✦"}</span><span className="glans" /></div>
-        : <Foto src={s.afbeelding} alt={s.naam} />}
+        : <Foto kaart={s} alt={s.naam} />}
       {n > 1 && <span className="aantal-merk" aria-hidden="true">×{n}</span>}
       {nieuw && <span className="nieuw-merk">Nieuw</span>}
       <div className="tegel-info">
@@ -373,17 +393,28 @@ function KlantTegel({ g, i, onOpen }: { g: Groep<Stuk>; i: number; onOpen: () =>
   );
 }
 
-function Foto({ src, alt, groot = false }: { src: string | null; alt: string; groot?: boolean }) {
+/** Kaartfoto met reservebronnen (TCGdex, dan Limitless, dan pokemontcg.io). */
+function Foto({ kaart, alt, groot = false }: { kaart: FotoKaart; alt: string; groot?: boolean }) {
+  const bronnen = useMemo(() => fotoBronnen(kaart, groot ? "groot" : "klein"), [kaart.afbeelding, kaart.set_code, kaart.nummer, kaart.kaart_id, groot]);
+  const [i, setI] = useState(0);
+  const bron = bronnen[i];
   return (
     <div className="foto">
-      {src && <img src={groot ? src.replace("/low.webp", "/high.webp") : src} alt={alt} loading="lazy" decoding="async" onLoad={(e) => e.currentTarget.classList.add("geladen")} onError={(e) => { e.currentTarget.style.display = "none"; }} />}
+      {bron && <img key={bron} src={bron} alt={alt} loading="lazy" decoding="async" onLoad={(e) => e.currentTarget.classList.add("geladen")} onError={() => setI((x) => x + 1)} />}
       <span className="foto-reserve">{alt.slice(0, 1)}</span>
       <span className="glans" />
     </div>
   );
 }
 
-function Detail({ g, ig, onSluit }: { g: Groep<Stuk>; ig: string; onSluit: () => void }) {
+const MAANDEN = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
+const DAGEN = ["zo", "ma", "di", "wo", "do", "vr", "za"];
+function datumMooi(iso: string): string {
+  const d = new Date(iso + "T12:00:00");
+  return `${DAGEN[d.getDay()]} ${d.getDate()} ${MAANDEN[d.getMonth()]}`;
+}
+
+function Detail({ g, beurzen, onSluit }: { g: Groep<Stuk>; beurzen: KomendeBeurs[]; onSluit: () => void }) {
   const s = g.eerste;
   const n = aantalVan(g);
   useEffect(() => {
@@ -404,9 +435,9 @@ function Detail({ g, ig, onSluit }: { g: Groep<Stuk>; ig: string; onSluit: () =>
           <div className="klant-detail">
             <div className="klant-detail-links">
             {s.bron === "kaart" ? (
-              <div className={`klant-detail-foto${s.prijs >= 50 ? " holo" : ""}`} {...kantel}><Foto src={s.afbeelding} alt={s.naam} groot /></div>
+              <div className={`klant-detail-foto zweeft${s.prijs >= 50 ? " holo" : ""}`}><div className="kantel-vlak" {...kantelVrij}><Foto kaart={s} alt={s.naam} groot /></div></div>
             ) : (
-              <div className="klant-detail-foto"><div className={`artikel-vlak ${s.soort === "eigen product" ? "bindr" : "sealed"}`}><span className="artikel-glyph">{s.soort === "eigen product" ? "B" : "✦"}</span></div></div>
+              <div className="klant-detail-foto zweeft"><div className={`artikel-vlak ${s.soort === "eigen product" ? "bindr" : "sealed"}`}><span className="artikel-glyph">{s.soort === "eigen product" ? "B" : "✦"}</span></div></div>
             )}
             </div>
             <div className="klant-detail-rechts">
@@ -432,13 +463,15 @@ function Detail({ g, ig, onSluit }: { g: Groep<Stuk>; ig: string; onSluit: () =>
                 </>
               )}
             </dl>
-            <p className="klant-vraag">Interesse? Kom langs aan onze stand, of stuur ons een berichtje op Instagram.</p>
             </div>
           </div>
         </div>
         <div className="klant-detail-balk">
           <Prijs p={s.prijs} groot />
-          <a className="knop ig-knop" href={igBericht(ig)} target="_blank" rel="noreferrer"><IgIcoon /> Bericht op Instagram</a>
+          <div className="detail-stand">
+            <strong>Interesse? Vraag ernaar aan onze stand.</strong>
+            <span>{beurzen.length ? <>Volgende beurs: {beurzen[0].naam}, {datumMooi(beurzen[0].datum)}{beurzen[0].locatie ? ` · ${beurzen[0].locatie}` : ""}</> : "Je vindt ons op de komende beurzen."}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -456,9 +489,22 @@ function Prijs({ p, groot = false }: { p: number; groot?: boolean }) {
 
 // ── Instagram: onderaan de pagina en de eend ─────────────────────────────────
 
-function Voet({ ig }: { ig: string }) {
+function Voet({ ig, beurzen }: { ig: string; beurzen: KomendeBeurs[] }) {
   return (
     <footer className="klant-voet">
+      <section className="komende-beurzen">
+        <h2>Bezoek onze stand</h2>
+        {beurzen.length ? (
+          <ul>
+            {beurzen.slice(0, 6).map((b) => (
+              <li key={b.datum + b.naam}>
+                <span className="beurs-datum"><strong>{new Date(b.datum + "T12:00:00").getDate()}</strong><em>{MAANDEN[new Date(b.datum + "T12:00:00").getMonth()]}</em></span>
+                <span className="beurs-tekst"><strong>{b.naam}</strong>{b.locatie && <span>{b.locatie}</span>}</span>
+              </li>
+            ))}
+          </ul>
+        ) : <p>De volgende beurzen staan binnenkort hier. Volg ons op Instagram om niets te missen.</p>}
+      </section>
       <a className="ig-blok" href={igProfiel(ig)} target="_blank" rel="noreferrer">
         <span className="ig-blok-icoon"><IgIcoon maat={28} /></span>
         <span className="ig-blok-tekst">
@@ -467,7 +513,7 @@ function Voet({ ig }: { ig: string }) {
         </span>
         <span className="ig-blok-pijl" aria-hidden="true">→</span>
       </a>
-      <img src="../img/logo-woord.png" alt="Bind'r" className="voet-logo" width={120} height={53} />
+      <img src={`${BASIS}img/logo-woord.png`} alt="Bind'r" className="voet-logo" width={120} height={53} />
       <p>Collectibles · Crafts · 3D prints</p>
       <p className="zacht">Prijzen in euro, zolang de voorraad strekt.</p>
     </footer>
@@ -519,7 +565,7 @@ function Eend({ ig, verborgen }: { ig: string; verborgen: boolean }) {
         </>
       )}
       <button className="eend-knop" onClick={() => setOpen(!open)} aria-label={open ? "Ballon dichtklappen" : "Wat zegt de eend?"}>
-        <img className="eend-beeld" src="../img/eend.png" alt="" width={96} height={96} />
+        <img className="eend-beeld" src={`${BASIS}img/eend.png`} alt="" width={96} height={96} />
       </button>
     </aside>
   );
@@ -530,6 +576,7 @@ function Eend({ ig, verborgen }: { ig: string; verborgen: boolean }) {
 function Svg({ maat = 20, children }: { maat?: number; children: ReactNode }) {
   return <svg width={maat} height={maat} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>;
 }
+const SlotIcoon = () => <Svg maat={16}><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></Svg>;
 const IgIcoon = ({ maat = 20 }: { maat?: number }) => <Svg maat={maat}><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><circle cx="12" cy="12" r="4" /><path d="M17 7h.01" /></Svg>;
 const ZoekIcoon = () => <Svg maat={18}><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></Svg>;
 const SorteerIcoon = () => <Svg maat={18}><path d="M7 4v16M3.5 16.5 7 20l3.5-3.5M17 20V4M13.5 7.5 17 4l3.5 3.5" /></Svg>;

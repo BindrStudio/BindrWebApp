@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  actieveBeurs, afrekenen, bodToepassen, huidig, inMandje, mandjeLegen, meld, ongedaanMaken, openTransactie, print, totaalAanpassen,
-  useApp, verwijderRegel, wijzigRegel,
+  actieveBeurs, afrekenen, alleCodes, bodToepassen, huidig, inMandje, mandjeLegen, meld, ongedaanMaken, openTransactie, print, totaalAanpassen,
+  useApp, verwijderRegel, wijzigRegel, zetInstellingen,
 } from "../state";
 import type { Artikel, CatalogusKaart, Exemplaar, Regel, Transactie } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
 import { inVoorraad } from "../lib/exemplaar";
-import { beursCijfers, netto, regelArtikelUit, regelIn, regelUit, totaalIn, totaalUit, type Betaling } from "../lib/kassa";
-import { euro, getal, zonderAccenten } from "../lib/format";
+import { beursCijfers, marge, netto, regelArtikelUit, regelIn, regelUit, totaalIn, totaalUit, type Betaling } from "../lib/kassa";
+import { datumKort, euro, getal, vandaag, zonderAccenten } from "../lib/format";
 import { nieuweCode, toonCode } from "../lib/code";
 import { afbeelding } from "../lib/catalog";
+import { uitCatalogus } from "../lib/foto";
 import { voorstelVoor } from "../lib/pricing";
 import { tril } from "../lib/camera";
 import { uuid } from "../lib/uuid";
@@ -17,17 +18,19 @@ import { Badges, Hartje, Icoon, KaartFoto, Kiezer, Leeg, Segment, Sheet, Veld } 
 import { MandjeActie } from "./MandjeActie";
 import { Scanner, type FotoResultaat } from "./Scan";
 import { KiesKaart } from "./Toevoegen";
-import { BeursAfsluiten, BeursStart, TransactiesLijst } from "./Beurs";
+import { BeursAfsluiten, BeursStart, geplandeBeurzen, TransactiesLijst } from "./Beurs";
 import { MarktBlok } from "./Markt";
 import { bodVoorstellen, marktwaarde, procentVan } from "../lib/bod";
+import { GELUKT, kies, MANDJE_LEEG } from "../lib/grapjes";
 
-type Paneel = null | "scan" | "zoek" | "artikel" | "klantkaart" | "afrekenen" | "start" | "afsluiten" | "transacties";
+type Paneel = null | "scan" | "zoek" | "artikel" | "klantkaart" | "afrekenen" | "start" | "plan" | "afsluiten" | "transacties";
 
 export function Kassa() {
   const s = useApp();
   const beurs = actieveBeurs(s);
   const [paneel, setPaneel] = useState<Paneel>(null);
   const [klaar, setKlaar] = useState<{ t: Transactie; wisselgeld: number | null } | null>(null);
+  const [leegTekst] = useState(() => kies(MANDJE_LEEG));
   const regels = s.mandje.regels;
   const uit = regels.map((r, i) => ({ r, i })).filter((x) => x.r.richting === "uit");
   const binnen = regels.map((r, i) => ({ r, i })).filter((x) => x.r.richting === "in");
@@ -50,7 +53,7 @@ export function Kassa() {
         </div>
       </header>
 
-      <BeursBalk onStart={() => setPaneel("start")} onAfsluiten={() => setPaneel("afsluiten")} />
+      <BeursBalk onStart={() => setPaneel("start")} onPlan={() => setPaneel("plan")} onAfsluiten={() => setPaneel("afsluiten")} />
 
       {klaar ? (
         <Gelukt t={klaar.t} wisselgeld={klaar.wisselgeld} onVolgende={() => setKlaar(null)} />
@@ -58,12 +61,19 @@ export function Kassa() {
         <>
           <section className="mandje-kant">
             <div className="kant-kop">
-              <h2>Wij geven</h2>
-              {regels.length > 0 && <button className="tekstknop klein" onClick={mandjeLegen}>Leegmaken</button>}
+              <div>
+                <h2>Uit onze voorraad</h2>
+                <span className="zacht klein">wat de klant meeneemt</span>
+              </div>
+              <div className="kant-kop-knoppen">
+                <MargeKnop />
+                {regels.length > 0 && <button className="tekstknop klein" onClick={mandjeLegen}>Leegmaken</button>}
+              </div>
             </div>
             {uit.length === 0 && <p className="zacht klein kant-leeg">Scan het label achteraan de toploader, of zoek de kaart.</p>}
             {uit.map(({ r, i }) => <RegelRij key={i} r={r} i={i} />)}
             {uit.length > 1 && <TotaalRij richting="uit" totaal={totaalUit(regels)} />}
+            {s.instellingen.toonMarge && uit.length > 0 && <MargeRij regels={regels} />}
             <div className="kant-knoppen">
               <button className="knop" onClick={() => setPaneel("scan")}><Icoon naam="scan" maat={18} /> Scan</button>
               <button className="knop zacht" onClick={() => setPaneel("zoek")}><Icoon naam="zoek" maat={18} /> Zoek</button>
@@ -73,8 +83,10 @@ export function Kassa() {
 
           <section className="mandje-kant klant">
             <div className="kant-kop">
-              <h2>Wij krijgen</h2>
-              <span className="zacht klein">bij ruil of inkoop</span>
+              <div>
+                <h2>Van de klant</h2>
+                <span className="zacht klein">kaarten die wij krijgen, bij ruil of inkoop</span>
+              </div>
             </div>
             {binnen.map(({ r, i }) => <RegelRij key={i} r={r} i={i} />)}
             {binnen.some((x) => (x.r.referentie ?? 0) > 0)
@@ -95,7 +107,7 @@ export function Kassa() {
               <button className="knop groot" onClick={() => setPaneel("afrekenen")}>Afrekenen</button>
             </div>
           ) : (
-            <Leeg titel="Het mandje is leeg" tekst="Scan een kaart om te verkopen, of voeg kaarten van de klant toe voor een ruil of inkoop." />
+            <Leeg titel="Het mandje is leeg" tekst={leegTekst} />
           )}
         </>
       )}
@@ -106,24 +118,30 @@ export function Kassa() {
       {paneel === "klantkaart" && <KlantKaart onSluit={naKlantKaarten} />}
       {paneel === "afrekenen" && <Afrekenen onSluit={sluit} onKlaar={(t, w) => { sluit(); setKlaar({ t, wisselgeld: w }); }} />}
       {paneel === "start" && <BeursStart onSluit={sluit} />}
+      {paneel === "plan" && <BeursStart plannen onSluit={sluit} />}
       {paneel === "afsluiten" && beurs && <BeursAfsluiten beurs={beurs} onSluit={sluit} />}
       {paneel === "transacties" && <TransactiesLijst beursId={beurs?.id ?? null} onSluit={sluit} />}
     </div>
   );
 }
 
-function BeursBalk({ onStart, onAfsluiten }: { onStart: () => void; onAfsluiten: () => void }) {
+function BeursBalk({ onStart, onPlan, onAfsluiten }: { onStart: () => void; onPlan: () => void; onAfsluiten: () => void }) {
   const s = useApp();
   const beurs = actieveBeurs(s);
   const cijfers = useMemo(() => (beurs ? beursCijfers(beurs, s.transacties.filter((t) => t.beurs_id === beurs.id)) : null), [beurs, s.transacties]);
   if (!beurs || !cijfers) {
+    const volgende = geplandeBeurzen(s.beurzen)[0];
+    const isVandaag = volgende?.datum === vandaag();
     return (
       <div className="beurs-balk leeg">
         <div>
           <strong>Geen beurs bezig</strong>
-          <span className="zacht klein">Start een beurs om de cashkoffer en SumUp bij te houden.</span>
+          {volgende
+            ? <span className="beurs-volgende">{isVandaag ? "Vandaag" : "Volgende"}: {volgende.naam} · {datumKort(volgende.datum)}</span>
+            : <span className="zacht klein">Start een beurs om de cashkoffer en SumUp bij te houden.</span>}
+          <button className="tekstknop klein" onClick={onPlan}>Beurs plannen</button>
         </div>
-        <button className="knop klein" onClick={onStart}>Beurs starten</button>
+        <button className="knop klein" onClick={onStart}>{isVandaag ? "Starten" : "Beurs starten"}</button>
       </div>
     );
   }
@@ -139,7 +157,8 @@ function BeursBalk({ onStart, onAfsluiten }: { onStart: () => void; onAfsluiten:
 }
 
 function RegelRij({ r, i }: { r: Regel; i: number }) {
-  const { exemplaren } = useApp();
+  const { exemplaren, instellingen } = useApp();
+  const toonMarge = !!instellingen.toonMarge;
   const ex = r.exemplaar_id ? exemplaren.find((e) => e.id === r.exemplaar_id) : null;
   const beeld = ex?.afbeelding ?? r.nieuw?.afbeelding ?? null;
   const [bewerk, setBewerk] = useState(false);
@@ -152,7 +171,7 @@ function RegelRij({ r, i }: { r: Regel; i: number }) {
   };
   return (
     <div className={`regel ${r.richting}`}>
-      {r.artikel_id ? <div className="regel-icoon"><Icoon naam={r.richting === "in" ? "stapel" : "doos"} maat={22} /></div> : <KaartFoto src={beeld} alt={r.naam} klein />}
+      {r.artikel_id ? <div className="regel-icoon"><Icoon naam={r.richting === "in" ? "stapel" : "doos"} maat={22} /></div> : <KaartFoto src={beeld} alt={r.naam} klein kaart={ex ?? r.nieuw ?? undefined} />}
       <div className="regel-tekst">
         <strong>{r.naam}</strong>
         <span className="zacht klein">
@@ -161,6 +180,11 @@ function RegelRij({ r, i }: { r: Regel; i: number }) {
           {r.nieuw && <> · {[r.nieuw.set_code, r.nieuw.nummer].filter(Boolean).join(" ")} {r.nieuw.conditie} {r.nieuw.taal !== "EN" ? r.nieuw.taal : ""}</>}
           {r.referentie != null && <> · ref. {euro(r.referentie)}</>}
         </span>
+        {toonMarge && r.richting === "uit" && !r.artikel_id && (
+          r.aankoopprijs != null
+            ? <span className={`regel-marge${r.prijs - r.aankoopprijs < 0 ? " min" : ""}`}>inkoop {euro(r.aankoopprijs)} · {plusMin(r.prijs - r.aankoopprijs)}</span>
+            : <span className="regel-marge onbekend">inkoop niet ingevuld</span>
+        )}
         {r.artikel_id && r.richting === "uit" && (
           <span className="stapper klein">
             <button onClick={() => {
@@ -192,6 +216,31 @@ function RegelRij({ r, i }: { r: Regel; i: number }) {
         )}
       </div>
       <button className="rond-knop" onClick={() => verwijderRegel(i)} aria-label="Uit het mandje"><Icoon naam="kruis" maat={16} /></button>
+    </div>
+  );
+}
+
+const plusMin = (x: number) => `${x < 0 ? "−" : "+"}${euro(Math.abs(Math.round(x * 100) / 100))}`.replace(/\s/g, "\u00a0");
+
+/** Oogje: inkoopprijzen en marge tonen of verbergen (enkel op deze gsm, standaard verborgen voor wie meekijkt). */
+function MargeKnop() {
+  const { instellingen } = useApp();
+  const aan = !!instellingen.toonMarge;
+  return (
+    <button className={`marge-knop${aan ? " aan" : ""}`} onClick={() => zetInstellingen({ toonMarge: !aan })} aria-pressed={aan}
+      title={aan ? "Inkoopprijzen verbergen" : "Inkoopprijzen tonen"}>
+      <Icoon naam="oog" maat={16} /> Inkoop
+    </button>
+  );
+}
+
+function MargeRij({ regels }: { regels: Regel[] }) {
+  const m = marge(regels);
+  if (!m.gekend) return <p className="marge-rij onbekend">Geen aankoopprijs gekend: geen marge te tonen.</p>;
+  return (
+    <div className={`marge-rij${m.winst < 0 ? " min" : ""}`}>
+      <span>Marge{m.onbekend ? ` (${m.gekend} van ${m.gekend + m.onbekend})` : ""}</span>
+      <strong>{plusMin(m.winst)}{m.pct != null && <small> · {m.pct > 0 ? "+" : ""}{m.pct}%</small>}</strong>
     </div>
   );
 }
@@ -370,7 +419,7 @@ function FotoKeuze({ r, onKies, onWeg }: { r: FotoResultaat; onKies: (ex: Exempl
       <div className="scan-keuzes">
         {!kaart && r.kandidaten.slice(0, 5).map((k) => (
           <button key={k.id} className="scan-keuze" onClick={() => setKaart(k)}>
-            <KaartFoto src={afbeelding(k)} alt={k.naam} klein />
+            <KaartFoto src={afbeelding(k)} alt={k.naam} klein kaart={uitCatalogus(k)} />
             <span><strong>{k.naam}</strong><em>{k.setCode || k.setId} {k.nummer}</em></span>
           </button>
         ))}
@@ -408,7 +457,7 @@ function VoorraadZoeker({ onSluit }: { onSluit: () => void }) {
         {resultaten.map((e) => (
           <li key={e.id} className={open === e.id ? "open" : ""}>
             <button onClick={() => setOpen(open === e.id ? null : e.id)}>
-              <KaartFoto src={e.afbeelding} alt={e.naam} klein />
+              <KaartFoto src={e.afbeelding} alt={e.naam} klein kaart={e} />
               <span className="res-tekst">
                 <strong>{e.naam}</strong>
                 <span className="zacht">{[e.set_code, e.nummer].filter(Boolean).join(" ")} · <span className="code">{toonCode(e.code)}</span></span>
@@ -496,7 +545,7 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart 
   const toevoegen = () => {
     if (!v.naam.trim()) return meld("Vul een naam in", "fout");
     const s = huidig();
-    const codes = new Set([...s.exemplaren.map((e) => e.code), ...s.mandje.regels.map((r) => r.nieuw?.code).filter(Boolean) as string[]]);
+    const codes = new Set([...alleCodes(), ...s.mandje.regels.map((r) => r.nieuw?.code).filter(Boolean) as string[]]);
     const naamOrigineel = kaart?.catalogus === "asia" ? (v.taal.startsWith("CN") ? kaart.naamZhTw || kaart.naamZhCn || kaart.naamJa : kaart.naamJa || kaart.naamZhTw) || null : null;
     const nieuw = {
       id: uuid(), code: nieuweCode(codes), soort: "kaart" as const, naam: v.naam.trim(), naam_origineel: naamOrigineel,
@@ -515,7 +564,7 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart 
     <div className="formulier">
       {kaart ? (
         <div className="gekozen">
-          <KaartFoto src={afbeelding(kaart)} alt={kaart.naam} klein />
+          <KaartFoto src={afbeelding(kaart)} alt={kaart.naam} klein kaart={uitCatalogus(kaart)} />
           <div>
             <strong>{kaart.naam}</strong>
             <div className="zacht">{kaart.setNaam} · {kaart.setCode || kaart.setId} {kaart.nummer}</div>
@@ -563,7 +612,7 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart 
 // ── Afrekenen ────────────────────────────────────────────────────────────────
 
 function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Transactie, wisselgeld: number | null) => void }) {
-  const { mandje } = useApp();
+  const { mandje, instellingen } = useApp();
   const regels = mandje.regels;
   const n = netto(regels);
   const [wijze, setWijze] = useState<"cash" | "sumup" | "beide">("cash");
@@ -608,10 +657,11 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
   return (
     <Sheet titel="Afrekenen" onSluit={onSluit}>
       <div className="afreken-overzicht">
-        {totaalUit(regels) > 0 && <div><span>Wij geven</span><strong>{euro(totaalUit(regels))}</strong></div>}
-        {regels.some((r) => r.richting === "in") && <div><span>Wij krijgen</span><strong>− {euro(totaalIn(regels))}</strong></div>}
-        <div className="afreken-netto"><span>{n > 0 ? "Klant betaalt" : n < 0 ? "Wij betalen terug" : "Te betalen"}</span><strong>{euro(Math.abs(n))}</strong></div>
+        {totaalUit(regels) > 0 && <div><span>Uit onze voorraad</span><strong>{euro(totaalUit(regels))}</strong></div>}
+        {regels.some((r) => r.richting === "in") && <div><span>Van de klant</span><strong>− {euro(totaalIn(regels))}</strong></div>}
+        <div className="afreken-netto"><span>{n > 0 ? "Klant betaalt" : n < 0 ? "Wij betalen de klant" : "Te betalen"}</span><strong>{euro(Math.abs(n))}</strong></div>
       </div>
+      {instellingen.toonMarge && totaalUit(regels) > 0 && <MargeRij regels={regels} />}
 
       {waarschuwingen.length > 0 && (
         <div className="waarschuwing">
@@ -666,6 +716,7 @@ function Gelukt({ t, wisselgeld, onVolgende }: { t: Transactie; wisselgeld: numb
     <div className="gelukt">
       <img src="img/eend.png" alt="" width={110} height={110} />
       <h2>{huidigT.status === "ongedaan" ? "Ongedaan gemaakt" : titel}</h2>
+      {huidigT.status !== "ongedaan" && <p className="gelukt-grapje">{kies(GELUKT[t.soort], t.id)}</p>}
       <p className="gelukt-bedrag">
         {t.totaal > 0 ? `${euro(t.totaal)} ontvangen` : t.totaal < 0 ? `${euro(-t.totaal)} uitbetaald` : "zonder geld"}
         {t.cash > 0 && t.sumup > 0 && <span className="zacht"> ({euro(t.cash)} cash, {euro(t.sumup)} SumUp)</span>}

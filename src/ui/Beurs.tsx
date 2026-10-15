@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   actieveBeurs, bewaarBeurs, conflictAanvaarden, conflictOplossen, huidig, meld, ongedaanMaken, openBeurs, openExemplaar,
-  openTransactie, retour, sluit, sluitBeurs, startBeurs, useApp,
+  openTransactie, planBeurs, retour, schrapBeurs, sluit, sluitBeurs, startBeurs, useApp,
 } from "../state";
 import type { Beurs, Regel, Stand, Transactie } from "../types";
 import { beursCijfers, stand } from "../lib/kassa";
@@ -15,31 +15,104 @@ const SOORT_NAAM: Record<Transactie["soort"], string> = { verkoop: "Verkoop", ru
 
 // ── Beurs starten en afsluiten ───────────────────────────────────────────────
 
-export function BeursStart({ onSluit }: { onSluit: () => void }) {
+/** Komende beurzen van deze omgeving, de eerste eerst. */
+export function geplandeBeurzen(beurzen: Beurs[]): Beurs[] {
+  const nu = vandaag();
+  return beurzen.filter((b) => b.status === "gepland" && b.datum >= nu).sort((a, b) => a.datum.localeCompare(b.datum));
+}
+
+/**
+ * Een beurs starten (met de cashkoffer) of enkel plannen: geplande beurzen verschijnen
+ * op de klantenpagina bij "Bezoek onze stand". Starten kan vanuit een geplande beurs.
+ */
+export function BeursStart({ onSluit, plannen = false }: { onSluit: () => void; plannen?: boolean }) {
   const s = useApp();
   const st = stand(s);
-  const [v, setV] = useState({ naam: "", datum: vandaag(), startkas: "" });
+  const gepland = geplandeBeurzen(s.beurzen);
+  const vandaagGepland = gepland.find((b) => b.datum === vandaag());
+  const [gekozen, setGekozen] = useState<string | null>(plannen ? null : vandaagGepland?.id ?? null);
+  const basis = gepland.find((b) => b.id === gekozen);
+  const [v, setV] = useState({
+    naam: basis?.naam ?? "", datum: basis?.datum ?? vandaag(), locatie: basis?.locatie ?? "", startkas: "",
+  });
+  const kies = (b: Beurs | null) => {
+    setGekozen(b?.id ?? null);
+    setV({ ...v, naam: b?.naam ?? "", datum: b?.datum ?? vandaag(), locatie: b?.locatie ?? "" });
+  };
   const kas = getal(v.startkas);
   return (
-    <Sheet titel="Beurs starten" onSluit={onSluit}>
+    <Sheet titel={plannen ? "Beurs plannen" : "Beurs starten"} onSluit={onSluit}>
       <div className="formulier">
-        <Veld label="Naam"><input value={v.naam} onChange={(e) => setV({ ...v, naam: e.target.value })} placeholder="bv. Beurs Gent" autoFocus /></Veld>
-        <Veld label="Datum"><input type="date" value={v.datum} onChange={(e) => setV({ ...v, datum: e.target.value })} /></Veld>
-        <Veld label="Startbedrag in de cashkoffer (€)" hint="Tel het geld in de koffer en vul het exacte bedrag in.">
-          <input inputMode="decimal" value={v.startkas} onChange={(e) => setV({ ...v, startkas: e.target.value })} placeholder="150" />
-        </Veld>
-        <div className="stand-blok">
-          <span className="zacht klein">De app noteert nu de stand bij de start</span>
-          <StandRij st={st} />
+        {!plannen && gepland.length > 0 && (
+          <Veld label="Gepland">
+            <div className="kiezer">
+              {gepland.slice(0, 4).map((b) => (
+                <button key={b.id} type="button" className={`chip${gekozen === b.id ? " aan" : ""}`} onClick={() => kies(gekozen === b.id ? null : b)}>
+                  {b.naam} · {datumKort(b.datum)}
+                </button>
+              ))}
+            </div>
+          </Veld>
+        )}
+        <Veld label="Naam"><input value={v.naam} onChange={(e) => setV({ ...v, naam: e.target.value })} placeholder="bv. Beurs Gent" autoFocus={!basis} /></Veld>
+        <div className="twee">
+          <Veld label="Datum"><input type="date" value={v.datum} onChange={(e) => setV({ ...v, datum: e.target.value })} /></Veld>
+          <Veld label="Plaats"><input value={v.locatie} onChange={(e) => setV({ ...v, locatie: e.target.value })} placeholder="bv. ICC Gent" /></Veld>
         </div>
-        <button className="knop groot" disabled={kas == null || kas < 0} onClick={() => {
-          try {
-            startBeurs({ naam: v.naam || `Beurs ${datumKort(v.datum)}`, datum: v.datum, startkas: kas! });
-            onSluit();
-          } catch (e) { meld((e as Error).message, "fout"); }
-        }}>Beurs starten</button>
+        {plannen ? (
+          <>
+            <p className="zacht klein">Klanten zien geplande beurzen op de klantenpagina, bij "Bezoek onze stand". Op de dag zelf start je hem met één tik.</p>
+            <button className="knop groot" disabled={!v.naam.trim() || v.datum < vandaag()} onClick={() => {
+              planBeurs({ naam: v.naam, datum: v.datum, locatie: v.locatie });
+              onSluit();
+            }}>Beurs plannen</button>
+          </>
+        ) : (
+          <>
+            <Veld label="Startbedrag in de cashkoffer (€)" hint="Tel het geld in de koffer en vul het exacte bedrag in.">
+              <input inputMode="decimal" value={v.startkas} onChange={(e) => setV({ ...v, startkas: e.target.value })} placeholder="150" autoFocus={!!basis} />
+            </Veld>
+            <div className="stand-blok">
+              <span className="zacht klein">De app noteert nu de stand bij de start</span>
+              <StandRij st={st} />
+            </div>
+            <button className="knop groot" disabled={kas == null || kas < 0} onClick={() => {
+              try {
+                startBeurs({ naam: v.naam || `Beurs ${datumKort(v.datum)}`, datum: v.datum, startkas: kas!, locatie: v.locatie.trim() || null, geplandId: gekozen });
+                onSluit();
+              } catch (e) { meld((e as Error).message, "fout"); }
+            }}>Beurs starten</button>
+          </>
+        )}
       </div>
     </Sheet>
+  );
+}
+
+/** De komende beurzen, met schrappen (in het overzicht en bij de kassa). */
+export function KomendeBeurzen({ onPlan }: { onPlan: () => void }) {
+  const { beurzen } = useApp();
+  const lijst = geplandeBeurzen(beurzen);
+  const [weg, setWeg] = useState<string | null>(null);
+  return (
+    <section className="blok">
+      <div className="blok-kop"><h3>Komende beurzen</h3><button className="tekstknop klein" onClick={onPlan}><Icoon naam="plus" maat={16} /> Plannen</button></div>
+      {!lijst.length && <p className="zacht klein">Niets gepland. Geplande beurzen staan ook op de klantenpagina.</p>}
+      <ul className="lijst">
+        {lijst.map((b) => (
+          <li key={b.id} className="komend-rij">
+            <span className="komend-datum"><strong>{new Date(b.datum + "T12:00:00").getDate()}</strong>{new Date(b.datum + "T12:00:00").toLocaleDateString("nl-BE", { month: "short" })}</span>
+            <span className="lijst-naam"><strong>{b.naam}</strong>{b.locatie && <span className="zacht klein"> · {b.locatie}</span>}</span>
+            {weg === b.id ? (
+              <span className="rechts knoppenrij klein">
+                <button className="tekstknop klein rood" onClick={() => { schrapBeurs(b.id); setWeg(null); }}>Schrappen</button>
+                <button className="tekstknop klein" onClick={() => setWeg(null)}>Toch niet</button>
+              </span>
+            ) : <button className="rond-knop rechts" onClick={() => setWeg(b.id)} aria-label={`${b.naam} schrappen`}><Icoon naam="kruis" maat={14} /></button>}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -293,6 +366,7 @@ export function Overzicht() {
     return Math.round(actief.reduce((x, e) => x + (nu - Date.parse(e.aangemaakt_op)) / 86400000, 0) / actief.length);
   })();
   const actief = actieveBeurs(s);
+  const [plan, setPlan] = useState(false);
   return (
     <Sheet titel="Overzicht" onSluit={sluit} vol>
       <div className="rapport-raster">
@@ -302,11 +376,13 @@ export function Overzicht() {
         <Cijfer label="Aankoopwaarde" waarde={euro(aankoop, true)} sub="van alles in voorraad" />
         <Cijfer label="Gemiddelde ouderdom" waarde={leeftijd == null ? "–" : `${leeftijd} dagen`} sub="sinds invoer" />
       </div>
+      <KomendeBeurzen onPlan={() => setPlan(true)} />
+      {plan && <BeursStart plannen onSluit={() => setPlan(false)} />}
       <section className="blok">
         <h3>Beurzen</h3>
-        {!s.beurzen.length && <p className="zacht">Nog geen beurzen.</p>}
+        {!s.beurzen.some((b) => b.status !== "gepland") && <p className="zacht">Nog geen beurzen.</p>}
         <ul className="lijst">
-          {s.beurzen.slice().sort((a, b) => b.datum.localeCompare(a.datum)).map((b) => {
+          {s.beurzen.filter((b) => b.status !== "gepland").sort((a, b) => b.datum.localeCompare(a.datum)).map((b) => {
             const c = beursCijfers(b, s.transacties.filter((t) => t.beurs_id === b.id));
             return (
               <li key={b.id}>

@@ -3,7 +3,7 @@
   "short_name": "Bind'r",
   "description": "Voorraad, QR-labels en prijzen voor de kaarten van Bind'r",
   "lang": "nl",
-  "start_url": "./",
+  "start_url": "beheer.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",

@@ -4,7 +4,7 @@ import type { Catalogus } from "../types";
 import { TALEN } from "../types";
 import { datumKort, euro } from "../lib/format";
 import { laadCatalogus } from "../lib/catalog";
-import { cardmarketLink, grapje, marktinfo, procent, RICHTING_TEKST, setTrend, type Richting, type SetTrend } from "../lib/markt";
+import { cardmarketLink, grapje, marktinfo, procent, RICHTING_TEKST, setGrapje, setTrend, type Richting, type SetTrend } from "../lib/markt";
 import { Icoon } from "./common";
 
 const TALEN_MET_GIDS = new Set(["EN", "JP"]);
@@ -77,7 +77,8 @@ export function MarktBlok({ cardmarketId, variant, taal, setId, catalogus, soort
       {set?.trend && (
         <div className={`set-trend ${set.trend.richting}`}>
           <TrendPijl r={set.trend.richting} klein />
-          <span>Set <strong>{set.naam}</strong>: {RICHTING_TEKST[set.trend.richting].toLowerCase()} {procent(set.trend.verandering)}</span>
+          <span>Set <strong>{set.naam}</strong>: {RICHTING_TEKST[set.trend.richting].toLowerCase()} {procent(set.trend.verandering)}
+            <span className="set-grapje">{setGrapje(set.trend.richting, set.naam)}</span></span>
           <em>{set.trend.kaarten} kaarten</em>
         </div>
       )}

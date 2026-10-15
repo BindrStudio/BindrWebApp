@@ -92,11 +92,26 @@ function fouten(page) {
     return tekst;
   }
   async function volgende() { await page.getByRole("button", { name: "Volgende klant" }).click(); await wacht(150); }
+  // Hartje onder de aankoopprijs: de app vraagt het eerst. In de testcase kiezen we telkens "Toch".
+  async function tochAlsGevraagd() {
+    await wacht(150);
+    const vraag = sheet().locator(".onder-aankoop");
+    if (await vraag.count()) await vraag.getByRole("button", { name: /^Toch/ }).click();
+  }
+  const binnenDagen = (n) => { const d = new Date(Date.now() + n * 86400000); return d.toISOString().slice(0, 10); };
   async function kas() { return page.locator(".beurs-balk").innerText(); }
 
   // ── A. Voorbereiding ───────────────────────────────────────────────────────
-  stap("demo en testset");
-  await page.goto(BASIS);
+  stap("klantenpagina eerst, rechtsboven Beheer, daar inloggen met pincode of de demo");
+  await page.goto(BASIS + "?demo=1");
+  await page.locator(".klant-beheer-knop").click();
+  await page.waitForURL(/beheer\.html/);
+  await page.getByLabel("Pincode").waitFor();
+  await page.getByRole("button", { name: "Eerste keer? Log in met je wachtwoord" }).click();
+  await page.getByPlaceholder("Wachtwoord").waitFor();
+  await page.getByRole("button", { name: "Inloggen met pincode" }).click();
+  await foto("00-login");
+  await geenHorizontaleScroll("login");
   await page.getByText("Uitproberen zonder account").click();
   await tab("Meer");
   await geenHorizontaleScroll("meer");
@@ -120,10 +135,25 @@ function fouten(page) {
     await page.locator(".tegel.wijzig").first().click();
     await sheet().getByRole("button", { name: "Nieuw hartje" }).click();
     await sheet().getByRole("button", { name: "Bewaar hartje" }).click();
+    await tochAlsGevraagd();
     await page.keyboard.press("Escape");
     await wacht(200);
   }
   assert.equal(await page.locator(".tegel.wijzig").count(), 0);
+
+  stap("hartje onder de aankoopprijs: eerst een vraag, met de vault als uitweg");
+  await page.locator(".tegel").first().click();
+  await sheet().locator(".detail-foto .kantel-vlak").waitFor();
+  await sheet().getByRole("button", { name: "Nieuw hartje" }).click();
+  await sheet().locator(".euro-invoer input").fill("0");
+  await sheet().getByRole("button", { name: "Bewaar hartje" }).click();
+  await sheet().locator(".onder-aankoop").waitFor();
+  assert.ok(await sheet().locator(".onder-aankoop").getByRole("button", { name: "Naar de vault" }).isVisible());
+  await foto("02b-onder-aankoop");
+  await sheet().getByRole("button", { name: "Andere prijs" }).click();
+  await sheet().getByRole("button", { name: "Annuleer" }).click();
+  await page.keyboard.press("Escape");
+  await wacht(200);
 
   stap("vault en categorieën");
   await page.locator(".categorieen button", { hasText: "Sealed" }).click();
@@ -135,9 +165,30 @@ function fouten(page) {
   await foto("04-vault");
   await geenHorizontaleScroll("vault");
 
+  stap("omgevingen: Brent heeft een eigen (lege) catalogus");
+  await page.locator(".omgeving-pil").click();
+  await sheet().getByRole("button", { name: /Brent/ }).click();
+  await page.getByText("Je werkt nu in Brent").waitFor();
+  await tab("Catalogus");
+  await wacht(400);
+  assert.match(await page.locator(".kop-sub").first().innerText(), /^0 exemplaren|Nog niets|leeg/i);
+  await foto("04b-omgeving-brent");
+  await page.locator(".omgeving-pil").click();
+  await sheet().getByRole("button", { name: /Bind'r/ }).click();
+  await wacht(400);
+  assert.match(await page.locator(".kop-sub").first().innerText(), /85 exemplaren/);
+
   // ── B. Beurs starten ───────────────────────────────────────────────────────
-  stap("B1/B4: beurs starten met startkas 150");
+  stap("beurs plannen: klanten zien hem bij Bezoek onze stand");
   await tab("Kassa");
+  await page.getByRole("button", { name: "Beurs plannen" }).click();
+  await sheet().getByLabel("Naam").fill("Beurs Antwerpen");
+  await sheet().getByLabel("Datum").fill(binnenDagen(30));
+  await sheet().getByLabel("Plaats").fill("Antwerp Expo");
+  await sheet().getByRole("button", { name: "Beurs plannen" }).click();
+  await page.locator(".beurs-volgende", { hasText: "Beurs Antwerpen" }).waitFor();
+
+  stap("B1/B4: beurs starten met startkas 150");
   await page.getByRole("button", { name: "Beurs starten" }).click();
   await sheet().getByLabel("Naam").fill("Testbeurs Gent");
   await sheet().getByLabel(/Startbedrag in de cashkoffer/).fill("150");
@@ -150,9 +201,13 @@ function fouten(page) {
   await wacht(200);
 
   // ── C. Verkopen ────────────────────────────────────────────────────────────
-  stap("C1: Psyduck cash, klant geeft 60");
+  stap("C1: Psyduck cash, klant geeft 60 (met inkoop en marge even zichtbaar)");
   await verkoop("FYA-Y74");
+  await page.getByRole("button", { name: "Inkoop" }).click();
+  await page.locator(".marge-rij").waitFor();
   await foto("06-mandje");
+  await page.getByRole("button", { name: "Inkoop" }).click();
+  assert.equal(await page.locator(".marge-rij").count(), 0);
   await geenHorizontaleScroll("kassa");
   const wissel = await afrekenen("cash", { klantGeeft: 60 });
   assert.match(wissel, /10/);
@@ -273,6 +328,7 @@ function fouten(page) {
   await sheet().getByRole("button", { name: "Nieuw hartje" }).click();
   await sheet().locator(".euro-invoer input").fill("1150");
   await sheet().getByRole("button", { name: "Bewaar hartje" }).click();
+  await tochAlsGevraagd();
   await sheet().getByText("eigen prijs").waitFor();
   await foto("11-eigen-prijs");
   await page.keyboard.press("Escape");
@@ -282,6 +338,7 @@ function fouten(page) {
   await sheet().getByText("Deze kaart ligt in de vault.").waitFor();
   await sheet().locator(".mandje-actie input").fill("60");
   await sheet().getByRole("button", { name: "Naar catalogus en in het mandje" }).click();
+  await tochAlsGevraagd();
   await scanKlaar();
   await afrekenen("cash"); await volgende();
 
@@ -309,10 +366,11 @@ function fouten(page) {
   const klant = await ctx.newPage();
   const fk = fouten(klant);
   await klant.goto(BASIS + "catalogus/?demo=1");
+  await klant.waitForURL((u) => !u.pathname.includes("/catalogus/"));
   await klant.locator(".tegel").first().waitFor();
   const verwacht = await klant.evaluate(() => {
     const d = JSON.parse(localStorage.getItem("bindr-demo-v1"));
-    return d.exemplaren.filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null).length
+    return d.exemplaren.filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null && e.nieuw_hartje == null).length
       + d.artikelen.filter((a) => a.opslag === "vitrine" && a.aantal > 0 && a.prijs != null).reduce((s, a) => s + a.aantal, 0);
   });
   const getoond = await klant.locator(".klant .tegel").evaluateAll((ts) => ts.reduce((s, t) => {
@@ -329,14 +387,25 @@ function fouten(page) {
   const anders = await klant.locator(".klant .tegel").count();
   assert.ok(anders > 0 && anders < alle, `filter andere talen (${anders} van ${alle})`);
   await klant.locator(".schakelchip", { hasText: "Andere talen" }).click();
+  await klant.locator(".setkeuze-knop").click();
+  await klant.locator(".set-sheet .set-tegel").nth(1).click();
+  await klant.waitForTimeout(300);
+  const inSet = await klant.locator(".klant .tegel").count();
+  assert.ok(inSet > 0 && inSet < alle, `filter op set via het logo (${inSet} van ${alle})`);
+  await klant.locator(".setkeuze-knop").click();
+  await klant.locator(".set-sheet").screenshot({ path: path.join(SHOTS, "14b-sets.png") }).catch(() => {});
+  await klant.locator(".set-sheet .set-tegel.alle").click();
   await klant.locator(".sorteer select").selectOption("set");
   await klant.locator(".set-kop").first().waitFor();
   await klant.locator(".sorteer select").selectOption("nieuw");
   assert.equal(await klant.locator(".tabbalk, .kop-knoppen, .beurs-balk").count(), 0, "geen beheer op de klantenpagina");
   await klant.screenshot({ path: path.join(SHOTS, "14-klant.png") });
   await geenHorizontaleScroll("klantenpagina", klant);
+  assert.match(await klant.locator(".komende-beurzen").innerText(), /Beurs Antwerpen[\s\S]*Antwerp Expo/, "geplande beurs op de klantenpagina");
   await klant.locator(".tegel").first().click();
-  await klant.getByRole("link", { name: /Bericht op Instagram/ }).waitFor();
+  await klant.locator(".detail-stand").waitFor();
+  assert.match(await klant.locator(".detail-stand").innerText(), /stand/i);
+  assert.equal(await klant.getByRole("link", { name: /Bericht op Instagram/ }).count(), 0, "geen Instagram-bericht meer in het detail");
   await klant.waitForTimeout(500);
   await geenHorizontaleScroll("klantendetail", klant);
   await klant.screenshot({ path: path.join(SHOTS, "15-klant-detail.png") });
@@ -357,7 +426,7 @@ function fouten(page) {
   await ctx2.addInitScript((d) => { localStorage.setItem("bindr-demo-v1", d); localStorage.setItem("bindr-modus", "demo"); }, demo);
   const p2 = await ctx2.newPage();
   const f2 = fouten(p2);
-  await p2.goto(BASIS + "#scan");
+  await p2.goto(BASIS + "beheer.html#scan");
   await p2.locator(".scan-item", { hasText: "0J6-8VC" }).waitFor({ timeout: 15000 });
   await p2.waitForTimeout(3000); // de camera blijft het label zien: het mag er niet nog eens bijkomen
   assert.equal(await p2.locator(".scan-item").count(), 1, "QR blijft in beeld, toch maar één keer in de lijst");

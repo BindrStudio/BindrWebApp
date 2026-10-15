@@ -1,4 +1,4 @@
--- Bind'r Stock & Beurs App — databaseschema (fase 1, 2 en 3)
+-- Bind'r Stock & Beurs App — databaseschema (fase 1, 2 en 3, omgevingen)
 --
 -- Uitvoeren: Supabase-dashboard › SQL Editor › New query › dit hele bestand plakken › Run.
 -- Het script mag gerust een tweede keer lopen; het overschrijft geen gegevens.
@@ -27,6 +27,29 @@ security definer
 set search_path = public
 as $$
   select exists (select 1 from public.beheerders where user_id = auth.uid());
+$$;
+
+-- ── Omgevingen: Bind'r en Brent houden elk hun eigen stock en kassa bij ──────
+-- Elke omgeving heeft een eigen catalogus, vault, kassa en beurzen. De klantenpagina
+-- toont samen wat in de omgevingen met "zichtbaar voor klanten" ligt.
+create table if not exists public.omgevingen (
+  id                     uuid primary key default gen_random_uuid(),
+  naam                   text not null unique,
+  volgorde               integer not null default 0,
+  zichtbaar_voor_klanten boolean not null default true,
+  aangemaakt_op          timestamptz not null default now()
+);
+insert into public.omgevingen (naam, volgorde) values ('Bind''r', 1), ('Brent', 2) on conflict (naam) do nothing;
+
+-- De eerste omgeving: daar komt alles terecht dat (nog) geen omgeving meekrijgt.
+create or replace function public.standaard_omgeving()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select id from public.omgevingen order by volgorde, aangemaakt_op limit 1;
 $$;
 
 -- ── Exemplaren: elke fysieke kaart, slab of binder met een eigen QR-code ─────
@@ -165,7 +188,38 @@ create table if not exists public.transacties (
 );
 create index if not exists transacties_beurs_idx on public.transacties (beurs_id, tijd);
 
+-- ── Omgeving koppelen aan alles; bestaande gegevens horen bij Bind'r ────────
+do $$
+declare
+  tabel text;
+begin
+  foreach tabel in array array['exemplaren', 'artikelen', 'beurzen', 'transacties'] loop
+    execute format('alter table public.%I add column if not exists omgeving_id uuid references public.omgevingen (id)', tabel);
+    execute format('update public.%I set omgeving_id = public.standaard_omgeving() where omgeving_id is null', tabel);
+    execute format('alter table public.%I alter column omgeving_id set default public.standaard_omgeving()', tabel);
+    execute format('alter table public.%I alter column omgeving_id set not null', tabel);
+    execute format('create index if not exists %I on public.%I (omgeving_id)', tabel || '_omgeving_idx', tabel);
+  end loop;
+end
+$$;
+
+-- Wat sinds 15 okt 2026 bijkwam:
+alter table public.exemplaren add column if not exists nieuw_hartje numeric(10, 2); -- prijscheck: dit hartje moet erop (null = klopt)
+alter table public.beurzen add column if not exists locatie text;                    -- voor "komende beurzen" op de klantenpagina
+alter table public.transacties add column if not exists gewijzigd_op timestamptz not null default now();
+alter table public.transacties add column if not exists gewijzigd_door uuid;
+
+-- ── Wie is er bezig? Elk toestel meldt zich om de minuut ────────────────────
+create table if not exists public.aanwezig (
+  user_id     uuid primary key default auth.uid() references auth.users (id) on delete cascade,
+  omgeving_id uuid references public.omgevingen (id) on delete set null,
+  scherm      text,
+  laatst      timestamptz not null default now()
+);
+
 -- ── Triggers: gewijzigd_op bijhouden en elke wijziging loggen ────────────────
+-- Ook bij een nieuwe rij zet de server zelf gewijzigd_op: zo ziet de 30-secondensynchronisatie van de
+-- andere gsm's ook kaarten die offline werden toegevoegd (met een oudere tijd van de gsm).
 create or replace function public.zet_gewijzigd()
 returns trigger
 language plpgsql
@@ -233,22 +287,40 @@ update public.exemplaren
    set vitrine_sinds = coalesce(hartjesdatum::timestamptz, aangemaakt_op)
  where opslag = 'vitrine' and vitrine_sinds is null;
 
+create or replace function public.zet_laatst()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.laatst := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists aanwezig_laatst on public.aanwezig;
+create trigger aanwezig_laatst before insert or update on public.aanwezig
+  for each row execute function public.zet_laatst();
+
+drop trigger if exists transacties_gewijzigd on public.transacties;
+create trigger transacties_gewijzigd before insert or update on public.transacties
+  for each row execute function public.zet_gewijzigd();
+
 drop trigger if exists exemplaren_gewijzigd on public.exemplaren;
-create trigger exemplaren_gewijzigd before update on public.exemplaren
+create trigger exemplaren_gewijzigd before insert or update on public.exemplaren
   for each row execute function public.zet_gewijzigd();
 drop trigger if exists exemplaren_log on public.exemplaren;
 create trigger exemplaren_log after insert or update or delete on public.exemplaren
   for each row execute function public.log_wijziging();
 
 drop trigger if exists beurzen_gewijzigd on public.beurzen;
-create trigger beurzen_gewijzigd before update on public.beurzen
+create trigger beurzen_gewijzigd before insert or update on public.beurzen
   for each row execute function public.zet_gewijzigd();
 drop trigger if exists beurzen_log on public.beurzen;
 create trigger beurzen_log after insert or update or delete on public.beurzen
   for each row execute function public.log_wijziging();
 
 drop trigger if exists artikelen_gewijzigd on public.artikelen;
-create trigger artikelen_gewijzigd before update on public.artikelen
+create trigger artikelen_gewijzigd before insert or update on public.artikelen
   for each row execute function public.zet_gewijzigd();
 drop trigger if exists artikelen_log on public.artikelen;
 create trigger artikelen_log after insert or update or delete on public.artikelen
@@ -262,6 +334,19 @@ alter table public.instellingen enable row level security;
 alter table public.logboek      enable row level security;
 alter table public.beurzen      enable row level security;
 alter table public.transacties  enable row level security;
+alter table public.omgevingen   enable row level security;
+alter table public.aanwezig     enable row level security;
+
+drop policy if exists "beheerders alles" on public.omgevingen;
+create policy "beheerders alles" on public.omgevingen
+  for all to authenticated using (public.is_beheerder()) with check (public.is_beheerder());
+
+drop policy if exists "beheerders lezen" on public.aanwezig;
+create policy "beheerders lezen" on public.aanwezig
+  for select to authenticated using (public.is_beheerder());
+drop policy if exists "eigen rij" on public.aanwezig;
+create policy "eigen rij" on public.aanwezig
+  for all to authenticated using (public.is_beheerder() and user_id = auth.uid()) with check (public.is_beheerder() and user_id = auth.uid());
 
 drop policy if exists "beheerders lezen" on public.beheerders;
 create policy "beheerders lezen" on public.beheerders
@@ -296,10 +381,10 @@ create policy "beheerders alles" on public.transacties
 -- aan de API. Daarom expliciet: ingelogde gebruikers mogen de tabellen aanspreken
 -- (de rijbeveiliging hierboven beslist wat ze echt zien), de publieke sleutel niets.
 grant usage on schema public to anon, authenticated;
-grant select, insert, update, delete on public.exemplaren, public.artikelen, public.instellingen, public.beurzen, public.transacties to authenticated;
+grant select, insert, update, delete on public.exemplaren, public.artikelen, public.instellingen, public.beurzen, public.transacties, public.omgevingen, public.aanwezig to authenticated;
 grant select on public.beheerders, public.logboek to authenticated;
-grant execute on function public.is_beheerder() to authenticated;
-revoke all on public.beheerders, public.exemplaren, public.artikelen, public.instellingen, public.logboek, public.beurzen, public.transacties from anon;
+grant execute on function public.is_beheerder(), public.standaard_omgeving() to authenticated;
+revoke all on public.beheerders, public.exemplaren, public.artikelen, public.instellingen, public.logboek, public.beurzen, public.transacties, public.omgevingen, public.aanwezig from anon;
 
 -- ── Kassa: transacties boeken, ongedaan maken en conflicten oplossen ─────────
 -- Dezelfde regels als src/lib/kassa.ts (pasToe, maakOngedaan, losConflictOp).
@@ -321,6 +406,7 @@ declare
   v_soort    text := t->>'soort';
   tid        uuid := (t->>'id')::uuid;
   v_tijd     timestamptz := coalesce((t->>'tijd')::timestamptz, now());
+  v_omgeving uuid := coalesce(nullif(t->>'omgeving_id', '')::uuid, public.standaard_omgeving());
 begin
   if not public.is_beheerder() then
     raise exception 'Enkel beheerders kunnen boeken';
@@ -354,6 +440,8 @@ begin
           conflicten := conflicten || jsonb_build_object('exemplaar_id', r->>'exemplaar_id', 'reden', 'onbekend exemplaar');
         elsif e.status <> 'in voorraad' then
           conflicten := conflicten || jsonb_build_object('exemplaar_id', r->>'exemplaar_id', 'reden', 'al ' || e.status);
+        elsif e.omgeving_id <> v_omgeving then
+          conflicten := conflicten || jsonb_build_object('exemplaar_id', r->>'exemplaar_id', 'reden', 'van een andere omgeving');
         else
           update public.exemplaren
              set status = case when v_soort = 'ruil' then 'geruild' else 'verkocht' end,
@@ -376,10 +464,10 @@ begin
       if jsonb_typeof(r->'nieuw') = 'object' then
         nieuw := jsonb_build_object(
                    'soort', 'kaart', 'taal', 'EN', 'variant', 'normaal', 'opslag', 'stockdoos', 'prijs_handmatig', false,
-                   'aankoopbron', case when v_soort = 'ruil' then 'ruil' else 'beurs' end,
+                   'aankoopbron', case when v_soort = 'ruil' then 'ruil' else 'beurs' end, 'omgeving_id', v_omgeving,
                    'aangemaakt_door', auth.uid(), 'aangemaakt_op', v_tijd, 'gewijzigd_op', v_tijd)
                  || jsonb_strip_nulls(r->'nieuw')
-                 || jsonb_build_object('status', 'in voorraad', 'label_status', 'te printen',
+                 || jsonb_build_object('status', 'in voorraad', 'label_status', 'te printen', 'omgeving_id', v_omgeving,
                                        'aankoopprijs', r->'prijs', 'aankoopdatum', (v_tijd at time zone 'Europe/Brussels')::date);
         insert into public.exemplaren
           select * from jsonb_populate_record(null::public.exemplaren, nieuw)
@@ -393,8 +481,8 @@ begin
     end if;
   end loop;
 
-  insert into public.transacties (id, beurs_id, soort, tijd, regels, totaal, cash, sumup, status, conflicten, opmerking)
-  values (tid, nullif(t->>'beurs_id', '')::uuid, v_soort, v_tijd, coalesce(t->'regels', '[]'::jsonb),
+  insert into public.transacties (id, omgeving_id, beurs_id, soort, tijd, regels, totaal, cash, sumup, status, conflicten, opmerking)
+  values (tid, v_omgeving, nullif(t->>'beurs_id', '')::uuid, v_soort, v_tijd, coalesce(t->'regels', '[]'::jsonb),
           coalesce((t->>'totaal')::numeric, 0), coalesce((t->>'cash')::numeric, 0), coalesce((t->>'sumup')::numeric, 0),
           case when jsonb_array_length(conflicten) > 0 then 'conflict' else 'ok' end, conflicten, t->>'opmerking')
   returning * into uitkomst;
@@ -479,6 +567,9 @@ begin
   if e.status <> 'in voorraad' then
     raise exception 'Dat exemplaar is ook al %', e.status;
   end if;
+  if e.omgeving_id <> t.omgeving_id then
+    raise exception 'Dat exemplaar hoort bij een andere omgeving';
+  end if;
 
   update public.exemplaren
      set status = case when t.soort = 'ruil' then 'geruild' else 'verkocht' end, transactie_id = tid, afgeboekt_op = t.tijd
@@ -532,26 +623,57 @@ begin
 end;
 $$;
 
+-- Prijzen nakijken: welke hartjes moeten wisselen, gedeeld door alle toestellen van een omgeving.
+-- lijst = [{ "id": "...", "nieuw": 12 }, ...]; wat niet in de lijst staat, klopt weer.
+create or replace function public.markeer_prijzen(omgeving uuid, lijst jsonb)
+returns integer
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  n integer;
+begin
+  if not public.is_beheerder() then
+    raise exception 'Enkel beheerders kunnen prijzen nakijken';
+  end if;
+  update public.exemplaren
+     set nieuw_hartje = null
+   where omgeving_id = omgeving and nieuw_hartje is not null
+     and id not in (select (x->>'id')::uuid from jsonb_array_elements(coalesce(lijst, '[]'::jsonb)) x);
+  update public.exemplaren e
+     set nieuw_hartje = (x->>'nieuw')::numeric
+    from jsonb_array_elements(coalesce(lijst, '[]'::jsonb)) x
+   where e.id = (x->>'id')::uuid and e.omgeving_id = omgeving
+     and e.nieuw_hartje is distinct from (x->>'nieuw')::numeric;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
 revoke all on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid),
-  public.los_conflict_op(uuid, uuid, uuid), public.aanvaard_conflict(uuid, text) from public, anon;
+  public.los_conflict_op(uuid, uuid, uuid), public.aanvaard_conflict(uuid, text), public.markeer_prijzen(uuid, jsonb) from public, anon;
 grant execute on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid),
-  public.los_conflict_op(uuid, uuid, uuid), public.aanvaard_conflict(uuid, text) to authenticated;
+  public.los_conflict_op(uuid, uuid, uuid), public.aanvaard_conflict(uuid, text), public.markeer_prijzen(uuid, jsonb) to authenticated;
 
 -- ── Publieke catalogus (de klantenpagina) ────────────────────────────────────
 -- Weergaven met de rechten van de eigenaar: ze tonen enkel deze kolommen en enkel wat
 -- in de catalogus (vitrine) ligt, ook al kan de publieke sleutel de tabellen zelf niet lezen.
--- Nooit zichtbaar voor klanten: de vault (stockdoos), aankoopprijzen, transacties.
+-- Nooit zichtbaar voor klanten: de vault (stockdoos), aankoopprijzen, transacties,
+-- omgevingen die niet aangevinkt staan, en kaarten waarvan het hartje eerst moet wisselen.
 create or replace view public.publieke_vitrine as
   select kaart_id, catalogus, afbeelding, soort, naam, set_naam, set_code, nummer, taal, conditie,
          variant, grader, grade, hartjesprijs as prijs,
          code, naam_origineel, hartjesdatum as sinds, vitrine_sinds as toegevoegd
     from public.exemplaren
-   where opslag = 'vitrine' and status = 'in voorraad' and hartjesprijs is not null;
+   where opslag = 'vitrine' and status = 'in voorraad' and hartjesprijs is not null and nieuw_hartje is null
+     and omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten);
 
 create or replace view public.publieke_artikelen as
   select id, naam, soort, prijs, aantal
     from public.artikelen
-   where opslag = 'vitrine' and aantal > 0 and prijs is not null;
+   where opslag = 'vitrine' and aantal > 0 and prijs is not null
+     and omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten);
 
 -- Instellingen die de klantenpagina nodig heeft (bv. de Instagram-naam).
 create or replace view public.publieke_instellingen as
@@ -559,8 +681,22 @@ create or replace view public.publieke_instellingen as
     from public.instellingen
    where sleutel in ('instagram', 'catalogus_tekst');
 
-revoke all on public.publieke_vitrine, public.publieke_artikelen, public.publieke_instellingen from anon;
-grant select on public.publieke_vitrine, public.publieke_artikelen, public.publieke_instellingen to anon, authenticated;
+-- Komende beurzen ("bezoek onze stand").
+create or replace view public.publieke_beurzen as
+  select distinct on (datum, lower(naam)) naam, datum, locatie
+    from public.beurzen
+   where status in ('gepland', 'actief') and datum >= current_date
+     and omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten)
+   order by datum, lower(naam);
+
+revoke all on public.publieke_vitrine, public.publieke_artikelen, public.publieke_instellingen, public.publieke_beurzen from anon;
+grant select on public.publieke_vitrine, public.publieke_artikelen, public.publieke_instellingen, public.publieke_beurzen to anon, authenticated;
+
+-- ── Inloggen met een pincode ─────────────────────────────────────────────────
+-- In de app log je in met een pincode van 6 cijfers: dat is het wachtwoord van je account.
+-- Eerste keer: log in met je huidige wachtwoord en kies in Meer › Pincode wijzigen je pincode.
+-- Supabase › Authentication › Sign In / Providers › Email: "Minimum password length" op 6
+-- laten staan (standaard) en geen extra eisen aan tekens.
 
 -- ── Beheerders toevoegen ─────────────────────────────────────────────────────
 -- Doe dit pas nadat de drie accounts bestaan (Authentication › Users › Add user).

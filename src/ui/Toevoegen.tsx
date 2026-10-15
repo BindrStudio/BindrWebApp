@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { huidig, meld, openArtikel, openExemplaar, print, sluit, useApp, voegToe, zetInstellingen } from "../state";
+import { alleCodes, huidig, meld, openArtikel, openExemplaar, print, sluit, useApp, voegToe, zetInstellingen } from "../state";
 import type { Catalogus, CatalogusKaart, Exemplaar, NieuwExemplaar, Opslag, Soort } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
 import { afbeelding, herken, laadCatalogus, zoek, type Index, type Kandidaat } from "../lib/catalog";
+import { uitCatalogus } from "../lib/foto";
 import { nieuweCode, toonCode } from "../lib/code";
 import { euro, getal, vandaag } from "../lib/format";
 import { voorstelVoor } from "../lib/pricing";
 import { bestandNaarCanvas } from "../lib/camera";
 import { leesKaart } from "../lib/ocr";
-import { Icoon, KaartFoto, Kiezer, Segment, Sheet, Veld } from "./common";
+import { Icoon, KaartFoto, Kiezer, OnderAankoop, onderAankoop, Segment, Sheet, Veld } from "./common";
 import { MarktBlok } from "./Markt";
+import { kies, TOEGEVOEGD } from "../lib/grapjes";
 
 type Bron = "zoeken" | "foto" | "handmatig";
 
@@ -111,7 +113,7 @@ function Resultaten({ kaarten, onKies, scores }: { kaarten: CatalogusKaart[]; on
       {kaarten.map((k) => (
         <li key={k.id}>
           <button onClick={() => onKies(k)}>
-            <KaartFoto src={afbeelding(k)} alt={k.naam} klein />
+            <KaartFoto src={afbeelding(k)} alt={k.naam} klein kaart={uitCatalogus(k)} />
             <span className="res-tekst">
               <strong>{k.naam}</strong>
               {(k.naamJa || k.naamZhTw) && <span className="naam-origineel">{[k.naamJa, k.naamZhTw, k.naamZhCn].filter(Boolean).join(" · ")}</span>}
@@ -203,13 +205,15 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
   const inVoorraad = kaart ? exemplaren.filter((e) => e.kaart_id === kaart.id && e.status === "in voorraad").length : 0;
   const naamOrigineel = kaart?.catalogus === "asia" ? (v.taal.startsWith("CN") ? kaart.naamZhTw || kaart.naamZhCn || kaart.naamJa : kaart.naamJa || kaart.naamZhTw) || null : null;
 
+  // "Toch deze prijs" geldt voor de ingevulde prijs en aankoopprijs; verander je er één, dan vragen we opnieuw.
+  const [verliesOk, setVerliesOk] = useState("");
   const bewaar = async () => {
     const prijs = getal(v.prijs);
     if (!v.naam.trim()) return meld("Vul een naam in", "fout");
     if (v.opslag === "vitrine" && prijs == null) return meld("Een kaart in de catalogus heeft een hartjesprijs nodig", "fout");
     setBezig(true);
     try {
-      const codes = new Set(huidig().exemplaren.map((e) => e.code));
+      const codes = alleCodes();
       const handmatigePrijs = prijs != null && (!voorstel || prijs !== voorstel.voorstel);
       const rijen: NieuwExemplaar[] = Array.from({ length: Math.max(1, v.aantal) }, () => {
         const code = nieuweCode(codes);
@@ -244,7 +248,7 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
     <div className="formulier">
       {kaart ? (
         <div className="gekozen">
-          <KaartFoto src={afbeelding(kaart)} alt={kaart.naam} klein />
+          <KaartFoto src={afbeelding(kaart)} alt={kaart.naam} klein kaart={uitCatalogus(kaart)} />
           <div>
             <strong>{kaart.naam}</strong>
             {naamOrigineel && <div className="naam-origineel">{naamOrigineel}</div>}
@@ -308,6 +312,10 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
         </Veld>
         <Veld label="Aankoopprijs (€)"><input inputMode="decimal" value={v.aankoopprijs} onChange={(e) => setV({ ...v, aankoopprijs: e.target.value })} /></Veld>
       </div>
+      {v.opslag === "vitrine" && onderAankoop(getal(v.prijs), getal(v.aankoopprijs)) && verliesOk !== `${v.prijs}|${v.aankoopprijs}` && (
+        <OnderAankoop prijs={getal(v.prijs)!} aankoop={getal(v.aankoopprijs)!} vaultTekst="Leg ze in de vault"
+          onVault={() => setV({ ...v, opslag: "stockdoos" })} onToch={() => setVerliesOk(`${v.prijs}|${v.aankoopprijs}`)} />
+      )}
       <Veld label="Aankoopbron"><input value={v.aankoopbron} onChange={(e) => setV({ ...v, aankoopbron: e.target.value })} placeholder="beurs, particulier, pack opening, ruil…" /></Veld>
 
       <Veld label="Aantal exemplaren" hint="Elk exemplaar krijgt een eigen code en label.">
@@ -341,6 +349,7 @@ function Klaar({ nieuw, onVolgende }: { nieuw: Exemplaar[]; onVolgende: () => vo
     <div className="klaar">
       <div className="sparkles" aria-hidden="true"><span>✦</span><span>✦</span><span>✦</span></div>
       <h2>{nieuw.length === 1 ? "Exemplaar toegevoegd" : `${nieuw.length} exemplaren toegevoegd`}</h2>
+      <p className="gelukt-grapje">{kies(TOEGEVOEGD, nieuw[0]?.id)}</p>
       <ul className="lijst">
         {actueel.map((e) => (
           <li key={e.id}>

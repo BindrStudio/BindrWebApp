@@ -1,10 +1,11 @@
 import { useEffect } from "react";
-import { actieveBeurs, naarTab, sluit, sluitToast, start, useApp, type Tab } from "./state";
+import { meldAanwezig, naarTab, sluit, sluitToast, start, useApp, type Tab } from "./state";
 import { Voorraad } from "./ui/Voorraad";
 import { Scan } from "./ui/Scan";
 import { Labels } from "./ui/Labels";
 import { Meer } from "./ui/Meer";
-import { Login } from "./ui/Login";
+import { Login, PinKiezen, Slot } from "./ui/Login";
+import { Bovenbalk } from "./ui/Bovenbalk";
 import { ExemplaarSheet } from "./ui/ExemplaarSheet";
 import { ArtikelSheet } from "./ui/ArtikelSheet";
 import { Toevoegen } from "./ui/Toevoegen";
@@ -27,6 +28,7 @@ export function App() {
   useEffect(() => {
     history.replaceState(null, "", tab === "catalogus" ? location.pathname : `#${tab}`);
     window.scrollTo(0, 0);
+    void meldAanwezig();
   }, [tab]);
 
   if (fase === "start" || fase === "laden") {
@@ -38,9 +40,10 @@ export function App() {
     );
   }
   if (fase === "login") return <><Login /><Toasts toasts={toasts} /></>;
+  if (fase === "slot") return <><Slot /><Toasts toasts={toasts} /></>;
+  if (fase === "pin") return <><PinKiezen /><Toasts toasts={toasts} /></>;
 
   const inMandje = mandje.regels.length;
-  const beurs = actieveBeurs();
 
   return (
     <div className="app">
@@ -50,12 +53,7 @@ export function App() {
           {online ? `Wijzigingen doorsturen… (${wachtrij})` : `Offline${wachtrij ? ` · ${wachtrij} ${wachtrij === 1 ? "wijziging wacht" : "wijzigingen wachten"}` : ""} · alles werkt verder`}
         </div>
       )}
-      <header className="merkbalk">
-        <img src="img/logo-woord.png" alt="Bind'r" width={77} height={34} />
-        {beurs && tab !== "kassa" && (
-          <button className="beurs-pil" onClick={() => naarTab("kassa")}><span className="stip" /><span>{beurs.naam}</span></button>
-        )}
-      </header>
+      <Bovenbalk />
       <main key={tab} className="tab-inhoud">
         {tab === "catalogus" && <Voorraad opslag="vitrine" />}
         {tab === "vault" && <Voorraad opslag="stockdoos" />}

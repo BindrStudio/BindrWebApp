@@ -14,6 +14,7 @@ export interface Instellingen {
   labelMaat: string; // id uit LABELMATEN
   inkoopPct: number; // wat we bieden bij inkoop, in % van de marktwaarde
   ruilPct: number;   // wat een kaart van de klant waard is bij ruil, in %
+  toonMarge?: boolean; // aankoopprijs en marge zichtbaar in de kassa (enkel op deze gsm)
 }
 
 export const STANDAARD_INSTELLINGEN: Instellingen = {

@@ -26,6 +26,23 @@ export function netto(regels: Regel[]) {
   return rond2(totaalUit(regels) - totaalIn(regels));
 }
 
+/**
+ * De marge op wat de deur uitgaat: verkoopprijs min aankoopprijs, enkel voor regels waarvan
+ * we de aankoopprijs kennen. Alleen voor de beheerders, nooit voor de klant.
+ */
+export function marge(regels: Regel[]) {
+  const gekend = regels.filter((r) => r.richting === "uit" && r.aankoopprijs != null);
+  const verkoop = som(gekend.map((r) => r.prijs));
+  const aankoop = som(gekend.map((r) => r.aankoopprijs!));
+  const winst = rond2(verkoop - aankoop);
+  return {
+    verkoop, aankoop, winst,
+    pct: aankoop > 0 ? Math.round((winst / aankoop) * 100) : null,
+    gekend: gekend.length,
+    onbekend: regels.filter((r) => r.richting === "uit" && r.aankoopprijs == null).length,
+  };
+}
+
 export function bepaalSoort(regels: Regel[]): TransactieSoort {
   const uit = regels.some((r) => r.richting === "uit");
   const binnen = regels.some((r) => r.richting === "in");
@@ -136,6 +153,10 @@ export function pasToe(v: Voorraad, t: Transactie): { voorraad: Voorraad; transa
           conflicten.push({ exemplaar_id: r.exemplaar_id, reden: e ? `al ${e.status}` : "onbekend exemplaar" });
           continue;
         }
+        if (t.omgeving_id && e.omgeving_id && e.omgeving_id !== t.omgeving_id) {
+          conflicten.push({ exemplaar_id: r.exemplaar_id, reden: "van een andere omgeving" });
+          continue;
+        }
         exemplaren.set(e.id, {
           ...e, status: t.soort === "ruil" ? "geruild" : "verkocht", transactie_id: t.id, afgeboekt_op: t.tijd, gewijzigd_op: t.tijd,
         });
@@ -157,6 +178,7 @@ export function pasToe(v: Voorraad, t: Transactie): { voorraad: Voorraad; transa
           status: "in voorraad",
           opslag: r.nieuw.opslag ?? "stockdoos",
           label_status: "te printen",
+          ...(t.omgeving_id ? { omgeving_id: t.omgeving_id } : {}),
         }, t.tijd);
         exemplaren.set(e.id, e);
         nieuweVolgorde.push(e);
@@ -231,6 +253,7 @@ export function losConflictOp(v: Voorraad, t: Transactie, oudId: string, nieuwId
   const nieuw = v.exemplaren.find((e) => e.id === nieuwId);
   if (!nieuw) throw new Error("Dat exemplaar bestaat niet");
   if (!inVoorraad(nieuw)) throw new Error(`Dat exemplaar is ook al ${nieuw.status}`);
+  if (t.omgeving_id && nieuw.omgeving_id && nieuw.omgeving_id !== t.omgeving_id) throw new Error("Dat exemplaar hoort bij een andere omgeving");
   const regels = t.regels.map((r) =>
     r.exemplaar_id === oudId && r.richting === "uit"
       ? { ...r, exemplaar_id: nieuw.id, code: nieuw.code, naam: nieuw.naam, hartjesprijs: nieuw.hartjesprijs ?? nieuw.verkoopprijs, aankoopprijs: nieuw.aankoopprijs }

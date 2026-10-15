@@ -124,13 +124,9 @@ body { overflow-x: clip; }
 .klant-detail { display: grid; gap: 12px; justify-items: start; }
 .klant-detail-links, .klant-detail-rechts { display: grid; gap: 12px; justify-items: start; width: 100%; }
 .klant-detail-links { justify-items: center; }
-.klant-detail-foto { position: relative; width: min(250px, 64vw); justify-self: center; border-radius: 16px;
-  transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .4s var(--veer);
-  animation: kaart-zweef 5s ease-in-out infinite; }
-.klant-detail-foto.kantelt { transition: transform .08s linear; animation: none; }
+.klant-detail-foto { position: relative; width: min(250px, 64vw); justify-self: center; border-radius: 16px; }
 .klant-detail-foto .foto, .klant-detail-foto .artikel-vlak { border-radius: 16px; box-shadow: 0 18px 40px rgba(59, 42, 18, .25); }
 .klant-detail-foto.holo .glans { opacity: .45; animation: glimmer 4s ease-in-out infinite; }
-@keyframes kaart-zweef { 0%, 100% { transform: perspective(900px) rotateY(-4deg) rotateX(2deg); } 50% { transform: perspective(900px) rotateY(4deg) rotateX(-1deg); } }
 .detail-prijsrij { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-self: center; }
 .aantal-label { padding: 5px 10px; border-radius: 999px; background: var(--inkt); color: var(--boter); font-weight: 700; font-size: 13px; }
 .nieuw-label { padding: 5px 10px; border-radius: 999px; background: var(--boter); color: var(--inkt); font-weight: 700; font-size: 13px; }
@@ -200,3 +196,25 @@ body { overflow-x: clip; }
 }
 
 @keyframes waaier-in { from { opacity: 0; transform: translateX(-50%) rotate(0deg) translateY(30px); } }
+
+/* Beheer-knop, de stand en komende beurzen */
+.klant-balk-rechts { display: flex; align-items: center; gap: 8px; }
+.klant-beheer-knop { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 8px 12px; border-radius: 999px; color: var(--inkt-2); text-decoration: none; font-weight: 600; font-size: 13.5px;
+  border: 1.5px solid var(--lijn); transition: background .2s; }
+.klant-beheer-knop:hover { background: var(--room); }
+@media (max-width: 420px) {
+  .klant-ig-knop span, .klant-beheer-knop span { display: none; }
+  .klant-ig-knop, .klant-beheer-knop { width: 44px; justify-content: center; padding: 0; }
+}
+.detail-stand { display: grid; gap: 2px; text-align: right; font-size: 13px; color: var(--inkt-2); min-width: 0; }
+.detail-stand strong { color: var(--inkt); font-size: 14.5px; }
+.komende-beurzen { width: 100%; display: grid; gap: 10px; padding: 16px; margin-bottom: 14px; border-radius: 22px; background: var(--room); box-shadow: var(--schaduw); text-align: left; }
+.komende-beurzen h2 { font-size: 21px; color: var(--inkt); }
+.komende-beurzen ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.komende-beurzen li { display: flex; align-items: center; gap: 12px; }
+.beurs-datum { width: 50px; height: 54px; border-radius: 12px; background: var(--zee); color: #fff; display: grid; place-content: center; text-align: center; flex: none; }
+.beurs-datum strong { font-family: var(--titel); font-size: 22px; line-height: 1; }
+.beurs-datum em { font-style: normal; font-size: 12px; font-weight: 700; text-transform: uppercase; opacity: .85; }
+.beurs-tekst { display: grid; gap: 1px; font-size: 14px; color: var(--inkt-2); }
+.beurs-tekst strong { color: var(--inkt); font-size: 15.5px; }
+.komende-beurzen p { margin: 0; font-size: 14px; }
