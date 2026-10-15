@@ -193,6 +193,16 @@ drop policy if exists "beheerders lezen" on public.logboek;
 create policy "beheerders lezen" on public.logboek
   for select to authenticated using (public.is_beheerder());
 
+-- ── Rechten voor de app (REST-API) ───────────────────────────────────────────
+-- Nieuwere Supabase-projecten geven nieuwe tabellen niet altijd automatisch vrij
+-- aan de API. Daarom expliciet: ingelogde gebruikers mogen de tabellen aanspreken
+-- (de rijbeveiliging hierboven beslist wat ze echt zien), de publieke sleutel niets.
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on public.exemplaren, public.artikelen, public.instellingen to authenticated;
+grant select on public.beheerders, public.logboek to authenticated;
+grant execute on function public.is_beheerder() to authenticated;
+revoke all on public.beheerders, public.exemplaren, public.artikelen, public.instellingen, public.logboek from anon;
+
 -- ── Publieke vitrine (voor de klantencatalogus, fase 2) ──────────────────────
 -- Een weergave met de rechten van de eigenaar: ze toont enkel deze kolommen en
 -- enkel wat in de vitrine ligt, ook al kan de publieke sleutel de tabel zelf niet lezen.
@@ -206,9 +216,19 @@ revoke all on public.publieke_vitrine from anon;
 grant select on public.publieke_vitrine to anon, authenticated;
 
 -- ── Beheerders toevoegen ─────────────────────────────────────────────────────
--- 1. Maak de drie accounts aan in Authentication › Users › Add user (met e-mail en wachtwoord).
--- 2. Vul hieronder de e-mailadressen en namen in en voer enkel dit stuk uit:
+-- Doe dit pas nadat de drie accounts bestaan (Authentication › Users › Add user).
+-- Kopieer het stuk hieronder naar een nieuwe query, haal de -- weg, vul de
+-- e-mailadressen en namen in en voer het uit:
 --
 -- insert into public.beheerders (user_id, naam)
--- select id, 'Naam 1' from auth.users where email = 'eerste@voorbeeld.be'
--- on conflict (user_id) do nothing;
+-- select id, naam
+--   from auth.users
+--   join (values
+--     ('eerste@voorbeeld.be', 'Naam 1'),
+--     ('tweede@voorbeeld.be', 'Naam 2'),
+--     ('derde@voorbeeld.be',  'Naam 3')
+--   ) as lijst (mail, naam) on lower(auth.users.email) = lower(lijst.mail)
+-- on conflict (user_id) do update set naam = excluded.naam;
+--
+-- Controle (moet 3 rijen geven):
+-- select b.naam, u.email from public.beheerders b join auth.users u on u.id = b.user_id;
