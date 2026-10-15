@@ -105,3 +105,58 @@ export function cardmarketLink(cardmarketId: number, taal: string, landen: (keyo
   if (landen.length) q.set("sellerCountry", landen.map((l) => CM_LAND[l]).join(","));
   return `https://www.cardmarket.com/en/Pokemon/Products?${q.toString().replace(/%2C/g, ",")}`;
 }
+
+/** Sealed op Cardmarket: het product (als we het kennen) of anders een zoekopdracht op naam. */
+export function cardmarketSealedLink(cardmarketId: number | null | undefined, naam: string, landen: (keyof typeof CM_LAND)[] = ["BE", "NL"]): string {
+  if (cardmarketId) {
+    const q = new URLSearchParams({ idProduct: String(cardmarketId) });
+    if (landen.length) q.set("sellerCountry", landen.map((l) => CM_LAND[l]).join(","));
+    return `https://www.cardmarket.com/en/Pokemon/Products?${q.toString().replace(/%2C/g, ",")}`;
+  }
+  return `https://www.cardmarket.com/en/Pokemon/Products/Search?${new URLSearchParams({ searchString: naam.trim() })}`;
+}
+
+// ── Graded: laatste verkopen opzoeken (enkel gewone links, geen scraping) ────
+
+/** De zoektekst voor een graded kaart, bv. "Charizard ex 199/165 PSA 10". */
+export function gradedZoektekst(k: { naam: string; nummer?: string | null; setTotaal?: string | number | null; set_code?: string | null; grader?: string | null; grade?: string | null }): string {
+  const nr = k.nummer ? (k.setTotaal ? `${k.nummer}/${k.setTotaal}` : k.nummer) : "";
+  return [k.naam, nr, k.grader, k.grade].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
+
+/** Verkochte (afgelopen) advertenties op eBay, nieuwste eerst. */
+export function ebaySoldLink(zoek: string, site: "com" | "de" | "nl" | "be" = "com"): string {
+  const host = site === "be" ? "www.benl.ebay.be" : `www.ebay.${site}`;
+  const q = new URLSearchParams({ _nkw: zoek, LH_Sold: "1", LH_Complete: "1", _sop: "13" });
+  return `https://${host}/sch/i.html?${q}`;
+}
+
+/** Het certificaat van een slab bij de grader (PSA, CGC, BGS), als we het nummer hebben. */
+export function certLink(grader: string | null | undefined, cert: string | null | undefined): string | null {
+  const c = (cert ?? "").replace(/\D/g, "");
+  if (!c) return null;
+  const g = (grader ?? "").toUpperCase();
+  if (g === "PSA") return `https://www.psacard.com/cert/${c}`;
+  if (g === "CGC") return `https://www.cgccards.com/certlookup/${c}/`;
+  if (g === "BGS" || g === "BECKETT") return `https://www.beckett.com/grading/card-lookup?item_type=BGS&item_id=${c}`;
+  return null;
+}
+
+/**
+ * Schatting uit zelf opgezochte verkopen: de mediaan, waarbij verkopen van de laatste
+ * 30 dagen dubbel tellen. Null zonder verkopen.
+ */
+export function schattingUitVerkopen(verkopen: { datum: string; prijs: number }[], nu = Date.now()): number | null {
+  const geldig = verkopen.filter((v) => Number.isFinite(v.prijs) && v.prijs > 0);
+  if (!geldig.length) return null;
+  const gewogen: number[] = [];
+  for (const v of geldig) {
+    gewogen.push(v.prijs);
+    const dagen = (nu - Date.parse(v.datum + "T12:00:00")) / 86400000;
+    if (dagen <= 30) gewogen.push(v.prijs);
+  }
+  gewogen.sort((a, b) => a - b);
+  const m = gewogen.length / 2;
+  const med = gewogen.length % 2 ? gewogen[Math.floor(m)] : (gewogen[m - 1] + gewogen[m]) / 2;
+  return Math.round(med * 100) / 100;
+}

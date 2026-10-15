@@ -65,7 +65,10 @@ export function regelUit(e: Exemplaar, prijs?: number): Regel {
 
 export function regelArtikelUit(a: Artikel, aantal = 1, prijs?: number): Regel {
   const lijst = rond2((a.prijs ?? 0) * aantal);
-  return { richting: "uit", artikel_id: a.id, aantal, naam: a.naam, hartjesprijs: lijst, prijs: rond2(prijs ?? lijst) };
+  return {
+    richting: "uit", artikel_id: a.id, aantal, naam: a.naam, hartjesprijs: lijst, prijs: rond2(prijs ?? lijst),
+    ...(a.aankoopprijs != null ? { aankoopprijs: rond2(a.aankoopprijs * aantal) } : {}),
+  };
 }
 
 /** Een kaart van de klant komt binnen (ruil of inkoop) als nieuw exemplaar. */
@@ -337,5 +340,69 @@ export function beursCijfers(beurs: Pick<Beurs, "startkas"> | null, transacties:
     nieuwViaInkoop: viaInkoop,
     transacties: geldig.length,
     conflicten: geldig.filter((t) => t.status === "conflict").length,
+  };
+}
+
+// ── Wat er op een beurs ging: per soort product ──────────────────────────────
+
+export type Productsoort = "kaarten" | "slabs" | "binders" | "3d-prints" | "sealed" | "andere";
+export const PRODUCTSOORTEN: { id: Productsoort; label: string; een: string; veel: string }[] = [
+  { id: "kaarten", label: "Kaarten", een: "kaart", veel: "kaarten" },
+  { id: "slabs", label: "Slabs", een: "slab", veel: "slabs" },
+  { id: "binders", label: "Binders", een: "binder", veel: "binders" },
+  { id: "3d-prints", label: "3D-prints", een: "3D-print", veel: "3D-prints" },
+  { id: "sealed", label: "Sealed", een: "sealed", veel: "sealed" },
+  { id: "andere", label: "Andere", een: "ander artikel", veel: "andere" },
+];
+
+export interface Telling { aantal: number; bedrag: number }
+
+export interface BeursOverzicht {
+  verkocht: Record<Productsoort, Telling>;      // verkocht voor geld
+  verkochtTotaal: Telling;
+  ingekocht: Telling;                            // kaarten en artikelen gekocht van klanten (bedrag = wat wij betaalden)
+  trades: { aantal: number; weg: number; binnen: number; bijbetaaldDoorKlant: number; bijbetaaldDoorOns: number };
+  retour: Telling;
+}
+
+/**
+ * Telt per soort product wat er verkocht, ingekocht en geruild werd.
+ * `soortVan` zegt welke soort een regel is (kaart, slab, binder …); de app zoekt dat op in de voorraad.
+ */
+export function beursOverzicht(transacties: Transactie[], soortVan: (r: Regel) => Productsoort): BeursOverzicht {
+  const leeg = (): Telling => ({ aantal: 0, bedrag: 0 });
+  const verkocht = Object.fromEntries(PRODUCTSOORTEN.map((p) => [p.id, leeg()])) as Record<Productsoort, Telling>;
+  const ingekocht = leeg();
+  const retour = leeg();
+  const trades = { aantal: 0, weg: 0, binnen: 0, bijbetaaldDoorKlant: 0, bijbetaaldDoorOns: 0 };
+  for (const t of transacties) {
+    if (t.status === "ongedaan") continue;
+    if (t.soort === "retour") { retour.aantal++; retour.bedrag += -t.totaal; continue; }
+    if (t.soort === "ruil") {
+      trades.aantal++;
+      if (t.totaal > 0) trades.bijbetaaldDoorKlant += t.totaal; else trades.bijbetaaldDoorOns += -t.totaal;
+    }
+    for (const r of t.regels) {
+      const n = r.aantal ?? 1;
+      if (r.richting === "uit") {
+        if (t.soort === "ruil") { trades.weg += n; continue; }
+        const v = verkocht[soortVan(r)];
+        v.aantal += n;
+        v.bedrag += r.prijs;
+      } else if (t.soort === "ruil") {
+        trades.binnen += n;
+      } else {
+        ingekocht.aantal += n;
+        ingekocht.bedrag += r.prijs;
+      }
+    }
+  }
+  for (const v of Object.values(verkocht)) v.bedrag = rond2(v.bedrag);
+  const vt = Object.values(verkocht).reduce((a, v) => ({ aantal: a.aantal + v.aantal, bedrag: a.bedrag + v.bedrag }), leeg());
+  return {
+    verkocht, verkochtTotaal: { aantal: vt.aantal, bedrag: rond2(vt.bedrag) },
+    ingekocht: { aantal: ingekocht.aantal, bedrag: rond2(ingekocht.bedrag) },
+    trades: { ...trades, bijbetaaldDoorKlant: rond2(trades.bijbetaaldDoorKlant), bijbetaaldDoorOns: rond2(trades.bijbetaaldDoorOns) },
+    retour: { aantal: retour.aantal, bedrag: rond2(retour.bedrag) },
   };
 }

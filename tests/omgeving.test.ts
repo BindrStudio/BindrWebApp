@@ -98,3 +98,34 @@ test("grapjes: genoeg keuze, en dezelfde kaart krijgt altijd hetzelfde", () => {
   assert.ok(verschillend.size >= 8, "verschillende kaarten krijgen verschillende grapjes");
   assert.ok(KAART.op.includes(kies(KAART.op)));
 });
+
+test("OCR: Otsu kiest een drempel tussen tekst en achtergrond", async () => {
+  const { otsu } = await import("../src/lib/ocr");
+  const pixels = [...Array(300).fill(40), ...Array(700).fill(210)];
+  const t = otsu(pixels);
+  assert.ok(t >= 40 && t < 210, `drempel ${t}`);
+});
+
+test("eigen foto's: enkel echte afbeeldingen als data-URL", async () => {
+  const { veiligeFoto } = await import("../src/lib/eigenfoto");
+  assert.equal(veiligeFoto("data:image/jpeg;base64,/9j/4AAQSkZJRg=="), "data:image/jpeg;base64,/9j/4AAQSkZJRg==");
+  assert.equal(veiligeFoto("javascript:alert(1)"), null);
+  assert.equal(veiligeFoto("https://example.com/x.jpg"), null);
+  assert.equal(veiligeFoto("data:image/svg+xml;base64,PHN2Zz4="), null, "geen SVG (kan scripts bevatten)");
+  assert.equal(veiligeFoto(null), null);
+});
+
+test("graded: eBay-link, certificaat en schatting uit verkopen", async () => {
+  const { ebaySoldLink, certLink, gradedZoektekst, schattingUitVerkopen, cardmarketSealedLink } = await import("../src/lib/markt");
+  const zoek = gradedZoektekst({ naam: "Charizard ex", nummer: "199", setTotaal: 165, grader: "PSA", grade: "10" });
+  assert.equal(zoek, "Charizard ex 199/165 PSA 10");
+  assert.equal(ebaySoldLink(zoek), "https://www.ebay.com/sch/i.html?_nkw=Charizard+ex+199%2F165+PSA+10&LH_Sold=1&LH_Complete=1&_sop=13");
+  assert.match(ebaySoldLink(zoek, "be"), /^https:\/\/www\.benl\.ebay\.be\//);
+  assert.equal(certLink("PSA", "12 345 678"), "https://www.psacard.com/cert/12345678");
+  assert.equal(certLink("PSA", "abc"), null);
+  const nu = Date.parse("2026-10-15T12:00:00Z");
+  assert.equal(schattingUitVerkopen([{ datum: "2026-10-01", prijs: 180 }, { datum: "2026-09-20", prijs: 170 }, { datum: "2026-10-10", prijs: 195 }], nu), 180);
+  assert.equal(schattingUitVerkopen([], nu), null);
+  assert.match(cardmarketSealedLink(123, "Booster"), /idProduct=123&sellerCountry=2,23/);
+  assert.match(cardmarketSealedLink(null, "Ascended Heroes booster"), /Products\/Search\?searchString=Ascended\+Heroes\+booster/);
+});

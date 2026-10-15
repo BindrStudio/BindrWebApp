@@ -4,10 +4,12 @@ import type { Artikel, Exemplaar, Opslag } from "../types";
 import { datumKort, euro, zonderAccenten } from "../lib/format";
 import { toonCode } from "../lib/code";
 import { waardeStijgers, type TeWijzigen } from "../lib/pricing";
-import { CATEGORIEEN, PLAATS, categorieArtikel, categorieExemplaar, type Categorie } from "../lib/categorie";
+import { CATEGORIEEN, PLAATS, artikelOmschrijving, categorieArtikel, categorieExemplaar, type Categorie } from "../lib/categorie";
 import { inVoorraad } from "../lib/exemplaar";
 import { klantUrl } from "../config";
 import { kantel } from "../lib/kantel";
+import { veiligeFoto } from "../lib/eigenfoto";
+
 import {
   groepeer, groepSleutel, isNieuw, pastFilters, perSet, SNELFILTERS, SORTERINGEN, setIdVan, sorteer,
   type Groep, type SetInfo, type Snelfilter, type Sortering, type Toonbaar,
@@ -137,11 +139,11 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
         <div>
           <h1>{PLAATS[opslag].naam}</h1>
           <p className="kop-sub">
-            {ex.length} {ex.length === 1 ? "exemplaar" : "exemplaren"}{art.length ? ` · ${art.length} artikelen` : ""} · {euro(waarde, true)}
+            {ex.length} {ex.length === 1 ? "exemplaar" : "exemplaren"}{art.length ? ` · ${art.length} ${art.length === 1 ? "artikel" : "artikels"}` : ""} · {euro(waarde, true)}
           </p>
         </div>
         <div className="kop-knoppen">
-          {catalogus && <a className="rond-knop groot" href={klantUrl(huidig().backend?.soort === "demo")} target="_blank" rel="noreferrer" aria-label="Bekijk als klant" title="Bekijk als klant"><Icoon naam="oog" /></a>}
+          <a className="rond-knop groot" href={klantUrl(huidig().backend?.soort === "demo")} target="_blank" rel="noreferrer" aria-label="Bekijk als klant" title="Bekijk als klant"><Icoon naam="oog" /></a>
           <button className="rond-knop groot" onClick={openLabels} aria-label="Labels">
             <Icoon naam="printer" />
             {aantalLabels > 0 && <span className="knop-teller">{aantalLabels}</span>}
@@ -245,15 +247,22 @@ export function Tegel({ ex, i, band, vault, aantal = 1, labelOpen }: { ex: Exemp
   const label = labelOpen ?? ex.label_status !== "gestickerd";
   return (
     <button
-      className={`tegel${band && !vault ? " wijzig" : ""}${duur ? " holo" : ""}`}
+      className={`tegel${band && !vault ? " wijzig" : ""}${duur && ex.soort !== "slab" ? " holo" : ""}${ex.soort === "slab" ? " slab" : ""}`}
       style={{ ["--i" as string]: Math.min(i, 24) }}
       onClick={() => openExemplaar(ex.id)}
       {...kantel}
     >
-      <div className="foto-vak">
-        <KaartFoto src={ex.afbeelding} alt={ex.naam} kaart={ex} />
-        <span className="glans" />
-      </div>
+      {ex.soort === "slab" ? (
+        <div className="slab-hoes">
+          <span className="slab-label"><b>{ex.grader || "Graded"}</b><em>{ex.grade}</em></span>
+          <div className="foto-vak"><KaartFoto src={ex.afbeelding} alt={ex.naam} kaart={ex} /><span className="glans" /></div>
+        </div>
+      ) : (
+        <div className="foto-vak">
+          <KaartFoto src={ex.afbeelding} alt={ex.naam} kaart={ex} />
+          <span className="glans" />
+        </div>
+      )}
       {aantal > 1 && <span className="aantal-merk" title={`${aantal} exemplaren`}>×{aantal}</span>}
       <div className="tegel-info">
         <div className="tegel-naam">{ex.naam}</div>
@@ -277,14 +286,14 @@ export function Tegel({ ex, i, band, vault, aantal = 1, labelOpen }: { ex: Exemp
 function ArtikelTegel({ a, i }: { a: Artikel; i: number }) {
   return (
     <button className="tegel artikel-tegel" style={{ ["--i" as string]: Math.min(i, 24) }} onClick={() => openArtikel(a.id)} {...kantel}>
-      <div className={`artikel-vlak ${categorieArtikel(a)}`}>
+      <div className={`artikel-vlak ${categorieArtikel(a)}${veiligeFoto(a.foto) ? " met-foto" : ""}`}>
+        {veiligeFoto(a.foto) ? <img src={veiligeFoto(a.foto)!} alt="" loading="lazy" /> : <Icoon naam={a.soort === "eigen product" ? "binder" : "doos"} maat={40} />}
         <span className="glans" />
-        <Icoon naam={a.soort === "eigen product" ? "binder" : "doos"} maat={40} />
         <span className="artikel-aantal">× {a.aantal}</span>
       </div>
       <div className="tegel-info">
         <div className="tegel-naam">{a.naam}</div>
-        <div className="tegel-set">{a.soort === "eigen product" ? "Bind'r" : a.soort}{a.aantal === 0 ? " · op" : ""}</div>
+        <div className="tegel-set">{artikelOmschrijving(a) || (a.soort === "eigen product" ? "Bind'r" : a.soort)}{a.aantal === 0 ? " · op" : ""}</div>
         <div className="tegel-onder">
           {a.prijs != null ? <span className="hartje"><Icoon naam="hart" maat={14} />{euro(a.prijs)}</span> : <span className="waarde">per deal</span>}
         </div>

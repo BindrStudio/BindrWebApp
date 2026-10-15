@@ -1,13 +1,17 @@
 import { useState } from "react";
 import {
-  actieveOmgeving, importeerTestset, logUit, offlineKlaarzetten, openOverzicht, synchroniseer, useApp, vernieuwPrijsgids, wisDemo, wisselOmgeving,
+  actieveOmgeving, importeerTestset, logUit, offlineKlaarzetten, openArtikelen, openOverzicht, synchroniseer, useApp, vernieuwPrijsgids, wisDemo, wisselOmgeving,
   zetInstagram, zetInstellingen, zetZichtbaarVoorKlanten,
 } from "../state";
 import { PinKiezen } from "./Login";
 import { APP_VERSIE, klantUrl } from "../config";
 import { datumKort, euro, getal } from "../lib/format";
 import { STANDAARD_INSTELLINGEN, type Drempel } from "../lib/pricing";
+import { PCT_MAX, PCT_MIN } from "../lib/bod";
+
+const PCTS = Array.from({ length: (PCT_MAX - PCT_MIN) / 5 + 1 }, (_, i) => PCT_MIN + i * 5);
 import { Icoon, QrBeeld, Sheet } from "./common";
+import { BeurzenEnTransacties } from "./Historiek";
 
 export function Meer() {
   const s = useApp();
@@ -15,7 +19,9 @@ export function Meer() {
   const demo = backend?.soort === "demo";
   const gebruiker = backend?.gebruiker();
   const [pinOpen, setPinOpen] = useState(false);
+  const [historiek, setHistoriek] = useState(false);
   const omg = actieveOmgeving(s);
+  const telArtikels = s.artikelen.reduce((n, a) => n + Math.max(0, a.aantal), 0);
 
   return (
     <div className="scherm meer">
@@ -25,6 +31,25 @@ export function Meer() {
           <p className="kop-sub">{demo ? "Demo op dit toestel" : gebruiker?.naam || gebruiker?.email}{omg ? ` · ${omg.naam}` : ""}</p>
         </div>
       </header>
+
+      <div className="meer-tegels">
+        <button className="meer-tegel" onClick={() => openArtikelen("binder")}>
+          <Icoon naam="binder" maat={26} />
+          <strong>Artikels</strong>
+          <span>Binders, sealed, 3D-prints · {telArtikels} op voorraad</span>
+        </button>
+        <button className="meer-tegel" onClick={() => setHistoriek(true)}>
+          <Icoon naam="historiek" maat={26} />
+          <strong>Beurzen en transacties</strong>
+          <span>Vorige beurzen, alles wat verkocht, ingekocht en geruild werd</span>
+        </button>
+        <button className="meer-tegel" onClick={openOverzicht}>
+          <Icoon naam="grafiek" maat={26} />
+          <strong>Overzicht</strong>
+          <span>Voorraadwaarde, komende beurzen, export</span>
+        </button>
+      </div>
+      {historiek && <BeurzenEnTransacties onSluit={() => setHistoriek(false)} />}
 
       <Groep titel="Account">
         <Rij label={demo ? "Demomodus" : "Ingelogd als"} waarde={demo ? "gegevens blijven op dit toestel" : gebruiker?.email} />
@@ -58,10 +83,6 @@ export function Meer() {
       )}
 
       <Klantencatalogus />
-
-      <Groep titel="Overzicht">
-        <button className="rij-knop" onClick={openOverzicht}><Icoon naam="grafiek" maat={18} /> Beurzen, omzet en voorraadwaarde</button>
-      </Groep>
 
       <Groep titel="Prijzen">
         <Rij label="Cardmarket-prijsgids" waarde={gids ? `${datumKort(gids.datum)} · ${gids.prijzen.size.toLocaleString("nl-BE")} producten` : "nog niet geladen"} />
@@ -144,16 +165,18 @@ function Prijsregels() {
   return (
     <Groep titel="Prijsregels">
       <div className="rij bod-instelling">
-        <span>Bod bij inkoop</span>
-        <span className="pct-veld"><input inputMode="numeric" defaultValue={instellingen.inkoopPct} aria-label="Inkoop in procent"
-          onBlur={(e) => { const n = getal(e.target.value); if (n != null && n > 0 && n <= 100) zetInstellingen({ inkoopPct: Math.round(n) }); }} /> %</span>
+        <span>Standaard bij inkoop</span>
+        <select value={Math.round(instellingen.inkoopPct / 5) * 5} aria-label="Inkoop in procent" onChange={(e) => zetInstellingen({ inkoopPct: Number(e.target.value) })}>
+          {PCTS.map((p) => <option key={p} value={p}>{p}%</option>)}
+        </select>
       </div>
       <div className="rij bod-instelling">
-        <span>Waarde bij ruil</span>
-        <span className="pct-veld"><input inputMode="numeric" defaultValue={instellingen.ruilPct} aria-label="Ruil in procent"
-          onBlur={(e) => { const n = getal(e.target.value); if (n != null && n > 0 && n <= 100) zetInstellingen({ ruilPct: Math.round(n) }); }} /> %</span>
+        <span>Standaard bij ruil</span>
+        <select value={Math.round(instellingen.ruilPct / 5) * 5} aria-label="Ruil in procent" onChange={(e) => zetInstellingen({ ruilPct: Number(e.target.value) })}>
+          {PCTS.map((p) => <option key={p} value={p}>{p}%</option>)}
+        </select>
       </div>
-      <p className="groep-uitleg">Van de marktwaarde (Cardmarket, met conditie) van de kaarten van een klant. De kassa stelt ronde bedragen voor; je kiest altijd zelf.</p>
+      <p className="groep-uitleg">Van de marktwaarde van de kaarten van een klant. In de kassa schuif je per klant tussen {PCT_MIN} en {PCT_MAX}% en rond je af; je kiest altijd zelf.</p>
       <button className="rij-knop" onClick={() => setOpen(!open)}>
         <Icoon naam={open ? "neer" : "pijlRechts"} maat={18} /> Drempels en conditiefactoren
       </button>

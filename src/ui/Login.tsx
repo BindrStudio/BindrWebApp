@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { kiesPincode, logInMetPin, logInMetWachtwoord, logUit, ontgrendel, pinGebruiker, pincodeLater, startDemo } from "../state";
-import { pinFout, wachtNog } from "../lib/pin";
+import { heeftEigenPin, kiesPincode, logInMetPin, logInMetWachtwoord, logUit, ontgrendel, pinGebruiker, pincodeLater, startDemo } from "../state";
+import { controleerPin, pinFout, wachtNog } from "../lib/pin";
 import { kies, SLOT } from "../lib/grapjes";
 import { Icoon } from "./common";
 
@@ -85,9 +85,21 @@ export function Slot() {
 
 /** Een pincode kiezen: na de eerste login met wachtwoord, of later via Meer. */
 export function PinKiezen({ inSheet = false, onKlaar }: { inSheet?: boolean; onKlaar?: () => void }) {
+  // Een bestaande pincode wijzigen: eerst de huidige, zodat niemand anders ze kan veranderen.
+  const [huidige, setHuidige] = useState<string | null>(() => (heeftEigenPin() ? null : ""));
   const [eerste, setEerste] = useState<string | null>(null);
   const [fout, setFout] = useState<string | null>(null);
   const [bezig, setBezig] = useState(false);
+  const controleer = async (pin: string) => {
+    setBezig(true);
+    const ok = await controleerPin(pin);
+    setBezig(false);
+    if (ok) { setFout(null); setHuidige(pin); } else setFout("Die pincode klopt niet");
+  };
+  if (huidige === null) {
+    const inhoud = <PinPad key="huidig" titel="Huidige pincode" sub="Geef eerst je huidige pincode in" onKlaar={(p) => void controleer(p)} fout={fout} bezig={bezig} />;
+    return inSheet ? <div className="pin-in-sheet">{inhoud}</div> : <Kader>{inhoud}</Kader>;
+  }
   const klaar = async (pin: string) => {
     if (!eerste) {
       const f = pinFout(pin);
@@ -99,7 +111,7 @@ export function PinKiezen({ inSheet = false, onKlaar }: { inSheet?: boolean; onK
     if (pin !== eerste) { setEerste(null); return setFout("De twee pincodes zijn niet gelijk. Begin opnieuw."); }
     setBezig(true);
     try {
-      await kiesPincode(pin);
+      await kiesPincode(pin, huidige || undefined);
       onKlaar?.();
     } catch (e) {
       setEerste(null);

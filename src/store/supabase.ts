@@ -9,7 +9,15 @@ const VERSIE_SLEUTEL = "bindr-schema-v1";
 const PAGINA = 1000;
 // Kolommen die pas bestaan na de update van het schema (omgevingen, prijscheck, beurslocatie).
 // Zolang de database ouder is, sturen we ze niet mee: anders weigert de server de hele wijziging.
-const NIEUWE_KOLOMMEN = ["omgeving_id", "nieuw_hartje", "locatie"];
+// Kolommen die pas in een nieuwere versie van het schema bestaan. Zolang supabase/schema.sql niet
+// opnieuw is uitgevoerd, laten we ze weg (anders weigert de server de hele wijziging).
+type Tabel = "exemplaren" | "artikelen" | "beurzen";
+const KOLOMMEN_V3 = ["omgeving_id", "nieuw_hartje", "locatie"];
+const KOLOMMEN_V4: Record<Tabel, string[]> = {
+  exemplaren: ["cert", "verkopen"],
+  artikelen: ["aankoopprijs", "foto", "details", "cardmarket_id"],
+  beurzen: [],
+};
 
 interface Sessie {
   access_token: string;
@@ -145,10 +153,10 @@ export class SupabaseBackend implements Backend {
     this.bewaar();
   }
 
-  private async alles<T>(tabel: string, volgorde: string, filter = ""): Promise<T[]> {
+  private async alles<T>(tabel: string, volgorde: string, filter = "", kolommen = "*"): Promise<T[]> {
     const uit: T[] = [];
     for (let van = 0; ; van += PAGINA) {
-      const deel = await this.vraag<T[]>("GET", `${tabel}?select=*${filter ? `&${filter}` : ""}&order=${volgorde}&limit=${PAGINA}&offset=${van}`);
+      const deel = await this.vraag<T[]>("GET", `${tabel}?select=${kolommen}${filter ? `&${filter}` : ""}&order=${volgorde}&limit=${PAGINA}&offset=${van}`);
       uit.push(...deel);
       if (deel.length < PAGINA) break;
     }
@@ -158,30 +166,41 @@ export class SupabaseBackend implements Backend {
   /** True als de database nog het schema van fase 1 heeft (geen beurzen en transacties). */
   schemaOud = false;
 
-  /** 3 = met omgevingen (oktober 2026), 2 = ouder. Null zolang we het niet weten. */
-  versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v === 2 || v === 3 ? v : null; })();
+  /** 4 = met artikel-details en graded (versie 0.5), 3 = met omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
+  versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v >= 2 && v <= 4 ? v : null; })();
 
   private async zekerVersie() {
     if (this.versie == null) await this.laadOmgevingen().catch(() => undefined);
   }
 
-  private schoon<T extends object>(r: T): T {
-    if (this.versie === 3) return r;
+  private schoon<T extends object>(r: T, tabel: Tabel): T {
+    const v = this.versie ?? 4;
+    if (v >= 4) return r;
     const k = { ...r } as Record<string, unknown>;
-    for (const x of NIEUWE_KOLOMMEN) delete k[x];
+    for (const x of KOLOMMEN_V4[tabel]) delete k[x];
+    if (v < 3) for (const x of KOLOMMEN_V3) delete k[x];
     return k as T;
+  }
+
+  private zetVersie(v: number) {
+    this.versie = v;
+    localStorage.setItem(VERSIE_SLEUTEL, String(v));
   }
 
   async laadOmgevingen(): Promise<Omgeving[]> {
     try {
       const o = await this.vraag<Omgeving[]>("GET", "omgevingen?select=id,naam,volgorde,zichtbaar_voor_klanten&order=volgorde.asc,aangemaakt_op.asc");
-      this.versie = 3;
-      localStorage.setItem(VERSIE_SLEUTEL, "3");
+      // Bestaan de kolommen van versie 0.5 al? Een onbekende kolom geeft een fout 400.
+      try {
+        await this.vraag("GET", "artikelen?select=id&limit=1&details=not.is.null&foto=is.null"); // filtert op de kolommen, zonder een foto te downloaden
+        this.zetVersie(4);
+      } catch (e) {
+        if (e instanceof Fout && e.status === 400) this.zetVersie(3); else throw e;
+      }
       return o;
     } catch (e) {
       if (e instanceof Fout && e.status === 404) {
-        this.versie = 2;
-        localStorage.setItem(VERSIE_SLEUTEL, "2");
+        this.zetVersie(2);
         return [];
       }
       throw e;
@@ -189,25 +208,57 @@ export class SupabaseBackend implements Backend {
   }
 
   async bewaarOmgeving(o: Omgeving) {
-    if (this.versie !== 3) return;
+    if ((this.versie ?? 0) < 3) return;
     await this.vraag("PATCH", `omgevingen?id=eq.${o.id}`, { naam: o.naam, zichtbaar_voor_klanten: o.zichtbaar_voor_klanten }, { Prefer: "return=minimal" });
   }
 
   async laadWijzigingen(sinds: string): Promise<Alles | null> {
-    if (this.versie !== 3) return null;
+    if ((this.versie ?? 0) < 3) return null;
     const f = `gewijzigd_op=gt.${encodeURIComponent(sinds)}`;
     const [exemplaren, artikelen, beurzen, transacties] = await Promise.all([
       this.alles<Exemplaar>("exemplaren", "gewijzigd_op.asc", f),
-      this.alles<Artikel>("artikelen", "gewijzigd_op.asc", f),
+      this.alles<Artikel>("artikelen", "gewijzigd_op.asc", f, this.artikelKolommen()),
       this.alles<Beurs>("beurzen", "gewijzigd_op.asc", f),
       this.alles<Transactie>("transacties", "gewijzigd_op.asc", f),
     ]);
-    return { exemplaren: exemplaren.map(schoonExemplaar), artikelen: artikelen.map(schoonArtikel), beurzen, transacties: transacties.map(getallen) };
+    return { exemplaren: exemplaren.map(schoonExemplaar), artikelen: (await this.vulFotos(artikelen, false)).map(schoonArtikel), beurzen, transacties: transacties.map(getallen) };
+  }
+
+  // ── Foto's van artikels: apart en enkel als ze veranderden ──────────────────
+  // Een foto is tot ~450 kB. Bij elke synchronisatie alles opnieuw downloaden kost op een beurs
+  // (4G) te veel; daarom laden we de rijen zonder foto en houden we de foto's per artikel bij.
+  private fotos = new Map<string, { gewijzigd: string | null | undefined; foto: string }>();
+
+  private artikelKolommen() {
+    return (this.versie ?? 0) >= 4
+      ? "id,naam,soort,aantal,prijs,opslag,opmerking,omgeving_id,aankoopprijs,details,cardmarket_id,gewijzigd_op"
+      : "*";
+  }
+
+  private async vulFotos(artikelen: Artikel[], alles: boolean): Promise<Artikel[]> {
+    if ((this.versie ?? 0) < 4 || !artikelen.length) return artikelen;
+    try {
+      const ids = artikelen.map((a) => a.id);
+      const metFoto: { id: string; gewijzigd_op: string | null }[] = [];
+      for (let i = 0; i < (alles ? 1 : ids.length); i += 80) {
+        const filter = alles ? "" : `&id=in.(${ids.slice(i, i + 80).join(",")})`;
+        metFoto.push(...await this.vraag<{ id: string; gewijzigd_op: string | null }[]>("GET", `artikelen?select=id,gewijzigd_op&foto=not.is.null${filter}`));
+      }
+      const nodig = metFoto.filter((x) => this.fotos.get(x.id)?.gewijzigd !== x.gewijzigd_op).map((x) => x.id);
+      for (let i = 0; i < nodig.length; i += 20) {
+        const rijen = await this.vraag<{ id: string; foto: string | null; gewijzigd_op: string | null }[]>("GET", `artikelen?select=id,foto,gewijzigd_op&id=in.(${nodig.slice(i, i + 20).join(",")})`);
+        for (const r of rijen) if (r.foto) this.fotos.set(r.id, { gewijzigd: r.gewijzigd_op, foto: r.foto });
+      }
+      const heeft = new Set(metFoto.map((x) => x.id));
+      return artikelen.map((a) => ({ ...a, foto: heeft.has(a.id) ? this.fotos.get(a.id)?.foto ?? null : null }));
+    } catch {
+      return artikelen; // foto's zijn niet nodig om te werken: volgende keer opnieuw
+    }
   }
 
   async meldAanwezig(omgevingId: string | null, scherm: string): Promise<Aanwezig[]> {
     await this.zekerVersie();
-    if (this.versie !== 3) return [];
+    if ((this.versie ?? 0) < 3) return [];
     await this.vraag("POST", "aanwezig?on_conflict=user_id", [{ user_id: this.sessie.user_id, omgeving_id: omgevingId, scherm }],
       { Prefer: "resolution=merge-duplicates,return=minimal" });
     const sinds = new Date(Date.now() - 3 * 60000).toISOString();
@@ -216,7 +267,7 @@ export class SupabaseBackend implements Backend {
 
   async markeerPrijzen(omgevingId: string | null, lijst: PrijsMarkering[]) {
     await this.zekerVersie();
-    if (this.versie !== 3 || !omgevingId) return;
+    if ((this.versie ?? 0) < 3 || !omgevingId) return;
     await this.vraag("POST", "rpc/markeer_prijzen", { omgeving: omgevingId, lijst });
   }
 
@@ -254,12 +305,14 @@ export class SupabaseBackend implements Backend {
       throw e;
     });
     this.schemaOud = false;
-    const [exemplaren, artikelen, beurzen, transacties] = await Promise.all([
+    await this.zekerVersie();
+    const [exemplaren, artikelenZonder, beurzen, transacties] = await Promise.all([
       this.alles<Exemplaar>("exemplaren", "aangemaakt_op.asc"),
-      this.alles<Artikel>("artikelen", "naam.asc"),
+      this.alles<Artikel>("artikelen", "naam.asc", "", this.artikelKolommen()),
       fase2(this.alles<Beurs>("beurzen", "datum.desc")),
       fase2(this.alles<Transactie>("transacties", "tijd.asc")),
     ]);
+    const artikelen = await this.vulFotos(artikelenZonder, true);
     return { exemplaren: exemplaren.map(schoonExemplaar), artikelen: artikelen.map(schoonArtikel), beurzen, transacties: transacties.map(getallen) };
   }
 
@@ -278,7 +331,7 @@ export class SupabaseBackend implements Backend {
 
   async voegExemplarenToe(rijen: NieuwExemplaar[]) {
     await this.zekerVersie();
-    rijen = rijen.map((r) => this.schoon(r));
+    rijen = rijen.map((r) => this.schoon(r, "exemplaren"));
     const uit: Exemplaar[] = [];
     for (let i = 0; i < rijen.length; i += 200) {
       // Met een id van de gsm zelf: opnieuw versturen (na een netwerkfout) maakt geen dubbels.
@@ -291,7 +344,7 @@ export class SupabaseBackend implements Backend {
 
   async wijzigExemplaar(id: string, wijziging: Partial<Exemplaar>) {
     await this.zekerVersie();
-    wijziging = this.schoon(wijziging);
+    wijziging = this.schoon(wijziging, "exemplaren");
     if (!Object.keys(wijziging).length) return { id } as Exemplaar;
     const r = await this.vraag<Exemplaar[]>("PATCH", `exemplaren?id=eq.${id}`, wijziging, { Prefer: "return=representation" });
     if (!r.length) throw new Fout("Exemplaar niet gevonden");
@@ -300,14 +353,14 @@ export class SupabaseBackend implements Backend {
 
   async wijzigExemplaren(ids: string[], wijziging: Partial<Exemplaar>) {
     await this.zekerVersie();
-    wijziging = this.schoon(wijziging);
+    wijziging = this.schoon(wijziging, "exemplaren");
     if (!ids.length || !Object.keys(wijziging).length) return [];
     return this.vraag<Exemplaar[]>("PATCH", `exemplaren?id=in.(${ids.join(",")})`, wijziging, { Prefer: "return=representation" });
   }
 
   async voegArtikelenToe(rijen: NieuwArtikel[]) {
     await this.zekerVersie();
-    rijen = rijen.map((r) => this.schoon(r));
+    rijen = rijen.map((r) => this.schoon(r, "artikelen"));
     if (!rijen.length) return [];
     return this.vraag<Artikel[]>("POST", "artikelen?on_conflict=id", rijen, {
       Prefer: "return=representation,missing=default,resolution=ignore-duplicates",
@@ -316,7 +369,8 @@ export class SupabaseBackend implements Backend {
 
   async wijzigArtikel(id: string, wijziging: Partial<Artikel>) {
     await this.zekerVersie();
-    wijziging = this.schoon(wijziging);
+    wijziging = this.schoon(wijziging, "artikelen");
+    if (!Object.keys(wijziging).length) return { id } as Artikel;
     const r = await this.vraag<Artikel[]>("PATCH", `artikelen?id=eq.${id}`, wijziging, { Prefer: "return=representation" });
     return r[0];
   }
@@ -325,7 +379,7 @@ export class SupabaseBackend implements Backend {
     await this.zekerVersie();
     const { id, naam, datum, standgeld, startkas, status, gestart_op, afgesloten_op, getelde_kas, sumup_bevestigd, stand_start, stand_einde, opmerking, locatie, omgeving_id } = b;
     const r = await this.vraag<Beurs[]>("POST", "beurzen?on_conflict=id", [
-      this.schoon({ id, naam, datum, standgeld, startkas, status, gestart_op, afgesloten_op, getelde_kas, sumup_bevestigd, stand_start, stand_einde, opmerking, locatie: locatie ?? null, omgeving_id }),
+      this.schoon({ id, naam, datum, standgeld, startkas, status, gestart_op, afgesloten_op, getelde_kas, sumup_bevestigd, stand_start, stand_einde, opmerking, locatie: locatie ?? null, omgeving_id }, "beurzen"),
     ], { Prefer: "return=representation,resolution=merge-duplicates" });
     return r[0] ?? b;
   }
@@ -366,10 +420,11 @@ export class SupabaseBackend implements Backend {
 
   async logUit() {
     try {
-      // Enkel deze gsm uitloggen, niet je andere toestellen.
+      // Enkel deze gsm uitloggen, niet je andere toestellen. Met een vers token, anders blijft de sessie op de server geldig.
+      const token = await this.token().catch(() => this.sessie.access_token);
       await fetch(`${SUPABASE_URL}/auth/v1/logout?scope=local`, {
         method: "POST",
-        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${this.sessie.access_token}` },
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}` },
       });
     } catch { /* offline: lokaal toch uitloggen */ }
     localStorage.removeItem(SESSIE_SLEUTEL);

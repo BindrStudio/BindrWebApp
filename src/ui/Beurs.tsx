@@ -4,11 +4,12 @@ import {
   openTransactie, planBeurs, retour, schrapBeurs, sluit, sluitBeurs, startBeurs, useApp,
 } from "../state";
 import type { Beurs, Regel, Stand, Transactie } from "../types";
-import { beursCijfers, stand } from "../lib/kassa";
+import { beursCijfers, beursOverzicht, PRODUCTSOORTEN, stand } from "../lib/kassa";
 import { datumKort, euro, getal, vandaag } from "../lib/format";
 import { normaliseerCode, toonCode } from "../lib/code";
 import { inVoorraad } from "../lib/exemplaar";
 import { Icoon, Sheet, Veld } from "./common";
+import { BeurzenEnTransacties, TransactieRij, useSoortVan } from "./Historiek";
 
 const tijdKort = (iso: string) => new Date(iso).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" });
 const SOORT_NAAM: Record<Transactie["soort"], string> = { verkoop: "Verkoop", ruil: "Ruil", inkoop: "Inkoop", retour: "Retour" };
@@ -120,7 +121,7 @@ function StandRij({ st }: { st: Stand }) {
   return (
     <div className="stand-rij">
       <div><span>Catalogus</span><strong>{st.catalogus} stuks</strong><em>{euro(st.catalogusWaarde, true)}</em></div>
-      <div><span>Artikelen</span><strong>{euro(st.artikelenWaarde, true)}</strong></div>
+      <div><span>Artikels</span><strong>{euro(st.artikelenWaarde, true)}</strong></div>
       <div><span>Voorraad</span><strong>{st.voorraad} stuks</strong></div>
     </div>
   );
@@ -165,39 +166,6 @@ export function BeursAfsluiten({ beurs, onSluit }: { beurs: Beurs; onSluit: () =
 }
 
 // ── Transacties ──────────────────────────────────────────────────────────────
-
-export function TransactiesLijst({ beursId, onSluit }: { beursId: string | null; onSluit: () => void }) {
-  const { transacties, beheerders } = useApp();
-  const lijst = useMemo(() => transacties.filter((t) => (beursId ? t.beurs_id === beursId : true)).slice().sort((a, b) => b.tijd.localeCompare(a.tijd)).slice(0, beursId ? 500 : 100), [transacties, beursId]);
-  return (
-    <Sheet titel={beursId ? "Transacties van deze beurs" : "Laatste transacties"} onSluit={onSluit} vol>
-      {!lijst.length && <p className="zacht">Nog geen transacties.</p>}
-      <ul className="transacties">
-        {lijst.map((t) => <TransactieRij key={t.id} t={t} beheerder={t.beheerder ? beheerders[t.beheerder] : undefined} />)}
-      </ul>
-    </Sheet>
-  );
-}
-
-function TransactieRij({ t, beheerder }: { t: Transactie; beheerder?: string }) {
-  const namen = t.regels.map((r) => r.naam).join(", ");
-  return (
-    <li>
-      <button className={`transactie-rij ${t.status}`} onClick={() => openTransactie(t.id)}>
-        <span className="transactie-tijd">{tijdKort(t.tijd)}</span>
-        <span className="transactie-tekst">
-          <strong>{SOORT_NAAM[t.soort]}{t.status === "ongedaan" ? " (ongedaan)" : ""}{t.status === "conflict" ? " · conflict" : ""}</strong>
-          <span className="zacht klein">{namen}</span>
-          {beheerder && <span className="zacht klein">door {beheerder}</span>}
-        </span>
-        <span className="transactie-bedrag">
-          <strong>{t.totaal >= 0 ? euro(t.totaal) : `− ${euro(-t.totaal)}`}</strong>
-          <span className="zacht klein">{[t.cash ? "cash" : null, t.sumup ? "SumUp" : null].filter(Boolean).join(" + ") || "geen geld"}</span>
-        </span>
-      </button>
-    </li>
-  );
-}
 
 export function TransactieSheet({ id }: { id: string }) {
   const { transacties, beheerders, exemplaren } = useApp();
@@ -298,10 +266,12 @@ function ConflictBlok({ t, conflictId, reden, isExemplaar }: { t: Transactie; co
 
 export function BeursRapport({ id }: { id: string }) {
   const s = useApp();
+  const soortVan = useSoortVan();
   const b = s.beurzen.find((x) => x.id === id);
   if (!b) return null;
   const tr = s.transacties.filter((t) => t.beurs_id === b.id);
   const c = beursCijfers(b, tr);
+  const o = beursOverzicht(tr, soortVan);
   const einde = b.stand_einde ?? (b.status === "actief" ? stand(s) : null);
   const resultaat = Math.round((c.omzet - c.uitbetaald) * 100) / 100;
   const verschil = b.getelde_kas != null ? Math.round((b.getelde_kas - c.kasVerwacht) * 100) / 100 : null;
@@ -317,6 +287,15 @@ export function BeursRapport({ id }: { id: string }) {
         <Cijfer label="Korting gegeven" waarde={euro(c.korting)} />
         <Cijfer label="Marge" waarde={c.marge == null ? "–" : euro(c.marge)} sub="op verkochte kaarten met aankoopprijs" />
       </div>
+      <section className="blok">
+        <h3>Per soort</h3>
+        {PRODUCTSOORTEN.filter((p) => o.verkocht[p.id].aantal > 0).map((p) => (
+          <div key={p.id} className="afsluit-rij"><span>{p.label} verkocht</span><strong>{o.verkocht[p.id].aantal} · {euro(o.verkocht[p.id].bedrag)}</strong></div>
+        ))}
+        <div className="afsluit-rij"><span>Ingekocht</span><strong>{o.ingekocht.aantal} · {euro(o.ingekocht.bedrag)}</strong></div>
+        <div className="afsluit-rij"><span>Ruil</span><strong>{o.trades.aantal} ({o.trades.weg} weg, {o.trades.binnen} binnen)</strong></div>
+        {o.retour.aantal > 0 && <div className="afsluit-rij"><span>Retour</span><strong>{o.retour.aantal} · −{euro(o.retour.bedrag)}</strong></div>}
+      </section>
       <section className="blok">
         <h3>Kaarten</h3>
         <div className="afsluit-rij"><span>Verkocht</span><strong>{c.verkocht}</strong></div>
@@ -367,12 +346,13 @@ export function Overzicht() {
   })();
   const actief = actieveBeurs(s);
   const [plan, setPlan] = useState(false);
+  const [historiek, setHistoriek] = useState(false);
   return (
     <Sheet titel="Overzicht" onSluit={sluit} vol>
       <div className="rapport-raster">
         <Cijfer label="Catalogus" waarde={euro(st.catalogusWaarde, true)} sub={`${st.catalogus} stuks, hartjes`} />
         <Cijfer label="Vault" waarde={euro(vaultWaarde, true)} sub={`${vault.length} stuks, waarde`} />
-        <Cijfer label="Artikelen" waarde={euro(st.artikelenWaarde, true)} sub="in de catalogus" />
+        <Cijfer label="Artikels" waarde={euro(st.artikelenWaarde, true)} sub="in de catalogus" />
         <Cijfer label="Aankoopwaarde" waarde={euro(aankoop, true)} sub="van alles in voorraad" />
         <Cijfer label="Gemiddelde ouderdom" waarde={leeftijd == null ? "–" : `${leeftijd} dagen`} sub="sinds invoer" />
       </div>
@@ -395,6 +375,8 @@ export function Overzicht() {
           })}
         </ul>
       </section>
+      <button className="knop zacht" onClick={() => setHistoriek(true)}><Icoon naam="historiek" maat={18} /> Alle transacties bekijken</button>
+      {historiek && <BeurzenEnTransacties start="transacties" onSluit={() => setHistoriek(false)} />}
       <button className="knop zacht" onClick={() => downloadCsv(`bindr-transacties-${vandaag()}.csv`, s.transacties, s.beheerders, s.beurzen)}>Alle transacties als CSV</button>
     </Sheet>
   );
@@ -412,7 +394,9 @@ function downloadCsv(naam: string, transacties: Transactie[], beheerders: Record
     }
   }
   const tekst = rijen.map((r) => r.map((v) => {
-    const x = v == null ? "" : typeof v === "number" ? String(v).replace(".", ",") : String(v);
+    let x = v == null ? "" : typeof v === "number" ? String(v).replace(".", ",") : String(v);
+    // Tekst die met = + - @ begint, voert Excel uit als formule: met een ' ervoor blijft het tekst.
+    if (typeof v === "string" && /^[=+\-@\t\r]/.test(x)) x = "'" + x;
     return /[;"\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x;
   }).join(";")).join("\n");
   const url = URL.createObjectURL(new Blob(["﻿" + tekst], { type: "text/csv;charset=utf-8" }));

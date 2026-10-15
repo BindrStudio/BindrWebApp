@@ -57,11 +57,18 @@ export async function controleerPin(pin: string): Promise<boolean> {
   return ok;
 }
 
+const VAAK = new Set(["147258", "258369", "159753", "357159", "147852", "789456", "456789", "102030", "010203", "142536", "131313", "202020", "696969", "112358", "314159", "271828", "100200", "200000", "123654"]);
+
 /** Een geldige pincode: 6 cijfers, en niet te makkelijk te raden. */
 export function pinFout(pin: string): string | null {
   if (!/^\d{6}$/.test(pin)) return "Een pincode heeft 6 cijfers.";
   if (/^(\d)\1{5}$/.test(pin)) return "Niet zes keer hetzelfde cijfer.";
   if ("01234567890123456".includes(pin) || "98765432109876543".includes(pin)) return "Geen reeks zoals 123456.";
+  // Patronen die mensen vaak kiezen (en die je dus snel raadt): 121212, 123123, 112233, 123321.
+  if (/^(\d\d)\1\1$/.test(pin) || /^(\d{3})\1$/.test(pin) || /^(\d)\1(\d)\2(\d)\3$/.test(pin) || pin === [...pin].reverse().join("")) {
+    return "Te makkelijk te raden. Kies 6 cijfers zonder patroon.";
+  }
+  if (VAAK.has(pin)) return "Die pincode kiezen veel mensen. Kies een andere.";
   return null;
 }
 

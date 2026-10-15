@@ -1,12 +1,16 @@
--- Bind'r Stock & Beurs App — databaseschema (fase 1, 2 en 3, omgevingen)
+-- Bind'r Stock & Beurs App — databaseschema (versie 0.5: omgevingen, artikels met foto, graded)
 --
 -- Uitvoeren: Supabase-dashboard › SQL Editor › New query › dit hele bestand plakken › Run.
 -- Het script mag gerust een tweede keer lopen; het overschrijft geen gegevens.
 --
+-- Let op vanaf 0.5: klanten zien een kaart pas als het label geplakt is (label_status
+-- 'gestickerd'). Kaarten met een geprint maar niet bevestigd label verdwijnen dus van de
+-- klantenpagina tot je ze in de app bevestigt (Labels › Nog te plakken › Zijn geplakt).
+--
 -- Beveiliging in het kort:
 --   * Enkel wie in de tabel `beheerders` staat, kan iets lezen of wijzigen.
---   * De publieke sleutel in de app geeft zonder login alleen toegang tot de
---     weergave `publieke_vitrine` (kaart, conditie, prijs van wat in de vitrine ligt).
+--   * De publieke sleutel in de app geeft zonder login alleen leestoegang tot de
+--     publieke weergaven (catalogus, binders, komende beurzen), nooit aankoopprijzen.
 --   * Zet in Authentication › Sign In / Providers "Allow new users to sign up" UIT,
 --     zodat niemand zelf een account kan maken.
 
@@ -209,6 +213,20 @@ alter table public.beurzen add column if not exists locatie text;               
 alter table public.transacties add column if not exists gewijzigd_op timestamptz not null default now();
 alter table public.transacties add column if not exists gewijzigd_door uuid;
 
+-- ── Versie 0.5: artikels (binders, sealed) met foto en details, graded kaarten ─
+alter table public.artikelen add column if not exists aankoopprijs numeric(10, 2);      -- per stuk: wat het ons kostte
+alter table public.artikelen add column if not exists foto text;                        -- eigen foto, verkleind (data:image/…)
+alter table public.artikelen add column if not exists details jsonb not null default '{}'::jsonb; -- type, grootte, artwork, techniek …
+alter table public.artikelen add column if not exists cardmarket_id integer;            -- sealed: het product op Cardmarket
+alter table public.exemplaren add column if not exists cert text;                       -- graded: certificaatnummer
+alter table public.exemplaren add column if not exists verkopen jsonb;                  -- graded: opgezochte verkopen [{datum, prijs, bron}]
+-- Een foto is altijd een kleine afbeelding, nooit een link of iets anders.
+alter table public.artikelen drop constraint if exists artikelen_foto_check;
+alter table public.artikelen add constraint artikelen_foto_check
+  check (foto is null or (length(foto) <= 600000 and foto ~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$'));
+alter table public.artikelen drop constraint if exists artikelen_details_check;
+alter table public.artikelen add constraint artikelen_details_check check (jsonb_typeof(details) = 'object');
+
 -- ── Wie is er bezig? Elk toestel meldt zich om de minuut ────────────────────
 create table if not exists public.aanwezig (
   user_id     uuid primary key default auth.uid() references auth.users (id) on delete cascade,
@@ -231,6 +249,15 @@ begin
 end;
 $$;
 
+create or replace function public.zonder_foto(r jsonb)
+returns jsonb
+language sql
+immutable
+set search_path = public
+as $$
+  select case when r ? 'foto' then (r - 'foto') || jsonb_build_object('foto', case when r->>'foto' is null then null else md5(r->>'foto') end) else r end
+$$;
+
 create or replace function public.log_wijziging()
 returns trigger
 language plpgsql
@@ -240,15 +267,16 @@ as $$
 declare
   verschil jsonb;
 begin
+  -- Foto's (tot ~450 kB) niet in het logboek: enkel dat er een foto is of dat ze wijzigde.
   if tg_op = 'INSERT' then
     insert into public.logboek (tabel, rij_id, actie, wijziging)
-    values (tg_table_name, new.id, 'toegevoegd', to_jsonb(new));
+    values (tg_table_name, new.id, 'toegevoegd', zonder_foto(to_jsonb(new)));
     return new;
   elsif tg_op = 'UPDATE' then
     select coalesce(jsonb_object_agg(n.key, jsonb_build_object('van', o.value, 'naar', n.value)), '{}'::jsonb)
       into verschil
-      from jsonb_each(to_jsonb(new)) n
-      join jsonb_each(to_jsonb(old)) o using (key)
+      from jsonb_each(zonder_foto(to_jsonb(new))) n
+      join jsonb_each(zonder_foto(to_jsonb(old))) o using (key)
      where n.value is distinct from o.value
        and n.key not in ('gewijzigd_op', 'gewijzigd_door');
     if verschil <> '{}'::jsonb then
@@ -258,7 +286,7 @@ begin
     return new;
   else
     insert into public.logboek (tabel, rij_id, actie, wijziging)
-    values (tg_table_name, old.id, 'verwijderd', to_jsonb(old));
+    values (tg_table_name, old.id, 'verwijderd', zonder_foto(to_jsonb(old)));
     return old;
   end if;
 end;
@@ -661,18 +689,28 @@ grant execute on function public.boek_transactie(jsonb), public.maak_ongedaan(uu
 -- in de catalogus (vitrine) ligt, ook al kan de publieke sleutel de tabellen zelf niet lezen.
 -- Nooit zichtbaar voor klanten: de vault (stockdoos), aankoopprijzen, transacties,
 -- omgevingen die niet aangevinkt staan, en kaarten waarvan het hartje eerst moet wisselen.
-create or replace view public.publieke_vitrine as
+-- Klanten zien enkel wat echt klaar is: in de catalogus, met een hartje dat klopt én een geplakt label.
+drop view if exists public.publieke_vitrine;
+create view public.publieke_vitrine as
   select kaart_id, catalogus, afbeelding, soort, naam, set_naam, set_code, nummer, taal, conditie,
          variant, grader, grade, hartjesprijs as prijs,
          code, naam_origineel, hartjesdatum as sinds, vitrine_sinds as toegevoegd
     from public.exemplaren
    where opslag = 'vitrine' and status = 'in voorraad' and hartjesprijs is not null and nieuw_hartje is null
+     and label_status = 'gestickerd'
      and omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten);
 
-create or replace view public.publieke_artikelen as
-  select id, naam, soort, prijs, aantal
+-- Artikels in de catalogus, en al onze binders (ook die in de vault liggen: "vraag ernaar").
+-- Enkel wat de klant mag zien: nooit de aankoopprijs of opmerkingen.
+drop view if exists public.publieke_artikelen;
+create view public.publieke_artikelen as
+  select id, naam, soort, prijs, aantal, foto,
+         details->>'type' as type, details->>'merk' as merk, details->>'grootte' as grootte,
+         case when jsonb_typeof(details->'toploader') = 'boolean' then (details->>'toploader')::boolean end as toploader, details->>'techniek' as techniek, details->>'artwork' as artwork,
+         opslag = 'vitrine' as uitgestald
     from public.artikelen
-   where opslag = 'vitrine' and aantal > 0 and prijs is not null
+   where aantal > 0 and prijs is not null
+     and (opslag = 'vitrine' or details->>'type' = 'binder')
      and omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten);
 
 -- Instellingen die de klantenpagina nodig heeft (bv. de Instagram-naam).
@@ -689,7 +727,10 @@ create or replace view public.publieke_beurzen as
      and omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten)
    order by datum, lower(naam);
 
-revoke all on public.publieke_vitrine, public.publieke_artikelen, public.publieke_instellingen, public.publieke_beurzen from anon;
+-- Enkel lezen. Supabase geeft nieuwe weergaven standaard alle rechten aan anon én authenticated;
+-- een eenvoudige weergave is aanpasbaar en loopt met de rechten van de eigenaar (zonder RLS),
+-- dus zonder deze revoke kon elke ingelogde gebruiker via de weergave de voorraad wijzigen.
+revoke all on public.publieke_vitrine, public.publieke_artikelen, public.publieke_instellingen, public.publieke_beurzen from public, anon, authenticated;
 grant select on public.publieke_vitrine, public.publieke_artikelen, public.publieke_instellingen, public.publieke_beurzen to anon, authenticated;
 
 -- ── Inloggen met een pincode ─────────────────────────────────────────────────

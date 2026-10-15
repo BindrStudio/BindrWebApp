@@ -1,5 +1,9 @@
 # Werkt elke week de kaartencatalogus bij uit de open TCGdex-database (nieuwe sets, Japans en Chinees).
 # De nachtelijke publicatie neemt de nieuwe catalogus daarna mee.
+#
+# Veiligheid: het bouwen leest code van een andere repo (TCGdex). Dat gebeurt in een job zonder
+# schrijfrechten en zonder opgeslagen GitHub-token. Een tweede job controleert dat het enkel geldige
+# JSON is en zet die dan pas in de repo.
 name: Kaartencatalogus bijwerken
 
 on:
@@ -8,13 +12,17 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  catalogus:
+  bouwen:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v6
         with:
@@ -29,6 +37,35 @@ jobs:
         run: |
           node scripts/build-catalog.mjs ../cards-database public/data
           node scripts/build-sets.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: catalogus
+          path: |
+            public/data/catalog-en.json
+            public/data/catalog-asia.json
+            public/data/sets.json
+          retention-days: 3
+
+  opslaan:
+    needs: bouwen
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: catalogus
+          path: nieuw
+
+      - name: Enkel geldige JSON overnemen
+        run: |
+          for f in catalog-en.json catalog-asia.json sets.json; do
+            node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if (typeof j !== "object" || j === null) process.exit(1)' "nieuw/$f"
+            cp "nieuw/$f" "public/data/$f"
+          done
 
       - name: Opslaan als er iets veranderde
         run: |

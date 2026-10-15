@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { openExemplaar, openToevoegen, print, sluit, useApp, wijzig, zetHartje } from "../state";
+import { bevestigLabel, openExemplaar, openToevoegen, print, sluit, useApp, wijzig, zetHartje } from "../state";
 import type { Exemplaar } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
 import { dagenGeleden, datumKort, euro, getal } from "../lib/format";
@@ -13,6 +13,8 @@ import { PLAATS } from "../lib/categorie";
 import { setIdVan } from "../lib/weergave";
 import { MarktBlok } from "./Markt";
 import { kantelVrij } from "../lib/kantel";
+import { VerkopenBlok } from "./Graded";
+import { gradedZoektekst } from "../lib/markt";
 
 export function ExemplaarSheet({ id }: { id: string }) {
   const { exemplaren, gids, instellingen, teWijzigen, printer } = useApp();
@@ -29,7 +31,12 @@ export function ExemplaarSheet({ id }: { id: string }) {
       <div className="detail-kop">
         <div className={`detail-foto zweeft${((ex.opslag === "vitrine" ? ex.hartjesprijs : ex.verkoopprijs) ?? 0) >= 50 ? " holo" : ""}`}>
           <div className="kantel-vlak" {...kantelVrij}>
-            <KaartFoto src={ex.afbeelding} kaart={ex} groot alt={ex.naam} />
+            {ex.soort === "slab" ? (
+              <div className="slab-hoes groot">
+                <span className="slab-label"><b>{ex.grader || "Graded"}</b><em>{ex.grade}</em></span>
+                <KaartFoto src={ex.afbeelding} kaart={ex} groot alt={ex.naam} />
+              </div>
+            ) : <KaartFoto src={ex.afbeelding} kaart={ex} groot alt={ex.naam} />}
             <span className="glans" />
           </div>
         </div>
@@ -45,6 +52,7 @@ export function ExemplaarSheet({ id }: { id: string }) {
       </div>
 
       <MandjeActie ex={ex} />
+      <KlantZiet ex={ex} />
 
       {wijzigNodig && (
         <div className={`melding-kaart ${wijzigNodig.richting}`}>
@@ -59,7 +67,12 @@ export function ExemplaarSheet({ id }: { id: string }) {
 
       <HartjeBlok ex={ex} voorstelPrijs={wijzigNodig?.nieuw ?? voorstel?.voorstel ?? null} />
 
-      <MarktBlok cardmarketId={ex.cardmarket_id} variant={ex.variant} taal={ex.taal} setId={ex.kaart_id ? setIdVan(ex) : null} catalogus={ex.catalogus} soort={ex.soort}>
+      {ex.soort === "slab" && (
+        <VerkopenBlok verkopen={ex.verkopen ?? []} grader={ex.grader} cert={ex.cert}
+          zoek={gradedZoektekst({ naam: ex.naam, nummer: ex.nummer, grader: ex.grader, grade: ex.grade })}
+          onChange={(verkopen) => void wijzig(ex.id, { verkopen }, undefined, true)} />
+      )}
+      {ex.soort !== "slab" && <MarktBlok cardmarketId={ex.cardmarket_id} variant={ex.variant} taal={ex.taal} setId={ex.kaart_id ? setIdVan(ex) : null} catalogus={ex.catalogus} soort={ex.soort}>
         {voorstel && (
           <div className="voorstel-rij">
             <span>Voorstel voor {ex.conditie ?? "NM"}{voorstel.factor !== 1 ? ` (${Math.round(voorstel.factor * 100)}%)` : ""}</span>
@@ -67,7 +80,7 @@ export function ExemplaarSheet({ id }: { id: string }) {
           </div>
         )}
         {voorstel?.nakijken && <p className="nakijken">Trend en 30-dagengemiddelde wijken sterk af: even nakijken.</p>}
-      </MarktBlok>
+      </MarktBlok>}
 
       <LabelBlok ex={ex} printer={printer} />
 
@@ -106,6 +119,27 @@ export function ExemplaarSheet({ id }: { id: string }) {
         <UitVoorraad ex={ex} />
       </div>
     </Sheet>
+  );
+}
+
+/** Ligt de kaart in de catalogus maar zien klanten ze (nog) niet? Zeg waarom. */
+function KlantZiet({ ex }: { ex: Exemplaar }) {
+  const { omgevingen } = useApp();
+  if (ex.opslag !== "vitrine" || ex.status !== "in voorraad") return null;
+  const redenen: string[] = [];
+  if (ex.label_status === "te printen") redenen.push("het label is nog niet geprint");
+  else if (ex.label_status === "geprint") redenen.push("het label is nog niet geplakt");
+  if (ex.hartjesprijs == null) redenen.push("er staat nog geen hartje op");
+  if (ex.nieuw_hartje != null) redenen.push("het hartje moet eerst wisselen");
+  const omg = omgevingen.find((o) => o.id === ex.omgeving_id);
+  if (omg && !omg.zichtbaar_voor_klanten) redenen.push(`${omg.naam} staat niet op de klantenpagina`);
+  if (!redenen.length) return null;
+  return (
+    <div className="klant-ziet">
+      <Icoon naam="oog" maat={18} />
+      <span>Klanten zien deze kaart nog niet: {redenen.join(", ")}.</span>
+      {ex.label_status === "geprint" && <button className="tekstknop klein" onClick={() => bevestigLabel(ex)}>Label is geplakt</button>}
+    </div>
   );
 }
 

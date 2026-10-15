@@ -60,11 +60,18 @@ function fouten(page) {
       await sheet().getByLabel("Naam (Engels)").fill(k.naam);
       if (k.taal) await sheet().locator("select").first().selectOption(k.taal);
       if (k.conditie) await sheet().getByRole("button", { name: k.conditie, exact: true }).click();
-      if (k.waarde != null) await sheet().getByLabel("Ruilwaarde of inkoopprijs (€)").fill(String(k.waarde));
-      await sheet().getByRole("button", { name: "In het mandje" }).click();
+      if (k.waarde != null) await sheet().getByLabel("Marktwaarde").fill(String(k.waarde));
+      await sheet().getByRole("button", { name: /^Toevoegen/ }).click();
       await wacht(150);
     }
     await sheet().getByRole("button", { name: /^Klaar/ }).last().click();
+  }
+  // Het bod voor alle kaarten van de klant samen: een eigen bedrag (zoals de testcase het afspreekt).
+  async function bied(bedrag) {
+    const p = page.locator(".bod-paneel");
+    await p.getByLabel("Eigen bod").fill(String(bedrag));
+    await p.getByLabel("Eigen bod").press("Enter");
+    await p.locator(".bod-stand", { hasText: String(bedrag) }).waitFor();
   }
   async function prijs(naam, bedrag) {
     const r = page.locator(".regel", { hasText: naam });
@@ -145,7 +152,7 @@ function fouten(page) {
   await page.locator(".tegel").first().click();
   await sheet().locator(".detail-foto .kantel-vlak").waitFor();
   await sheet().getByRole("button", { name: "Nieuw hartje" }).click();
-  await sheet().locator(".euro-invoer input").fill("0");
+  await sheet().locator(".hartje-blok .euro-invoer input").fill("0");
   await sheet().getByRole("button", { name: "Bewaar hartje" }).click();
   await sheet().locator(".onder-aankoop").waitFor();
   assert.ok(await sheet().locator(".onder-aankoop").getByRole("button", { name: "Naar de vault" }).isVisible());
@@ -224,6 +231,13 @@ function fouten(page) {
   await verkoop("KRG-PWF"); await afrekenen("cash"); await volgende();
   assert.match(await kas(), /€\s?350/, "cashkoffer na C");
   assert.match(await kas(), /€\s?131/, "SumUp na C");
+  stap("beurs bezig: live cijfers per soort");
+  assert.match(await page.locator(".beurs-live").innerText(), /Beurs bezig/);
+  await page.locator(".beurs-meer").click();
+  const dash = await page.locator(".beurs-dashboard").innerText();
+  for (const w of ["kaarten", "3D-print", "sealed", "Ingekocht", "Ruil"]) assert.match(dash, new RegExp(w, "i"), `dashboard toont ${w}`);
+  await foto("07b-beurs-cijfers");
+  await page.locator(".beurs-meer").click();
 
   // ── D. Onderhandelen ───────────────────────────────────────────────────────
   stap("D1: 12 → 10");
@@ -243,50 +257,70 @@ function fouten(page) {
 
   // ── E. Ruilen ──────────────────────────────────────────────────────────────
   stap("E1: gelijke ruil");
-  await verkoop("2QW-2C2"); await klantKaart([{ naam: "Ruilkaart E1", waarde: 15 }]);
+  await verkoop("2QW-2C2"); await klantKaart([{ naam: "Ruilkaart E1", waarde: 15 }]); await bied(15);
   await foto("09-ruil");
   await afrekenen(); await volgende();
   stap("E2: klant betaalt 24 bij");
-  await verkoop("GXJ-TGD"); await klantKaart([{ naam: "Ruilkaart E2a", waarde: 20 }, { naam: "Ruilkaart E2b", waarde: 10 }]);
+  await verkoop("GXJ-TGD"); await klantKaart([{ naam: "Ruilkaart E2a", waarde: 20 }, { naam: "Ruilkaart E2b", waarde: 10 }]); await bied(30);
   await afrekenen("cash"); await volgende();
   stap("E3: wij betalen 54");
-  await verkoop("Z78-0R5"); await klantKaart([{ naam: "Ruilkaart E3", waarde: 70 }]);
+  await verkoop("Z78-0R5"); await klantKaart([{ naam: "Ruilkaart E3", waarde: 70 }]); await bied(70);
   await afrekenen(); await volgende();
   stap("E4: drie kaarten tegen een binder, totaal 45");
   await verkoop("KAR-CW5"); await klantKaart([{ naam: "Ruilkaart E4a" }, { naam: "Ruilkaart E4b" }, { naam: "Ruilkaart E4c" }]);
   await totaal(wijKrijgen(), 45);
   await afrekenen(); await volgende();
   stap("E5: kaart tegen een 3D-print, wij geven 2 terug");
-  await artikel("3D-print toploaderstandaard"); await klantKaart([{ naam: "Ruilkaart E5", waarde: 10 }]);
+  await artikel("3D-print toploaderstandaard"); await klantKaart([{ naam: "Ruilkaart E5", waarde: 10 }]); await bied(10);
   await afrekenen(); await volgende();
   assert.match(await kas(), /€\s?(?:\d+\.)?\d+/);
+  stap("historiek: alle transacties met pijltjes, filter op ruil");
+  await page.getByRole("button", { name: "Historiek" }).click();
+  await sheet().getByText("Testbeurs Gent").first().waitFor();
+  await sheet().getByRole("button", { name: "Alle transacties" }).click();
+  assert.ok(await sheet().locator(".tr-icoon.verkoop").count() > 5, "verkopen met pijl");
+  await sheet().locator(".filterchips .chip", { hasText: "Ruil" }).click();
+  const ruilen = await sheet().locator(".transactie-rij").count();
+  assert.ok(ruilen >= 4 && ruilen === await sheet().locator(".tr-icoon.ruil").count(), `enkel ruilen (${ruilen})`);
+  await foto("09c-historiek");
+  await page.keyboard.press("Escape"); await wacht(200);
 
   // ── F. Inkopen ─────────────────────────────────────────────────────────────
   stap("F1: vijf kaarten voor 24");
   await klantKaart([6, 5, 5, 4, 4].map((w, i) => ({ naam: `Inkoop F1-${i + 1}`, waarde: w })));
+  await bied(24);
+  const f1 = await wijKrijgen().innerText();
+  assert.match(f1, /markt €\s?6/); // per kaart: de marktwaarde en wat we echt betalen
   await afrekenen(); await volgende();
   stap("F2 LP, F4 Chinees (bulk bestaat niet meer)");
-  await klantKaart([{ naam: "Inkoop LP", conditie: "LP", waarde: 30 }]); await afrekenen(); await volgende();
-  await klantKaart([{ naam: "Pikachu", taal: "CN-T", waarde: 8 }]); await afrekenen(); await volgende();
+  await klantKaart([{ naam: "Inkoop LP", conditie: "LP", waarde: 30 }]); await bied(30); await afrekenen(); await volgende();
+  await klantKaart([{ naam: "Pikachu", taal: "CN-T", waarde: 8 }]); await bied(8); await afrekenen(); await volgende();
 
-  stap("bod: twee kaarten uit de catalogus, marktwaarde en 70%");
+  stap("inkoop zoals aan de stand: kaart zoeken, marktwaarde, slider en afronden");
   await wijKrijgen().getByRole("button", { name: "Kaart van klant" }).click();
   for (const q of ["togekiss swsh4 178", "charizard ex obf 125"]) {
     await sheet().locator(".zoekbalk input").fill(q);
     await sheet().locator(".resultaten li button").first().click();
-    await sheet().locator(".markt").waitFor();
-    const cm = await sheet().locator(".cm-knop").getAttribute("href");
+    await sheet().locator(".markt-idee").waitFor();
+    const cm = await sheet().locator(".markt-idee a").first().getAttribute("href");
     assert.match(cm, /idProduct=\d+&language=1&minCondition=2&sellerCountry=2,23/, "Cardmarket-link met NM, Engels, BE en NL");
-    await sheet().getByRole("button", { name: "In het mandje" }).click();
+    assert.ok(Number((await sheet().getByLabel("Marktwaarde").inputValue()).replace(",", ".")) > 0, "marktwaarde voorgesteld");
+    await sheet().getByRole("button", { name: /^Toevoegen/ }).click();
     await wacht(200);
   }
   await sheet().getByRole("button", { name: /^Klaar/ }).last().click();
   const paneel = page.locator(".bod-paneel");
   await paneel.waitFor();
   assert.match(await paneel.innerText(), /70% van/);
-  await paneel.locator(".bod-keuze").nth(1).click();
+  await paneel.locator(".bod-slider input").fill("85");
+  await paneel.locator(".bod-som", { hasText: "85% van" }).waitFor();
+  await paneel.locator(".bod-keuze", { hasText: "↑" }).first().click();
   await paneel.locator(".bod-stand").waitFor();
   assert.match(await paneel.locator(".bod-stand").innerText(), /\d+% van de marktwaarde/);
+  const kaarten = await wijKrijgen().locator(".regel .prijs-knop strong").allInnerTexts();
+  const betaald = kaarten.reduce((x, t) => x + Number(t.replace(/[^\d,]/g, "").replace(",", ".")), 0);
+  const stand = Number((await paneel.locator(".bod-stand strong").innerText()).replace(/[^\d,]/g, "").replace(",", "."));
+  assert.ok(Math.abs(betaald - stand) < 0.005 && Number.isInteger(stand), `afgerond bod ${stand} verdeeld over de kaarten (${betaald})`);
   await paneel.getByLabel("Eigen bod").fill("12");
   assert.match(await paneel.locator(".bod-pct").innerText(), /\d+%/);
   await foto("09b-bod");
@@ -303,8 +337,9 @@ function fouten(page) {
   await page.getByRole("heading", { name: "Ongedaan gemaakt" }).waitFor();
   await volgende();
   stap("G4: retour deckbox");
-  await page.getByRole("button", { name: "Transacties" }).click();
-  await sheet().locator(".transactie-rij", { hasText: "3D-print deckbox" }).click();
+  await page.getByRole("button", { name: "Historiek" }).click();
+  await sheet().getByRole("button", { name: "Alle transacties" }).click();
+  await sheet().locator(".transactie-rij", { hasText: "3D-print deckbox" }).first().click();
   await sheet().getByRole("button", { name: "Retour" }).click();
   await sheet().locator(".regel", { hasText: "Booster" }).locator("input[type=checkbox]").uncheck();
   await sheet().getByRole("button", { name: /^Retour: € ?12/ }).click();
@@ -326,7 +361,7 @@ function fouten(page) {
   const label = await sheet().locator(".label-voorbeeld").getAttribute("src");
   fs.writeFileSync(path.join(SHOTS, "label-0J6-8VC.png"), Buffer.from(label.split(",")[1], "base64"));
   await sheet().getByRole("button", { name: "Nieuw hartje" }).click();
-  await sheet().locator(".euro-invoer input").fill("1150");
+  await sheet().locator(".hartje-blok .euro-invoer input").fill("1150");
   await sheet().getByRole("button", { name: "Bewaar hartje" }).click();
   await tochAlsGevraagd();
   await sheet().getByText("eigen prijs").waitFor();
@@ -361,6 +396,52 @@ function fouten(page) {
   ]) assert.match(rapport, re, w);
   await page.keyboard.press("Escape");
 
+  stap("binder toevoegen bij Meer › Artikels, met foto, in de vault");
+  await tab("Meer");
+  await page.locator(".meer-tegel", { hasText: "Artikels" }).click();
+  await sheet().getByRole("button", { name: "Nieuwe binder" }).click();
+  await sheet().locator('input[type="file"]').setInputFiles(path.resolve(__dirname, "../../public/img/eend.png"));
+  await sheet().locator(".foto-kiezer img").waitFor();
+  await sheet().getByLabel("Artwork (welk ontwerp staat erop?)").fill("Gengar");
+  await sheet().getByRole("button", { name: "Lasergravure" }).click();
+  await sheet().getByRole("button", { name: "9-pocket" }).click();
+  await sheet().getByLabel("Binder voor toploaders").check();
+  await sheet().getByLabel("Verkoopprijs per stuk (€)").fill("45");
+  await sheet().getByLabel("Kostprijs per stuk (€)").fill("18");
+  await sheet().getByRole("button", { name: "Vault", exact: true }).click();
+  await sheet().locator(".stapper button").last().click();
+  await sheet().locator(".stapper button").last().click();
+  await foto("17-binder-nieuw");
+  await sheet().getByRole("button", { name: "Toevoegen", exact: true }).click();
+  await sheet().locator(".artikel-rij", { hasText: "Gengar" }).waitFor();
+  assert.match(await sheet().locator(".artikel-rij", { hasText: "Gengar" }).innerText(), /3\s*stuks/);
+  await foto("18-artikels");
+  await page.keyboard.press("Escape"); await wacht(200);
+
+  stap("graded kaart toevoegen: slab, laatste verkopen en schatting");
+  await tab("Catalogus");
+  await page.getByRole("button", { name: "Toevoegen" }).click();
+  await sheet().locator(".zoekbalk input").fill("charizard ex obf 125");
+  await sheet().locator(".resultaten li button").first().click();
+  await sheet().getByRole("button", { name: "Graded (slab)" }).click();
+  await sheet().getByRole("button", { name: "PSA", exact: true }).click();
+  await sheet().getByLabel("Certificaat (optioneel)").fill("12345678");
+  assert.match(await sheet().locator(".sold-links a").first().getAttribute("href"), /ebay\.com\/sch\/i\.html\?_nkw=Charizard.*PSA.*10.*LH_Sold=1&LH_Complete=1/);
+  for (const [d, p] of [["2026-10-01", "180"], ["2026-09-20", "170"], ["2026-10-10", "195"]]) {
+    await sheet().getByLabel("Datum van de verkoop").fill(d);
+    await sheet().getByLabel("Prijs", { exact: true }).fill(p);
+    await sheet().getByRole("button", { name: "Voeg toe" }).click();
+  }
+  await sheet().locator(".schatting").waitFor();
+  await sheet().locator(".schatting").getByRole("button", { name: "Gebruik" }).click();
+  await foto("19-graded");
+  await sheet().getByRole("button", { name: "Catalogus (met hartje)" }).click();
+  await sheet().locator(".sheet-actie .knop").click();
+  await sheet().getByText(/Exemplaar toegevoegd/).waitFor();
+  await page.keyboard.press("Escape"); await wacht(300);
+  assert.ok(await page.locator(".tegel.slab .slab-label", { hasText: "PSA" }).count() >= 1, "slab-kader in de catalogus");
+  await foto("20-catalogus-slab");
+
   // ── Klantenpagina ──────────────────────────────────────────────────────────
   stap("klantencatalogus (demo)");
   const klant = await ctx.newPage();
@@ -370,7 +451,7 @@ function fouten(page) {
   await klant.locator(".tegel").first().waitFor();
   const verwacht = await klant.evaluate(() => {
     const d = JSON.parse(localStorage.getItem("bindr-demo-v1"));
-    return d.exemplaren.filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null && e.nieuw_hartje == null).length
+    return d.exemplaren.filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null && e.nieuw_hartje == null && e.label_status === "gestickerd").length
       + d.artikelen.filter((a) => a.opslag === "vitrine" && a.aantal > 0 && a.prijs != null).reduce((s, a) => s + a.aantal, 0);
   });
   const getoond = await klant.locator(".klant .tegel").evaluateAll((ts) => ts.reduce((s, t) => {
@@ -379,6 +460,7 @@ function fouten(page) {
   }, 0));
   assert.equal(getoond, verwacht, "klant ziet precies de catalogus (dubbels als één tegel met een aantal)");
   assert.ok(await klant.locator(".klant-merk img").isVisible(), "logo linksboven");
+  assert.match(await klant.locator(".binders").innerText(), /Gengar[\s\S]*vraag ernaar/i, "binders, ook die in de vault liggen");
   await klant.getByRole("heading", { name: "Hier vind je onze volledige catalogus" }).waitFor();
   assert.match(await klant.locator(".klant-ig-knop").getAttribute("href"), /instagram\.com\/bindr\.test\//);
   const alle = await klant.locator(".klant .tegel").count();

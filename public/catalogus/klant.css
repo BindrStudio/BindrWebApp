@@ -60,8 +60,8 @@ body { overflow-x: clip; }
 .held-cijfers span { font-size: 12px; font-weight: 700; opacity: .85; }
 @media (max-width: 420px) {
   .klant-held { grid-template-columns: minmax(0, 1fr); padding: 18px 16px 16px; gap: 6px 10px; }
-  .held-beeld { position: absolute; top: 14px; right: 14px; width: 64px; height: 64px; }
-  .held-tekst > .held-label, .klant-held h1 { margin-right: 64px; }
+  .held-beeld { position: absolute; top: 22px; right: 22px; width: 56px; height: 56px; }
+  .held-tekst > .held-label, .klant-held h1 { margin-right: 62px; }
   .klant-held h1 { font-size: clamp(22px, 6vw, 44px); }
   .klant-held p { font-size: 14px; }
   .held-cijfers { display: none; }
@@ -172,20 +172,26 @@ body { overflow-x: clip; }
 @media (min-width: 760px) {
   .klant { padding: 0 24px 40px; }
   .klant-held { padding: 34px 34px 28px; gap: 12px 24px; }
-  .held-beeld { width: 300px; height: 230px; }
+  /* Rechts in het welkomstblok: drie kaarten in een waaier, mooi in het midden, en de eend die ze vasthoudt.
+     Laden de foto's niet, dan staat de eend alleen, groot en in het midden. */
+  .klant-held { grid-template-columns: minmax(0, 1fr) 340px; }
+  .held-beeld { width: 340px; height: 250px; align-self: center; justify-self: center; }
   .waaier { display: block; position: absolute; inset: 0; }
-  .waaier img { position: absolute; top: 4px; left: 50%; width: 132px; border-radius: 9px; box-shadow: 0 14px 30px rgba(0, 0, 0, .3); opacity: 0; transition: opacity .5s;
-    transform-origin: 50% 120%; animation: waaier-in .9s var(--veer) backwards; }
+  .waaier img { position: absolute; top: 16px; left: 50%; width: 116px; margin-left: -58px; border-radius: 9px; box-shadow: 0 14px 30px rgba(0, 0, 0, .3); opacity: 0;
+    transform-origin: 50% 115%; transform: translateX(var(--x)) rotate(var(--hoek)); transition: opacity .5s, transform .5s var(--veer);
+    animation: waaier-in .9s var(--veer) backwards; }
   .waaier img.geladen { opacity: 1; }
-  .waaier .w0 { --hoek: -16deg; --x: -150%; animation-delay: .25s; }
-  .waaier .w1 { --hoek: 0deg; --x: -50%; z-index: 1; animation-delay: .1s; }
-  .waaier .w2 { --hoek: 16deg; --x: 50%; animation-delay: .4s; }
-  .waaier img { transform: translateX(var(--x)) rotate(var(--hoek)); }
-  .klant-held:hover .waaier .w0 { transform: translateX(-160%) rotate(-21deg); }
-  .klant-held:hover .waaier .w2 { transform: translateX(60%) rotate(21deg); }
-  .waaier img { transition: opacity .5s, transform .5s var(--veer); }
-  .held-beeld:has(.waaier) .held-eend { position: absolute; width: 96px; height: 96px; left: -10px; bottom: -14px; z-index: 2; }
-  .held-beeld:has(.waaier) .held-bel { display: none; }
+  .waaier .w0 { --hoek: -14deg; --x: -70px; animation-delay: .25s; }
+  .waaier .w1 { --hoek: 0deg; --x: 0px; top: 4px; z-index: 1; animation-delay: .1s; }
+  .waaier .w2 { --hoek: 14deg; --x: 70px; animation-delay: .4s; }
+  .klant-held:hover .waaier .w0 { --x: -82px; --hoek: -19deg; }
+  .klant-held:hover .waaier .w2 { --x: 82px; --hoek: 19deg; }
+  .held-eend, .held-bel { position: absolute; left: 50%; top: 50%; width: 150px; height: 150px; margin: -75px 0 0 -75px; }
+  .held-beeld:has(.waaier img.geladen) .held-eend { top: auto; bottom: -10px; width: 104px; height: 104px; margin: 0 0 0 -52px; z-index: 2; }
+  .held-beeld:has(.waaier img.geladen) .held-bel { display: none; }
+  .held-ster.s1 { left: 34px; top: 40px; }
+  .held-ster.s2 { right: 40px; top: 18px; }
+  .held-ster.s3 { right: 30px; bottom: 30px; }
   .klant-detail { grid-template-columns: minmax(260px, 340px) 1fr; gap: 24px; align-items: start; }
   .klant-detail-foto { width: 100%; }
   .klant .sheet.klant-sheet { max-width: 860px; }
@@ -195,7 +201,7 @@ body { overflow-x: clip; }
   .klant .raster { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 18px; }
 }
 
-@keyframes waaier-in { from { opacity: 0; transform: translateX(-50%) rotate(0deg) translateY(30px); } }
+@keyframes waaier-in { from { opacity: 0; transform: translateX(0) rotate(0deg) translateY(30px); } }
 
 /* Beheer-knop, de stand en komende beurzen */
 .klant-balk-rechts { display: flex; align-items: center; gap: 8px; }
@@ -218,3 +224,28 @@ body { overflow-x: clip; }
 .beurs-tekst { display: grid; gap: 1px; font-size: 14px; color: var(--inkt-2); }
 .beurs-tekst strong { color: var(--inkt); font-size: 15.5px; }
 .komende-beurzen p { margin: 0; font-size: 14px; }
+
+/* Onze binders: groot en apart, ook die niet uitgestald liggen */
+.binders { display: grid; gap: 10px; }
+.binders-kop h2 { font-size: 22px; }
+.binders-kop p { margin: 2px 0 0; color: var(--inkt-2); font-size: 14px; }
+.binders-rij { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(210px, 46%); gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; margin: 0 -16px; padding: 4px 16px 10px; scrollbar-width: none; }
+.binders-rij::-webkit-scrollbar { display: none; }
+.binder-kaart { scroll-snap-align: start; display: grid; gap: 8px; padding: 8px; border-radius: 20px; background: var(--room); box-shadow: var(--schaduw); text-align: left; animation: tegel-in .45s var(--veer) backwards; animation-delay: calc(var(--i, 0) * 50ms); }
+.binder-kaart .artikel-vlak { aspect-ratio: 4 / 5; border-radius: 14px; }
+.binder-tekst { display: grid; gap: 2px; padding: 0 4px; }
+.binder-tekst strong { font-family: var(--titel); font-weight: 600; font-size: 18px; line-height: 1.15; }
+.binder-tekst span { font-size: 13px; color: var(--inkt-2); }
+.binder-onder { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 4px 2px; }
+.binder-onder em { font-style: normal; font-size: 13px; font-weight: 700; color: var(--zee-donker); }
+.vraag-merk { position: absolute; top: 14px; left: 14px; z-index: 3; padding: 2px 8px; border-radius: 8px; background: var(--zee); color: #fff; font-size: 11px; font-weight: 800; }
+@media (min-width: 760px) {
+  .binders-rij { grid-auto-flow: row; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); overflow: visible; margin: 0; padding: 4px 0 10px; }
+}
+/* Eén binder: een brede kaart met de foto links */
+.binders-rij:has(> .binder-kaart:only-child) { grid-auto-columns: 100%; }
+.binder-kaart:only-child { grid-template-columns: 132px 1fr; grid-template-rows: 1fr auto; column-gap: 12px; }
+.binder-kaart:only-child .artikel-vlak { grid-row: 1 / 3; }
+.binder-kaart:only-child .binder-tekst { align-self: end; }
+@media (min-width: 760px) { .binder-kaart:only-child { max-width: 520px; } }
+.detail-prijsrij:empty { display: none; }

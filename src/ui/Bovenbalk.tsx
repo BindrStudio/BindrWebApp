@@ -42,7 +42,7 @@ export function Bovenbalk() {
           <button className={`omgeving-pil${beurs ? " beurs" : ""}`} onClick={() => setOpen(true)}>
             {beurs && <span className="stip" />}
             <span>{omg?.naam ?? beurs?.naam}</span>
-            {s.omgevingen.length > 1 && <Icoon naam="neer" maat={14} />}
+            {s.omgevingen.length > 1 && <Icoon naam="chevron" maat={14} />}
           </button>
         )}
       </div>

@@ -3,6 +3,7 @@
 //
 //   node scripts/fetch-prices.mjs                 download van Cardmarket (GitHub Actions)
 //   node scripts/fetch-prices.mjs --uit <bestand> gebruik een al gedownloade price_guide_6.json
+//   … --lijst <bestand>                           en een al gedownloade products_nonsingles_6.json
 //
 // Formaat: { datum, velden, p: { idProduct: [trend, laagste, gem30, trendHolo, laagsteHolo, gem30Holo, gem1, gem7, gem1Holo, gem7Holo] } }
 // (gem1 en gem7 staan achteraan, zodat oudere versies van de app het bestand nog kunnen lezen.)
@@ -12,6 +13,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const URL_GIDS = "https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_6.json";
+const URL_LIJST = "https://downloads.s3.cardmarket.com/productCatalog/productList/products_nonsingles_6.json";
 const UIT = path.join(root, "public/data/prices.json");
 
 async function catalogusIds() {
@@ -49,3 +51,32 @@ const datum = String(gids.createdAt || new Date().toISOString()).slice(0, 10);
 const uit = { datum, velden: ["trend", "laagste", "gem30", "trendHolo", "laagsteHolo", "gem30Holo", "gem1", "gem7", "gem1Holo", "gem7Holo"], p };
 await writeFile(UIT, JSON.stringify(uit));
 console.log(`prices.json: ${Object.keys(p).length} kaarten van ${rijen.length} producten, gids van ${datum}`);
+
+// ── Sealed: de publieke productlijst (geen kaarten) met de prijs uit dezelfde gids ──
+// public/data/sealed.json: { datum, velden, p: [[idProduct, naam, categorie, trend, laagste, gem30]] }
+// Mislukt dit, dan blijft de vorige sealed.json staan: de kaartprijzen hierboven gaan voor.
+try {
+  const lijst = await leesLijst();
+  const prijs = new Map(rijen.map((r) => [r.idProduct, r]));
+  const sealed = [];
+  for (const pr of lijst.products ?? []) {
+    const r = prijs.get(pr.idProduct);
+    if (!r || (r.trend == null && r.low == null)) continue;
+    sealed.push([pr.idProduct, pr.name, String(pr.categoryName || "").replace(/^Pok[eé]mon\s+/i, ""), rond(r.trend), rond(r.low), rond(r.avg30)]);
+  }
+  if (sealed.length < 50) throw new Error(`maar ${sealed.length} sealed producten met een prijs`);
+  sealed.sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+  await writeFile(path.join(root, "public/data/sealed.json"),
+    JSON.stringify({ datum, velden: ["id", "naam", "categorie", "trend", "laagste", "gem30"], p: sealed }));
+  console.log(`sealed.json: ${sealed.length} producten`);
+} catch (e) {
+  console.warn(`sealed.json niet bijgewerkt: ${e instanceof Error ? e.message : e}`);
+}
+
+async function leesLijst() {
+  const i = process.argv.indexOf("--lijst");
+  if (i > 0) return JSON.parse(await readFile(process.argv[i + 1], "utf8"));
+  const r = await fetch(URL_LIJST);
+  if (!r.ok) throw new Error(`${URL_LIJST} gaf HTTP ${r.status}`);
+  return r.json();
+}

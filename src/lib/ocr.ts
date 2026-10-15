@@ -42,33 +42,93 @@ export async function laadOcr(): Promise<void> {
   await worker();
 }
 
-/** Zwart-wit met meer contrast: helpt bij de kleine tekst onderaan een kaart. */
+/** Drempel volgens Otsu: scheidt tekst en achtergrond, ook bij een donkere of felle kaart. */
+export function otsu(grijs: Uint8ClampedArray | number[]): number {
+  const hist = new Array(256).fill(0);
+  for (const g of grijs) hist[g]++;
+  const n = grijs.length;
+  let somAlles = 0;
+  for (let i = 0; i < 256; i++) somAlles += i * hist[i];
+  let somA = 0, wA = 0, beste = 0, drempel = 127;
+  for (let t = 0; t < 256; t++) {
+    wA += hist[t];
+    if (!wA) continue;
+    const wB = n - wA;
+    if (!wB) break;
+    somA += t * hist[t];
+    const mA = somA / wA, mB = (somAlles - somA) / wB;
+    const tussen = wA * wB * (mA - mB) ** 2;
+    if (tussen > beste) { beste = tussen; drempel = t; }
+  }
+  return drempel;
+}
+
+/**
+ * Een stuk van de kaart, vergroot en zwart-wit (Otsu). Is de achtergrond donker (witte tekst,
+ * bv. full-art), dan keren we om: Tesseract leest het best zwarte tekst op wit.
+ */
 function voorbereid(bron: HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number, schaal: number): HTMLCanvasElement {
   const c = document.createElement("canvas");
-  c.width = Math.round(sw * schaal);
-  c.height = Math.round(sh * schaal);
+  c.width = Math.max(1, Math.round(sw * schaal));
+  c.height = Math.max(1, Math.round(sh * schaal));
   const ctx = c.getContext("2d", { willReadFrequently: true })!;
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(bron, sx, sy, sw, sh, 0, 0, c.width, c.height);
   const img = ctx.getImageData(0, 0, c.width, c.height);
   const d = img.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-    const v = g < 140 ? 0 : 255;
+  const grijs = new Uint8ClampedArray(d.length / 4);
+  let som = 0;
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+    grijs[j] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    som += grijs[j];
+  }
+  const drempel = otsu(grijs);
+  const donker = som / grijs.length < drempel; // meer donker dan licht: lichte tekst op donker
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+    let v = grijs[j] < drempel ? 0 : 255;
+    if (donker) v = 255 - v;
     d[i] = d[i + 1] = d[i + 2] = v;
   }
   ctx.putImageData(img, 0, 0);
   return c;
 }
 
-/** Leest de tekst van de hele kaart en, scherper, van de onderste strook met set en nummer. */
+const EEN_REGEL = { tessedit_pageseg_mode: "7", tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz/ " };
+const VRIJ = { tessedit_pageseg_mode: "11", tessedit_char_whitelist: "" };
+
+/** Staat er een kaartnummer met totaal in (bv. 125/197)? Dan is de rest niet meer nodig. */
+const heeftNummer = (t: string) => /\d{1,3}\s*[/|]\s*\d{2,3}/.test(t);
+
+/**
+ * Leest eerst de strook onderaan (links bij nieuwe kaarten, rechts bij oudere) en de naam
+ * bovenaan, vergroot en regel per regel. Enkel als daar geen nummer in staat, de hele kaart.
+ */
 export async function leesKaart(foto: HTMLCanvasElement, voortgang?: (s: string) => void): Promise<string> {
   voortgang?.("Tekstherkenning laden…");
   const w = await worker();
   voortgang?.("Kaart lezen…");
   const { width: W, height: H } = foto;
-  const onder = voorbereid(foto, 0, Math.round(H * 0.82), W, Math.round(H * 0.18), 2);
-  const geheel = voorbereid(foto, 0, 0, W, H, Math.min(1, 1400 / Math.max(W, H)));
-  const a = await w.recognize(onder);
-  const b = await w.recognize(geheel);
-  return `${a.data.text}\n${b.data.text}`;
+  const schaal = Math.max(2, Math.min(4, 900 / W)); // tekst groot genoeg (± 25 px hoog)
+  const stroken = [
+    voorbereid(foto, 0, Math.round(H * 0.88), Math.round(W * 0.55), Math.round(H * 0.12), schaal),       // linksonder: SV/SWSH
+    voorbereid(foto, Math.round(W * 0.45), Math.round(H * 0.88), Math.round(W * 0.55), Math.round(H * 0.12), schaal), // rechtsonder: ouder
+    voorbereid(foto, 0, Math.round(H * 0.82), W, Math.round(H * 0.08), schaal * 0.75),                    // net daarboven (sommige oudere layouts)
+  ];
+  const teksten: string[] = [];
+  await w.setParameters(EEN_REGEL);
+  // Stoppen zodra een strook een nummer heeft: elke herkenning kost op een gsm ± een seconde.
+  for (const s of stroken) {
+    teksten.push((await w.recognize(s)).data.text);
+    if (heeftNummer(teksten[teksten.length - 1])) break;
+  }
+  // De naam zonder filter op tekens (Ho-Oh, Farfetch'd, Flabébé).
+  await w.setParameters({ tessedit_pageseg_mode: "7", tessedit_char_whitelist: "" });
+  const naam = voorbereid(foto, Math.round(W * 0.05), Math.round(H * 0.03), Math.round(W * 0.7), Math.round(H * 0.08), Math.max(1.5, schaal * 0.6));
+  teksten.push((await w.recognize(naam)).data.text);
+  if (!teksten.some(heeftNummer)) {
+    await w.setParameters(VRIJ);
+    const geheel = voorbereid(foto, 0, 0, W, H, Math.min(1, 1400 / Math.max(W, H)));
+    teksten.push((await w.recognize(geheel)).data.text);
+  }
+  return teksten.join("\n");
 }

@@ -159,6 +159,30 @@ async function nabootsen(route) {
   await p2.locator(".tabbalk").waitFor();
   assert.ok(await p2.evaluate(() => !!localStorage.getItem("bindr-pin-v1")), "pincode bewaard op de tweede gsm");
 
+  stap("pincode wijzigen vraagt eerst de huidige");
+  await page.locator(".tabbalk button").filter({ hasText: "Meer" }).click();
+  await page.getByRole("button", { name: "Pincode wijzigen" }).click();
+  await page.getByRole("heading", { name: "Huidige pincode" }).waitFor();
+  await page.keyboard.type("111222");
+  await page.getByText("Die pincode klopt niet").waitFor();
+  await page.keyboard.type("482915");
+  await page.getByRole("heading", { name: "Kies je pincode" }).waitFor();
+  await page.keyboard.press("Escape");
+
+  stap("\"Later\" laat de gsm niet open: na een herstart opnieuw inloggen");
+  const p3 = await (await browser.newContext({ ...devices["iPhone 13"], locale: "nl-BE" })).newPage();
+  await p3.context().route(`${SUPABASE}/**`, nabootsen);
+  await p3.goto(BASIS + "beheer.html");
+  await p3.getByRole("button", { name: "Eerste keer? Log in met je wachtwoord" }).click();
+  await p3.getByPlaceholder("E-mailadres").fill(EMAIL);
+  await p3.getByPlaceholder("Wachtwoord").fill("482915");
+  await p3.getByRole("button", { name: "Inloggen", exact: true }).click();
+  await p3.getByRole("button", { name: "Later" }).click();
+  await p3.locator(".tabbalk").waitFor();
+  await p3.reload();
+  await p3.getByPlaceholder("E-mailadres").waitFor();
+  assert.equal(await p3.locator(".tabbalk").count(), 0, "zonder pincode niet meer open na een herstart");
+
   stap("uitloggen vanop het slotscherm");
   await page.evaluate(() => localStorage.setItem("bindr-actief-v1", "1"));
   await page.reload();

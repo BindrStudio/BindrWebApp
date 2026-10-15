@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { alleCodes, huidig, meld, openArtikel, openExemplaar, print, sluit, useApp, voegToe, zetInstellingen } from "../state";
-import type { Catalogus, CatalogusKaart, Exemplaar, NieuwExemplaar, Opslag, Soort } from "../types";
+import { alleCodes, huidig, meld, openArtikelen, openExemplaar, print, sluit, useApp, voegToe, zetInstellingen } from "../state";
+import type { Catalogus, CatalogusKaart, Exemplaar, NieuwExemplaar, Opslag, Soort, Verkoop } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
 import { afbeelding, herken, laadCatalogus, zoek, type Index, type Kandidaat } from "../lib/catalog";
 import { uitCatalogus } from "../lib/foto";
@@ -12,6 +12,8 @@ import { leesKaart } from "../lib/ocr";
 import { Icoon, KaartFoto, Kiezer, OnderAankoop, onderAankoop, Segment, Sheet, Veld } from "./common";
 import { MarktBlok } from "./Markt";
 import { kies, TOEGEVOEGD } from "../lib/grapjes";
+import { GradedVelden, VerkopenBlok } from "./Graded";
+import { gradedZoektekst } from "../lib/markt";
 
 type Bron = "zoeken" | "foto" | "handmatig";
 
@@ -92,10 +94,9 @@ export function KiesKaart({ onKies, onHandmatig, metArtikel = true, handmatigTek
         </div>
       )}
       {bron === "handmatig" && metArtikel && (
-        <div className="blok">
-          <p>Sealed of 3D-prints die per aantal gaan, zonder eigen label?</p>
-          <button className="knop zacht" onClick={() => openArtikel(null)}>Artikel per aantal toevoegen</button>
-        </div>
+        <p className="zacht klein center">Binders, sealed en 3D-prints gaan per aantal, zonder label: die voeg je toe bij{" "}
+          <button className="tekstknop klein inline" onClick={() => openArtikelen()}>Meer › Artikels</button>.
+        </p>
       )}
     </div>
   );
@@ -189,7 +190,15 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
     opmerking: "",
     grader: "PSA",
     grade: "10",
+    cert: "",
   });
+  const [verkopen, setVerkopen] = useState<Verkoop[]>([]);
+  // Graded: neem de verkopen over die we eerder opzochten voor dezelfde kaart, grader en grade.
+  useEffect(() => {
+    if (soort !== "slab" || !kaart || verkopen.length) return;
+    const eerder = exemplaren.find((e) => e.kaart_id === kaart.id && e.grader === v.grader && e.grade === v.grade && e.verkopen?.length);
+    if (eerder?.verkopen) setVerkopen(eerder.verkopen);
+  }, [soort, kaart, v.grader, v.grade]); // eslint-disable-line react-hooks/exhaustive-deps
   const [prijsAangeraakt, setPrijsAangeraakt] = useState(false);
   const [printen, setPrinten] = useState(instellingen.automatischPrinten);
   const [bezig, setBezig] = useState(false);
@@ -224,6 +233,7 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
           set_naam: v.setNaam.trim() || null, set_code: v.setCode.trim() || null, nummer: v.nummer.trim() || null,
           taal: soort === "eigen product" ? "EN" : v.taal, conditie: soort === "kaart" ? v.conditie : null, variant: v.variant,
           grader: soort === "slab" ? v.grader.trim() || null : null, grade: soort === "slab" ? v.grade.trim() || null : null,
+          cert: soort === "slab" ? v.cert.trim() || null : null, verkopen: soort === "slab" && verkopen.length ? verkopen : null,
           cardmarket_id: kaart?.cardmarket ?? null, opslag: v.opslag, status: "in voorraad",
           verkoopprijs: prijs, prijs_handmatig: handmatigePrijs,
           hartjesprijs: v.opslag === "vitrine" ? prijs : null, hartjesdatum: v.opslag === "vitrine" ? vandaag() : null,
@@ -268,16 +278,23 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
             </div>
           )}
           {soort !== "eigen product" && <Veld label="Setnaam"><input value={v.setNaam} onChange={(e) => setV({ ...v, setNaam: e.target.value })} /></Veld>}
-          {soort === "slab" && (
-            <div className="twee">
-              <Veld label="Grader"><input value={v.grader} onChange={(e) => setV({ ...v, grader: e.target.value })} /></Veld>
-              <Veld label="Grade"><input value={v.grade} onChange={(e) => setV({ ...v, grade: e.target.value })} /></Veld>
-            </div>
-          )}
+
           <button className="tekstknop" onClick={onTerug}>Toch zoeken in de catalogus</button>
         </>
       )}
 
+      {kaart && (
+        <Segment<"kaart" | "slab"> waarde={soort === "slab" ? "slab" : "kaart"} onKies={(x) => { setSoort(x); setPrijsAangeraakt(false); }}
+          opties={[{ waarde: "kaart", label: "Gewone kaart" }, { waarde: "slab", label: "Graded (slab)" }]} />
+      )}
+      {soort === "slab" && (
+        <>
+          <GradedVelden grader={v.grader} grade={v.grade} cert={v.cert} onChange={(w) => setV({ ...v, ...w })} />
+          <VerkopenBlok verkopen={verkopen} onChange={setVerkopen} grader={v.grader} cert={v.cert}
+            zoek={gradedZoektekst({ naam: v.naam, nummer: v.nummer, setTotaal: kaart?.setTotaal, grader: v.grader, grade: v.grade })}
+            onSchatting={(x) => { setPrijsAangeraakt(true); setV((y) => ({ ...y, prijs: String(Math.round(x)) })); }} />
+        </>
+      )}
       {kaart && soort === "kaart" && (
         <MarktBlok cardmarketId={kaart.cardmarket} variant={v.variant} taal={v.taal} setId={kaart.setId} catalogus={kaart.catalogus}>
           {voorstel && (
@@ -289,14 +306,14 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
         </MarktBlok>
       )}
 
-      {soort === "kaart" && (
+      {soort !== "eigen product" && (
         <>
           <Veld label="Taal">
             <select value={v.taal} onChange={(e) => setV({ ...v, taal: e.target.value })}>
               {talen.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
             </select>
           </Veld>
-          <Veld label="Conditie"><Kiezer waarde={v.conditie} opties={CONDITIES} onKies={(c) => setV({ ...v, conditie: c })} /></Veld>
+          {soort === "kaart" && <Veld label="Conditie"><Kiezer waarde={v.conditie} opties={CONDITIES} onKies={(c) => setV({ ...v, conditie: c })} /></Veld>}
           <Veld label="Variant"><Kiezer waarde={v.variant} opties={VARIANTEN} onKies={(c) => setV({ ...v, variant: c })} /></Veld>
         </>
       )}

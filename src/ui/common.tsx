@@ -1,10 +1,18 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { isValidElement, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { fotoBronnen, type FotoKaart } from "../lib/foto";
 import type { Exemplaar } from "../types";
 import { euro } from "../lib/format";
 
 const PADEN: Record<string, ReactNode> = {
+  chevron: <path d="m6 9 6 6 6-6" />,
+  verkoop: <><path d="M7 17 17 7" /><path d="M9 7h8v8" /></>,
+  inkoop: <><path d="M17 7 7 17" /><path d="M15 17H7V9" /></>,
+  klok: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
+  historiek: <><path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5" /><path d="M4 4v4.5h4.5M12 8v4l3 2" /></>,
+  wis: <><path d="M5 7h14M10 7V5h4v2M7 7l1 12.5a1.5 1.5 0 0 0 1.5 1.5h5a1.5 1.5 0 0 0 1.5-1.5L17 7" /></>,
+  print3d: <><path d="M5 4h14v4H5zM8 8v3h8V8M12 11v3" /><path d="M6 20h12M8 20l1.5-6h5L16 20" /></>,
+  slab: <><rect x="6" y="2.5" width="12" height="19" rx="2" /><path d="M6 7.5h12" /><rect x="8.5" y="10" width="7" height="9" rx="1" /></>,
   doos: <><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5v-9Z" /><path d="m3 7.5 9 4.5 9-4.5M12 12v9" /></>,
   scan: <><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" /><path d="M7 12h10" /></>,
   label: <><path d="M3.5 12.2V5a1.5 1.5 0 0 1 1.5-1.5h7.2l8.3 8.3a1.5 1.5 0 0 1 0 2.1l-6.9 6.9a1.5 1.5 0 0 1-2.1 0l-8-8.6Z" /><circle cx="8" cy="8" r="1.4" /></>,
@@ -58,12 +66,19 @@ export function Icoon({ naam, maat = 22, className }: { naam: keyof typeof PADEN
 let sheetNr = 0;
 
 let openSheets = 0;
+const stapel: string[] = [];
 
 export function Sheet({ titel, onSluit, children, vol = false, actie }: { titel?: ReactNode; onSluit: () => void; children: ReactNode; vol?: boolean; actie?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const id = useRef(`sheet-titel-${++sheetNr}`);
+  // Escape sluit enkel de bovenste sheet (er kan een sheet op een sheet liggen).
   useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onSluit();
+    const mijn = id.current;
+    stapel.push(mijn);
+    return () => { const i = stapel.lastIndexOf(mijn); if (i >= 0) stapel.splice(i, 1); };
+  }, []);
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && stapel[stapel.length - 1] === id.current) onSluit(); };
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
   }, [onSluit]);
@@ -159,14 +174,21 @@ export function KaartFoto({ src, alt, klein = false, kaart, groot = false }: { s
   );
 }
 
+/**
+ * Een veld met een label. Enkel rond één invoerveld is het een echte <label>: rond knoppen
+ * (keuzes, een teller) zou het label anders de eerste knop "indrukken" en die knop zijn naam geven.
+ */
 export function Veld({ label, children, hint }: { label: string; children: ReactNode; hint?: ReactNode }) {
-  return (
-    <label className="veld">
+  const c = isValidElement<{ className?: string }>(children) ? children : null;
+  const invoer = !!c && (["input", "select", "textarea"].includes(c.type as string) || (typeof c.type === "string" && /euro-invoer/.test(c.props.className ?? "")));
+  const inhoud = (
+    <>
       <span className="veld-label">{label}</span>
       {children}
       {hint && <span className="veld-hint">{hint}</span>}
-    </label>
+    </>
   );
+  return invoer ? <label className="veld">{inhoud}</label> : <div className="veld" role="group" aria-label={label}>{inhoud}</div>;
 }
 
 export function Kiezer<T extends string>({ waarde, opties, onKies }: { waarde: T; opties: readonly T[] | { waarde: T; label: string }[]; onKies: (w: T) => void }) {

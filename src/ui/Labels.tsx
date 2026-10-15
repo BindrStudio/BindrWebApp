@@ -5,6 +5,7 @@ import { toonCode } from "../lib/code";
 import { LABELMATEN, labelDataUrl } from "../lib/label";
 import { bluetoothMogelijk, huidigeMaat, isIphone } from "../lib/printer";
 import { Icoon, Leeg, Segment } from "./common";
+import { PLAATS } from "../lib/categorie";
 
 type Lijst = "te printen" | "geprint";
 const ACTIEF = (e: Exemplaar) => e.status === "in voorraad";
@@ -95,11 +96,11 @@ export function Labels({ inSheet = false }: { inSheet?: boolean }) {
               </button>
             ) : (
               <>
-                <p className="zacht klein center">Plak de labels en scan ze met Scan › Labels na elkaar bevestigen. Of zet ze hier in één keer op geplakt.</p>
+                <p className="zacht klein center">Plak de labels en scan ze daarna, of zet ze hier in één keer op geplakt. Pas dan verschijnen de kaarten op de klantenpagina.</p>
                 <div className="knoppenrij">
                   <button className="knop zacht" disabled={!selectie.length} onClick={() => void print(selectie.map((e) => e.id))}>Opnieuw printen</button>
                   <button className="knop" disabled={!selectie.length} onClick={() => { void wijzigVeel(selectie.map((e) => e.id), { label_status: "gestickerd" }); setGekozen(null); }}>
-                    <Icoon naam="check" maat={18} /> Hangen erop
+                    <Icoon naam="check" maat={18} /> Zijn geplakt
                   </button>
                 </div>
               </>
@@ -123,7 +124,7 @@ function LabelRij({ ex, aan, onWissel }: { ex: Exemplaar; aan: boolean; onWissel
       </button>
       <button className="labelrij-beeld" onClick={() => openExemplaar(ex.id)}>
         {beeld ? <img src={beeld} alt={`Label ${toonCode(ex.code)}`} /> : <span className="code">{toonCode(ex.code)}</span>}
-        <span className="zacht klein">{ex.opslag === "vitrine" ? "vitrine" : "stockdoos"} · {ex.naam}</span>
+        <span className="zacht klein">{PLAATS[ex.opslag].naam} · {ex.naam}</span>
       </button>
     </li>
   );

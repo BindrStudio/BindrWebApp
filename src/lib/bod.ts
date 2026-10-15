@@ -60,3 +60,59 @@ export function pasBodToe(regels: Regel[], bod: number): Regel[] {
   idx.forEach((i, j) => { uit[i] = { ...uit[i], prijs: delen[j] }; });
   return uit;
 }
+
+// ── Het bod zoals aan de stand: marktwaarde × percentage, dan afronden ───────
+
+/** Hoe het bod afgerond wordt. "eigen" = een bedrag dat de beheerder zelf typte. */
+export type Afronding = "exact" | "omlaag" | "omhoog" | "omlaag5" | "omhoog5" | "eigen";
+
+export interface BodInstelling {
+  pct?: number | null;       // 65–95, in stappen van 5 (leeg = standaard voor inkoop of ruil)
+  afronding: Afronding;
+  eigen?: number | null;     // bij "eigen"
+}
+
+export const PCT_MIN = 65;
+export const PCT_MAX = 95;
+
+/** Het bedrag bij een afronding (op hele euro of op 5 euro). */
+export function afgerond(exact: number, a: Exclude<Afronding, "eigen">): number {
+  const e = rond2(exact);
+  switch (a) {
+    case "omlaag": return Math.floor(e + 1e-9);
+    case "omhoog": return Math.ceil(e - 1e-9);
+    case "omlaag5": return Math.floor(e / 5 + 1e-9) * 5;
+    case "omhoog5": return Math.ceil(e / 5 - 1e-9) * 5;
+    default: return e;
+  }
+}
+
+/** Wat we bieden voor de kaarten met een marktwaarde. */
+export function bodBedrag(markt: number, pct: number, b: BodInstelling): number {
+  if (b.afronding === "eigen" && b.eigen != null && b.eigen >= 0) return rond2(b.eigen);
+  const exact = rond2((markt * pct) / 100);
+  let a: Exclude<Afronding, "eigen"> = b.afronding === "eigen" ? "exact" : b.afronding;
+  // Op 5 euro afronden enkel vanaf 20 euro; en nooit naar 0 euro voor kaarten die iets waard zijn.
+  if (exact < 20 && a === "omlaag5") a = "omlaag";
+  if (exact < 20 && a === "omhoog5") a = "omhoog";
+  const bedrag = afgerond(exact, a);
+  return bedrag <= 0 && exact > 0 ? afgerond(exact, exact >= 1 ? "omlaag" : "exact") || exact : bedrag;
+}
+
+/** De afrondingen die we tonen: op de euro, en vanaf 20 euro ook op 5 euro. Zonder dubbels. */
+export function afrondKeuzes(exact: number, gekozen?: Afronding): { afronding: Exclude<Afronding, "eigen">; bedrag: number }[] {
+  const lijst: { afronding: Exclude<Afronding, "eigen">; bedrag: number }[] = [];
+  const voeg = (a: Exclude<Afronding, "eigen">) => {
+    const bedrag = afgerond(exact, a);
+    if (bedrag <= 0) return;
+    const i = lijst.findIndex((x) => x.bedrag === bedrag);
+    if (i < 0) lijst.push({ afronding: a, bedrag });
+    else if (a === gekozen) lijst[i] = { afronding: a, bedrag }; // zelfde bedrag: toon de gekozen afronding
+  };
+  if (exact >= 20) voeg("omlaag5");
+  voeg("omlaag");
+  voeg("exact");
+  voeg("omhoog");
+  if (exact >= 20) voeg("omhoog5");
+  return lijst.sort((a, b) => a.bedrag - b.bedrag);
+}

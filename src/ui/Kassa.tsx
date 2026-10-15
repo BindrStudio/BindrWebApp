@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  actieveBeurs, afrekenen, alleCodes, bodToepassen, huidig, inMandje, mandjeLegen, meld, ongedaanMaken, openTransactie, print, totaalAanpassen,
-  useApp, verwijderRegel, wijzigRegel, zetInstellingen,
+  actieveBeurs, afrekenen, alleCodes, huidig, inMandje, mandjeLegen, meld, ongedaanMaken, openTransactie, print, totaalAanpassen,
+  bodPct, useApp, verwijderRegel, wijzigRegel, zetArtikelAantal, zetBod, zetInstellingen,
 } from "../state";
 import type { Artikel, CatalogusKaart, Exemplaar, Regel, Transactie } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
@@ -18,9 +18,11 @@ import { Badges, Hartje, Icoon, KaartFoto, Kiezer, Leeg, Segment, Sheet, Veld } 
 import { MandjeActie } from "./MandjeActie";
 import { Scanner, type FotoResultaat } from "./Scan";
 import { KiesKaart } from "./Toevoegen";
-import { BeursAfsluiten, BeursStart, geplandeBeurzen, TransactiesLijst } from "./Beurs";
-import { MarktBlok } from "./Markt";
-import { bodVoorstellen, marktwaarde, procentVan } from "../lib/bod";
+import { BeursAfsluiten, BeursStart, geplandeBeurzen } from "./Beurs";
+import { BeursDashboard, BeurzenEnTransacties } from "./Historiek";
+import { GradedVelden, SoldLinks } from "./Graded";
+import { cardmarketLink, gradedZoektekst } from "../lib/markt";
+import { afrondKeuzes, bodBedrag, marktwaarde, PCT_MAX, PCT_MIN, procentVan, type BodInstelling } from "../lib/bod";
 import { GELUKT, kies, MANDJE_LEEG } from "../lib/grapjes";
 
 type Paneel = null | "scan" | "zoek" | "artikel" | "klantkaart" | "afrekenen" | "start" | "plan" | "afsluiten" | "transacties";
@@ -46,10 +48,12 @@ export function Kassa() {
       <header className="kop">
         <div>
           <h1>Kassa</h1>
-          <p className="kop-sub">{beurs ? beurs.naam : "Geen beurs bezig"}</p>
+          {beurs
+            ? <p className="beurs-live"><span className="live-stip" /> Beurs bezig · {beurs.naam}{beurs.gestart_op ? ` · sinds ${new Date(beurs.gestart_op).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" })}` : ""}</p>
+            : <p className="kop-sub">Geen beurs bezig</p>}
         </div>
         <div className="kop-knoppen">
-          <button className="rond-knop groot" onClick={() => setPaneel("transacties")} aria-label="Transacties"><Icoon naam="kaartje" /></button>
+          <button className="pil-knop" onClick={() => setPaneel("transacties")}><Icoon naam="historiek" maat={18} /> Historiek</button>
         </div>
       </header>
 
@@ -90,7 +94,7 @@ export function Kassa() {
             </div>
             {binnen.map(({ r, i }) => <RegelRij key={i} r={r} i={i} />)}
             {binnen.some((x) => (x.r.referentie ?? 0) > 0)
-              ? <BodPaneel ruil={uit.length > 0} />
+              ? <BodPaneel />
               : binnen.length > 1 && <TotaalRij richting="in" totaal={totaalIn(regels)} />}
             <div className="kant-knoppen">
               <button className="knop zacht" onClick={() => setPaneel("klantkaart")}><Icoon naam="plus" maat={18} /> Kaart van klant</button>
@@ -120,7 +124,7 @@ export function Kassa() {
       {paneel === "start" && <BeursStart onSluit={sluit} />}
       {paneel === "plan" && <BeursStart plannen onSluit={sluit} />}
       {paneel === "afsluiten" && beurs && <BeursAfsluiten beurs={beurs} onSluit={sluit} />}
-      {paneel === "transacties" && <TransactiesLijst beursId={beurs?.id ?? null} onSluit={sluit} />}
+      {paneel === "transacties" && <BeurzenEnTransacties onSluit={sluit} />}
     </div>
   );
 }
@@ -129,6 +133,11 @@ function BeursBalk({ onStart, onPlan, onAfsluiten }: { onStart: () => void; onPl
   const s = useApp();
   const beurs = actieveBeurs(s);
   const cijfers = useMemo(() => (beurs ? beursCijfers(beurs, s.transacties.filter((t) => t.beurs_id === beurs.id)) : null), [beurs, s.transacties]);
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem("bindr-beurscijfers") === "1"; } catch { return false; } });
+  const zetOpen = (x: boolean) => { setOpen(x); try { localStorage.setItem("bindr-beurscijfers", x ? "1" : "0"); } catch { /* */ } };
+  const [vol, setVol] = useState(false);
+  const leeg = !s.mandje.regels.length;
+  useEffect(() => { if (leeg) setVol(false); }, [leeg]);
   if (!beurs || !cijfers) {
     const volgende = geplandeBeurzen(s.beurzen)[0];
     const isVandaag = volgende?.datum === vandaag();
@@ -145,14 +154,32 @@ function BeursBalk({ onStart, onPlan, onAfsluiten }: { onStart: () => void; onPl
       </div>
     );
   }
+  // Met iets in het mandje: de beurs als één smalle balk, zodat het mandje in beeld blijft.
+  if (s.mandje.regels.length > 0 && !open && !vol) {
+    return (
+      <button className="beurs-balk compact" onClick={() => setVol(true)} aria-label="Toon de cijfers van de beurs">
+        <span className="live-stip" />
+        <span>Kas <strong>{euro(cijfers.kasVerwacht)}</strong></span>
+        <span>SumUp <strong>{euro(cijfers.sumup)}</strong></span>
+        {cijfers.conflicten > 0 && <span className="badge rood-badge">{cijfers.conflicten}</span>}
+        <Icoon naam="chevron" maat={16} />
+      </button>
+    );
+  }
   return (
-    <div className="beurs-balk">
-      <div className="beurs-cijfer"><span>Cashkoffer</span><strong>{euro(cijfers.kasVerwacht)}</strong></div>
-      <div className="beurs-cijfer"><span>SumUp</span><strong>{euro(cijfers.sumup)}</strong></div>
-      <div className="beurs-cijfer"><span>Verkocht</span><strong>{cijfers.verkocht}</strong></div>
-      {cijfers.conflicten > 0 && <span className="badge rood-badge">{cijfers.conflicten} conflict</span>}
-      <button className="tekstknop klein afsluit-knop" onClick={onAfsluiten}>Afsluiten</button>
-    </div>
+    <>
+      <div className="beurs-balk">
+        <div className="beurs-cijfer"><span>Cashkoffer</span><strong>{euro(cijfers.kasVerwacht)}</strong></div>
+        <div className="beurs-cijfer"><span>SumUp</span><strong>{euro(cijfers.sumup)}</strong></div>
+        <div className="beurs-cijfer"><span>Transacties</span><strong>{cijfers.transacties}</strong></div>
+        {cijfers.conflicten > 0 && <span className="badge rood-badge">{cijfers.conflicten} conflict</span>}
+        <button className="tekstknop klein afsluit-knop" onClick={onAfsluiten}>Afsluiten</button>
+        <button className={`beurs-meer${open ? " open" : ""}`} onClick={() => zetOpen(!open)} aria-expanded={open}>
+          {open ? "Minder cijfers" : "Cijfers van deze beurs"} <Icoon naam="chevron" maat={14} />
+        </button>
+      </div>
+      {open && <BeursDashboard beurs={beurs} />}
+    </>
   );
 }
 
@@ -164,9 +191,12 @@ function RegelRij({ r, i }: { r: Regel; i: number }) {
   const [bewerk, setBewerk] = useState(false);
   const [waarde, setWaarde] = useState(String(r.prijs));
   const korting = r.hartjesprijs != null && r.prijs < r.hartjesprijs;
+  // Een kaart van de klant: je past de marktwaarde aan; wat we betalen volgt uit het bod.
+  const klantKaart = r.richting === "in" && !!r.nieuw;
   const opslaan = () => {
     const p = getal(waarde);
-    if (p != null && p >= 0) wijzigRegel(i, { prijs: Math.round(p * 100) / 100 });
+    if (klantKaart) wijzigRegel(i, p != null && p > 0 ? { referentie: Math.round(p * 100) / 100 } : { referentie: null, prijs: 0 });
+    else if (p != null && p >= 0) wijzigRegel(i, { prijs: Math.round(p * 100) / 100 });
     setBewerk(false);
   };
   return (
@@ -178,26 +208,18 @@ function RegelRij({ r, i }: { r: Regel; i: number }) {
           {r.code && <span className="code">{toonCode(r.code)}</span>}
           {ex && <> · {[ex.set_code, ex.nummer].filter(Boolean).join(" ")} {ex.conditie}</>}
           {r.nieuw && <> · {[r.nieuw.set_code, r.nieuw.nummer].filter(Boolean).join(" ")} {r.nieuw.conditie} {r.nieuw.taal !== "EN" ? r.nieuw.taal : ""}</>}
-          {r.referentie != null && <> · ref. {euro(r.referentie)}</>}
+          {r.nieuw?.soort === "slab" && <> · {[r.nieuw.grader, r.nieuw.grade].filter(Boolean).join(" ")}</>}
         </span>
-        {toonMarge && r.richting === "uit" && !r.artikel_id && (
+        {toonMarge && r.richting === "uit" && (!r.artikel_id || r.aankoopprijs != null) && (
           r.aankoopprijs != null
             ? <span className={`regel-marge${r.prijs - r.aankoopprijs < 0 ? " min" : ""}`}>inkoop {euro(r.aankoopprijs)} · {plusMin(r.prijs - r.aankoopprijs)}</span>
             : <span className="regel-marge onbekend">inkoop niet ingevuld</span>
         )}
         {r.artikel_id && r.richting === "uit" && (
           <span className="stapper klein">
-            <button onClick={() => {
-              const aantal = Math.max(1, (r.aantal ?? 1) - 1);
-              const per = (r.hartjesprijs ?? 0) / (r.aantal ?? 1);
-              wijzigRegel(i, { aantal, hartjesprijs: per * aantal, prijs: Math.round(per * aantal * 100) / 100 });
-            }} aria-label="Eén minder">−</button>
+            <button onClick={() => zetArtikelAantal(i, (r.aantal ?? 1) - 1)} aria-label="Eén minder">−</button>
             <span>{r.aantal ?? 1}</span>
-            <button onClick={() => {
-              const aantal = (r.aantal ?? 1) + 1;
-              const per = (r.hartjesprijs ?? 0) / (r.aantal ?? 1);
-              wijzigRegel(i, { aantal, hartjesprijs: per * aantal, prijs: Math.round(per * aantal * 100) / 100 });
-            }} aria-label="Eén meer">+</button>
+            <button onClick={() => zetArtikelAantal(i, (r.aantal ?? 1) + 1)} aria-label="Eén meer">+</button>
           </span>
         )}
         {r.artikel_id && r.richting === "in" && <span className="zacht klein">{r.aantal} stuks</span>}
@@ -209,10 +231,17 @@ function RegelRij({ r, i }: { r: Regel; i: number }) {
             <input autoFocus inputMode="decimal" value={waarde} onChange={(e) => setWaarde(e.target.value)} onBlur={opslaan} onKeyDown={(e) => e.key === "Enter" && opslaan()} />
           </span>
         ) : (
-          <button className="prijs-knop" onClick={() => { setWaarde(String(r.prijs).replace(".", ",")); setBewerk(true); }} aria-label="Prijs aanpassen">
-            {korting && <s>{euro(r.hartjesprijs)}</s>}
-            <strong>{r.richting === "in" && r.prijs === 0 ? "waarde?" : euro(r.prijs)}</strong>
-          </button>
+          klantKaart ? (
+            <button className="prijs-knop" onClick={() => { setWaarde(r.referentie ? String(r.referentie).replace(".", ",") : ""); setBewerk(true); }} aria-label="Marktwaarde aanpassen">
+              <strong>{r.referentie || r.prijs > 0 ? euro(r.prijs) : "markt?"}</strong>
+              <span className="regel-markt">{r.referentie ? `markt ${euro(r.referentie)}` : r.prijs > 0 ? "geen marktwaarde" : "tik om in te vullen"}</span>
+            </button>
+          ) : (
+            <button className="prijs-knop" onClick={() => { setWaarde(String(r.prijs).replace(".", ",")); setBewerk(true); }} aria-label="Prijs aanpassen">
+              {korting && <s>{euro(r.hartjesprijs)}</s>}
+              <strong>{r.richting === "in" && r.prijs === 0 ? "waarde?" : euro(r.prijs)}</strong>
+            </button>
+          )
         )}
       </div>
       <button className="rond-knop" onClick={() => verwijderRegel(i)} aria-label="Uit het mandje"><Icoon naam="kruis" maat={16} /></button>
@@ -276,69 +305,64 @@ function TotaalRij({ richting, totaal }: { richting: "uit" | "in"; totaal: numbe
 // ── Bod op de kaarten van de klant ───────────────────────────────────────────
 
 /**
- * Het bod voor de klant, op het moment zelf: de marktwaarde van zijn kaarten, het percentage
- * (inkoop 70%, ruil 80%), ronde bedragen om te kiezen en een eigen bedrag met zijn percentage.
+ * Het bod voor de kaarten van de klant, zoals aan de stand: de marktwaarde van alle kaarten
+ * samen, een percentage (slider van 65 tot 95%, per 5%), afronden naar boven of onder,
+ * en wat we dan per kaart echt betalen (zo komt het ook in de boekhouding).
  */
-function BodPaneel({ ruil }: { ruil: boolean }) {
-  const { mandje, instellingen } = useApp();
-  const [soort, setSoort] = useState<"inkoop" | "ruil">(ruil ? "ruil" : "inkoop");
-  const [eigen, setEigen] = useState("");
-  useEffect(() => { setSoort(ruil ? "ruil" : "inkoop"); }, [ruil]);
+function BodPaneel() {
+  const { mandje } = useApp();
+  const [eigen, setEigen] = useState(() => (mandje.bod?.afronding === "eigen" && mandje.bod.eigen != null ? String(mandje.bod.eigen).replace(".", ",") : ""));
   const m = marktwaarde(mandje.regels);
-  const pct = soort === "ruil" ? instellingen.ruilPct : instellingen.inkoopPct;
-  const exact = Math.round(m.totaal * pct) / 100;
-  const voorstellen = bodVoorstellen(exact, m.totaal);
-  const eigenBedrag = getal(eigen);
-  const gekozen = m.bod > 0;
-  const kies = (bod: number) => {
-    bodToepassen(bod);
-    setEigen("");
-    tril();
+  const pct = bodPct(mandje);
+  const ruil = mandje.regels.some((r) => r.richting === "uit");
+  const b = mandje.bod ?? { afronding: "exact" as const };
+  const exact = bodBedrag(m.totaal, pct, { afronding: "exact" });
+  const keuzes = afrondKeuzes(exact, b.afronding);
+  const zonderMarkt = mandje.regels.filter((r) => r.richting === "in" && !((r.referentie ?? 0) > 0)).reduce((x, r) => x + r.prijs, 0);
+  const kies = (w: Partial<BodInstelling>) => { zetBod(w); tril(); };
+  // Werd het eigen bod opzijgezet (andere kaarten), dan ook het veld leegmaken.
+  useEffect(() => { if (b.afronding !== "eigen") setEigen(""); }, [b.afronding]);
+  const typ = (tekst: string) => {
+    setEigen(tekst);
+    const n = getal(tekst);
+    if (n != null && n >= 0) zetBod({ afronding: "eigen", eigen: Math.round(n * 100) / 100 });
+    else if (!tekst.trim() && b.afronding === "eigen") zetBod({ afronding: "exact", eigen: null });
   };
-  const huidigPct = procentVan(m.bod, m.totaal);
+  const nuPct = procentVan(m.bod, m.totaal);
   return (
     <div className="bod-paneel">
       <div className="bod-kop">
-        <div>
-          <span className="zacht klein">Marktwaarde · {m.kaarten} {m.kaarten === 1 ? "kaart" : "kaarten"}</span>
-          <strong className="bod-markt">{euro(m.totaal)}</strong>
-        </div>
-        <Segment<"inkoop" | "ruil"> waarde={soort} onKies={setSoort} opties={[
-          { waarde: "inkoop", label: `Inkoop ${instellingen.inkoopPct}%` },
-          { waarde: "ruil", label: `Ruil ${instellingen.ruilPct}%` },
-        ]} />
+        <span className="zacht klein">Marktwaarde · {m.kaarten} {m.kaarten === 1 ? "kaart" : "kaarten"}</span>
+        <strong className="bod-markt">{euro(m.totaal)}</strong>
       </div>
+      <label className="bod-slider">
+        <span className="bod-slider-kop"><span>{ruil ? "Ruil" : "Inkoop"} · % van de marktwaarde</span><strong>{pct}%</strong></span>
+        <input type="range" min={PCT_MIN} max={PCT_MAX} step={5} value={pct} aria-label="Percentage van de marktwaarde"
+          onChange={(e) => { setEigen(""); kies({ pct: Number(e.target.value), afronding: b.afronding === "eigen" ? "exact" : b.afronding, eigen: null }); }} />
+        <span className="bod-schaal" aria-hidden="true">{Array.from({ length: (PCT_MAX - PCT_MIN) / 5 + 1 }, (_, i) => <span key={i}>{PCT_MIN + i * 5}</span>)}</span>
+      </label>
       <div className="bod-som">{pct}% van {euro(m.totaal)} = <strong>{euro(exact)}</strong></div>
       <div className="bod-keuzes">
-        {voorstellen.map((b) => (
-          <button key={b} className={`bod-keuze${gekozen && m.bod === b ? " aan" : ""}`} onClick={() => kies(b)}>
-            <strong>{euro(b)}</strong>
-            <span>{procentVan(b, m.totaal)}%</span>
+        {keuzes.map((k) => (
+          <button key={k.afronding} className={`bod-keuze${b.afronding === k.afronding ? " aan" : ""}`} onClick={() => { setEigen(""); kies({ afronding: k.afronding, eigen: null }); }}>
+            <strong>{euro(k.bedrag)}</strong>
+            <span>{k.afronding === "exact" ? "exact" : k.afronding.startsWith("omlaag") ? "↓ afronden" : "↑ afronden"}</span>
           </button>
         ))}
       </div>
       <div className="bod-eigen">
-        <span className="euro-invoer mini"><span>€</span>
-          <input inputMode="decimal" value={eigen} placeholder="Eigen bod" aria-label="Eigen bod"
-            onChange={(e) => setEigen(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && eigenBedrag != null && eigenBedrag >= 0) kies(eigenBedrag); }} />
+        <span className={`euro-invoer mini${b.afronding === "eigen" ? " aan" : ""}`}><span>€</span>
+          <input inputMode="decimal" value={eigen} placeholder="Eigen bod" aria-label="Eigen bod" onChange={(e) => typ(e.target.value)} />
         </span>
-        {eigenBedrag != null && eigenBedrag > 0 ? (
-          <>
-            <span className={`bod-pct${procentVan(eigenBedrag, m.totaal) > pct ? " hoog" : ""}`}>{procentVan(eigenBedrag, m.totaal)}%</span>
-            <button className="knop klein" onClick={() => kies(eigenBedrag)}>Bied</button>
-          </>
-        ) : <span className="zacht klein">typ een bedrag: je ziet meteen het percentage</span>}
+        {b.afronding === "eigen" ? <span className={`bod-pct${nuPct > 100 ? " hoog" : ""}`}>{nuPct}%</span> : <span className="zacht klein">of typ zelf een bedrag</span>}
       </div>
-      {gekozen ? (
-        <div className={`bod-stand${huidigPct > pct ? " hoog" : ""}`}>
-          <Icoon naam="check" maat={16} /> Bod {euro(m.bod)} · {huidigPct}% van de marktwaarde
-          {huidigPct > pct && <span> (boven {pct}%)</span>}
-        </div>
-      ) : (
-        <p className="zacht klein bod-uitleg">Tik een bedrag: het bod wordt verdeeld over de kaarten volgens hun marktwaarde.</p>
-      )}
-      {m.zonder > 0 && <p className="nakijken klein">{m.zonder === 1 ? "1 kaart heeft" : `${m.zonder} kaarten hebben`} geen marktprijs: geef die zelf een waarde (tik op de prijs).</p>}
+      <div className={`bod-stand${m.bod > m.totaal ? " hoog" : ""}`}>
+        <Icoon naam={m.bod > m.totaal ? "waarschuwing" : "check"} maat={16} />
+        <span>We betalen <strong>{euro(m.bod)}</strong> · {nuPct}% van de marktwaarde{m.bod > m.totaal ? ", meer dan ze waard zijn" : ""}</span>
+      </div>
+      {zonderMarkt > 0 && <p className="zacht klein">Plus {euro(zonderMarkt)} voor kaarten zonder marktwaarde.</p>}
+      <p className="zacht klein bod-uitleg">Per kaart zie je hierboven wat we echt betalen (in verhouding tot de marktwaarde). Zo komt het ook in de boekhouding.</p>
+      {m.zonder > 0 && <p className="nakijken klein">{m.zonder === 1 ? "1 kaart heeft" : `${m.zonder} kaarten hebben`} geen marktwaarde: tik op "markt?" om ze er een te geven.</p>}
     </div>
   );
 }
@@ -524,6 +548,11 @@ function KlantKaart({ onSluit }: { onSluit: () => void }) {
   );
 }
 
+/**
+ * Een kaart van de klant toevoegen, zoals aan de stand: kaart opzoeken, een idee van de
+ * marktwaarde (Cardmarket, of voor graded de laatste eBay-verkopen), zelf de marktwaarde
+ * ingeven en toevoegen. Het percentage en het afronden gebeuren daarna voor alle kaarten samen.
+ */
 function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart | null; onTerug: () => void; onKlaar: () => void }) {
   const { gids, instellingen } = useApp();
   const asia = kaart?.catalogus === "asia";
@@ -534,13 +563,23 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart 
     taal: asia ? "JP" : vorigeKlantKaart.taal === "JP" || vorigeKlantKaart.taal.startsWith("CN") ? "EN" : vorigeKlantKaart.taal,
     conditie: vorigeKlantKaart.conditie,
     variant: "normaal",
-    waarde: "",
+    graded: false,
+    grader: "PSA",
+    grade: "10",
+    cert: "",
+    markt: "",
   });
+  const [aangeraakt, setAangeraakt] = useState(false);
   const proef = (conditie: string) => voorstelVoor({ soort: "kaart", cardmarket_id: kaart?.cardmarket ?? null, taal: v.taal, conditie, variant: v.variant } as Exemplaar, gids, instellingen);
   const nm = proef("NM");
   const metConditie = proef(v.conditie);
   // Marktwaarde met conditie, op de cent (het voorstel is afgerond op hele euro's, minimum 1).
-  const markt = metConditie ? Math.round(metConditie.referentie * metConditie.factor * 100) / 100 : null;
+  const voorstel = !v.graded && metConditie ? Math.round(metConditie.referentie * metConditie.factor * 100) / 100 : null;
+  useEffect(() => {
+    if (!aangeraakt) setV((x) => ({ ...x, markt: voorstel != null ? String(voorstel).replace(".", ",") : "" }));
+  }, [voorstel, aangeraakt]);
+  const markt = getal(v.markt);
+  const zoek = gradedZoektekst({ naam: v.naam, nummer: v.nummer, setTotaal: kaart?.setTotaal, grader: v.grader, grade: v.grade });
 
   const toevoegen = () => {
     if (!v.naam.trim()) return meld("Vul een naam in", "fout");
@@ -548,14 +587,16 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart 
     const codes = new Set([...alleCodes(), ...s.mandje.regels.map((r) => r.nieuw?.code).filter(Boolean) as string[]]);
     const naamOrigineel = kaart?.catalogus === "asia" ? (v.taal.startsWith("CN") ? kaart.naamZhTw || kaart.naamZhCn || kaart.naamJa : kaart.naamJa || kaart.naamZhTw) || null : null;
     const nieuw = {
-      id: uuid(), code: nieuweCode(codes), soort: "kaart" as const, naam: v.naam.trim(), naam_origineel: naamOrigineel,
+      id: uuid(), code: nieuweCode(codes), soort: (v.graded ? "slab" : "kaart") as Exemplaar["soort"], naam: v.naam.trim(), naam_origineel: naamOrigineel,
       kaart_id: kaart?.id ?? null, catalogus: kaart?.catalogus ?? null, afbeelding: kaart ? afbeelding(kaart) : null,
       set_naam: kaart?.setNaam ?? null, set_code: v.setCode.trim() || null, nummer: v.nummer.trim() || null,
-      taal: v.taal, conditie: v.conditie, variant: v.variant, cardmarket_id: kaart?.cardmarket ?? null,
-      opslag: "stockdoos" as const, verkoopprijs: metConditie?.voorstel ?? null,
+      taal: v.taal, conditie: v.graded ? null : v.conditie, variant: v.variant, cardmarket_id: kaart?.cardmarket ?? null,
+      grader: v.graded ? v.grader : null, grade: v.graded ? v.grade.trim() || null : null, cert: v.graded ? v.cert.trim() || null : null,
+      opslag: "stockdoos" as const, verkoopprijs: v.graded ? (markt != null ? Math.round(markt) : null) : metConditie?.voorstel ?? (markt != null ? Math.max(1, Math.round(markt)) : null),
     };
     Object.assign(vorigeKlantKaart, { taal: v.taal, conditie: v.conditie });
-    inMandje(regelIn(nieuw, getal(v.waarde) ?? 0, markt));
+    // Prijs 0: het bod (percentage × marktwaarde, afgerond) verdeelt straks over alle kaarten.
+    inMandje(regelIn(nieuw, 0, markt != null && markt > 0 ? markt : null));
     onKlaar();
   };
 
@@ -580,30 +621,54 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart 
           </div>
         </>
       )}
-      <Veld label="Taal">
-        <select value={v.taal} onChange={(e) => setV({ ...v, taal: e.target.value })}>
-          {talen.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
-        </select>
-      </Veld>
-      <Veld label="Conditie (kies zelf)"><Kiezer waarde={v.conditie} opties={CONDITIES} onKies={(c) => setV({ ...v, conditie: c })} /></Veld>
-      <Veld label="Variant"><Kiezer waarde={v.variant} opties={VARIANTEN} onKies={(c) => setV({ ...v, variant: c })} /></Veld>
-      <div className="referentie">
-        <div><span>Near Mint (trend)</span><strong>{nm ? euro(nm.referentie) : "geen"}</strong></div>
-        <div><span>Marktwaarde {v.conditie}</span><strong>{markt != null ? euro(markt) : "–"}</strong></div>
+      <Segment<"raw" | "graded"> waarde={v.graded ? "graded" : "raw"} onKies={(x) => { setV({ ...v, graded: x === "graded" }); setAangeraakt(false); }}
+        opties={[{ waarde: "raw", label: "Gewone kaart" }, { waarde: "graded", label: "Graded (slab)" }]} />
+      {v.graded
+        ? <GradedVelden grader={v.grader} grade={v.grade} cert={v.cert} onChange={(w) => setV({ ...v, ...w })} />
+        : (
+          <>
+            <Veld label="Conditie"><Kiezer waarde={v.conditie} opties={CONDITIES} onKies={(c) => setV({ ...v, conditie: c })} /></Veld>
+            <div className="twee">
+              <Veld label="Taal">
+                <select value={v.taal} onChange={(e) => setV({ ...v, taal: e.target.value })}>
+                  {talen.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
+                </select>
+              </Veld>
+              <Veld label="Variant">
+                <select value={v.variant} onChange={(e) => setV({ ...v, variant: e.target.value })}>
+                  {VARIANTEN.map((x) => <option key={x}>{x}</option>)}
+                </select>
+              </Veld>
+            </div>
+          </>
+        )}
+
+      <div className="markt-idee">
+        {v.graded ? (
+          <>
+            <span className="zacht klein">Graded: kijk naar de laatste verkopen van "{zoek}".</span>
+            <SoldLinks zoek={zoek} grader={v.grader} cert={v.cert} />
+          </>
+        ) : (
+          <>
+            <span className="zacht klein">
+              {nm ? <>Cardmarket trend <strong>{euro(nm.referentie)}</strong> (NM){voorstel != null && v.conditie !== "NM" ? <> · {v.conditie}: <strong>{euro(voorstel)}</strong></> : null}</> : "Geen prijs in de prijsgids voor deze kaart."}
+            </span>
+            {kaart?.cardmarket
+              ? <a className="knop zacht klein" href={cardmarketLink(kaart.cardmarket, v.taal)} target="_blank" rel="noreferrer"><Icoon naam="link" maat={14} /> Zelf kijken op Cardmarket</a>
+              : <a className="knop zacht klein" href={`https://www.cardmarket.com/en/Pokemon/Products/Search?${new URLSearchParams({ searchString: [v.naam, v.nummer].filter(Boolean).join(" ") })}`} target="_blank" rel="noreferrer"><Icoon naam="link" maat={14} /> Zoek op Cardmarket</a>}
+          </>
+        )}
       </div>
-      {markt != null && (
-        <div className="referentie pct">
-          <div><span>Inkoop {instellingen.inkoopPct}%</span><strong>{euro(Math.round(markt * instellingen.inkoopPct) / 100)}</strong></div>
-          <div><span>Ruil {instellingen.ruilPct}%</span><strong>{euro(Math.round(markt * instellingen.ruilPct) / 100)}</strong></div>
-        </div>
-      )}
-      {kaart && <MarktBlok cardmarketId={kaart.cardmarket} variant={v.variant} taal={v.taal} setId={kaart.setId} catalogus={kaart.catalogus} />}
-      <Veld label="Ruilwaarde of inkoopprijs (€)" hint="Leeg laten is het makkelijkst: in het mandje kies je daarna één bod voor alle kaarten samen.">
-        <input inputMode="decimal" value={v.waarde} onChange={(e) => setV({ ...v, waarde: e.target.value })} placeholder="bv. 15" />
+      <Veld label="Marktwaarde (€)" hint="Wat de kaart waard is. Het percentage voor inkoop of ruil kies je daarna voor alle kaarten samen.">
+        <span className="euro-invoer groot-invoer"><span>€</span>
+          <input inputMode="decimal" value={v.markt} onChange={(e) => { setAangeraakt(true); setV({ ...v, markt: e.target.value }); }} placeholder="bv. 15" aria-label="Marktwaarde" />
+        </span>
       </Veld>
-      <p className="zacht klein">De kaart krijgt na het afrekenen een eigen code en label, en komt in de vault tot jullie er een hartje op zetten.</p>
       <div className="sheet-actie">
-        <button className="knop groot" onClick={toevoegen}><Icoon naam="plus" maat={18} /> In het mandje</button>
+        <button className="knop groot" onClick={toevoegen}>
+          <Icoon naam="plus" maat={18} /> Toevoegen{markt != null && markt > 0 ? ` · markt ${euro(markt)}` : ""}
+        </button>
       </div>
     </div>
   );
@@ -728,7 +793,7 @@ function Gelukt({ t, wisselgeld, onVolgende }: { t: Transactie; wisselgeld: numb
         {tePrinten.length > 0 && huidigT.status !== "ongedaan" && (
           <button className="knop" onClick={() => void print(tePrinten.map((e) => e.id))}><Icoon naam="printer" maat={18} /> Print {tePrinten.length === 1 ? "label" : `${tePrinten.length} labels`}</button>
         )}
-        <button className="knop zacht" onClick={onVolgende}>Volgende klant</button>
+        <button className="knop groot volgende-klant" onClick={onVolgende}>Volgende klant</button>
       </div>
       {kanTerug && huidigT.status !== "ongedaan" && <button className="tekstknop" onClick={() => ongedaanMaken(t.id)}><Icoon naam="terug" maat={16} /> Ongedaan maken</button>}
     </div>

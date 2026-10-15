@@ -117,7 +117,7 @@ export function setIdVan(k: Pick<Toonbaar, "kaart_id" | "nummer" | "set_code" | 
 export type Sortering = "nieuw" | "prijs-hoog" | "prijs-laag" | "set" | "naam";
 
 export const SORTERINGEN: { id: Sortering; label: string }[] = [
-  { id: "nieuw", label: "Nieuw binnen" },
+  { id: "nieuw", label: "Nieuwste eerst" },
   { id: "prijs-hoog", label: "Duurste eerst" },
   { id: "prijs-laag", label: "Goedkoopste eerst" },
   { id: "set", label: "Per set" },

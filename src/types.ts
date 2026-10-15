@@ -37,9 +37,30 @@ export interface Exemplaar {
   afgeboekt_op: string | null;
   vitrine_sinds?: string | null; // sinds wanneer het in de catalogus ligt (voor "Nieuw")
   nieuw_hartje?: number | null;  // prijscheck: dit hartje moet erop (null = het hartje klopt)
+  cert?: string | null;          // graded: certificaatnummer op het label van de slab
+  verkopen?: Verkoop[] | null;   // graded: laatste verkopen die we opzochten (eBay sold …)
   omgeving_id?: string | null;   // Bind'r of Brent
   aangemaakt_op: string;
   gewijzigd_op: string;
+}
+
+/** Wat voor artikel: onze binders en 3D-prints (eigen product), sealed, of iets anders. */
+export type ArtikelType = "binder" | "3d-print" | "sealed" | "andere";
+export type Techniek = "laser" | "uv" | "geschilderd";
+
+/** Extra gegevens per artikel (in de database: kolom details, jsonb). */
+export interface ArtikelDetails {
+  type?: ArtikelType;
+  // Binders
+  merk?: string | null;        // bv. Vault X
+  grootte?: string | null;     // 4-pocket, 9-pocket, 12-pocket …
+  toploader?: boolean;         // binder voor toploaders
+  artwork?: string | null;     // welk ontwerp erop staat
+  techniek?: Techniek | null;  // laser, UV-print of geschilderd
+  // Sealed
+  product?: string | null;     // booster, display, ETB …
+  set?: string | null;
+  taal?: string | null;
 }
 
 export interface Artikel {
@@ -51,9 +72,21 @@ export interface Artikel {
   opslag: Opslag;
   opmerking: string | null;
   omgeving_id?: string | null;
+  aankoopprijs?: number | null;  // per stuk (wat het ons kostte)
+  foto?: string | null;          // eigen foto (verkleind, als data-URL)
+  details?: ArtikelDetails | null;
+  cardmarket_id?: number | null; // voor sealed: het product op Cardmarket
+  gewijzigd_op?: string | null;
 }
 
 export type NieuwExemplaar = Partial<Exemplaar> & Pick<Exemplaar, "code" | "naam">;
+
+/** Een verkoop die we zelf opzochten (bv. eBay sold) om een graded kaart te prijzen. */
+export interface Verkoop {
+  datum: string;   // JJJJ-MM-DD
+  prijs: number;   // in euro
+  bron?: string | null; // eBay, 130point, beurs …
+}
 
 // ── Beurs en kassa ───────────────────────────────────────────────────────────
 

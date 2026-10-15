@@ -7,7 +7,7 @@ import { Meer } from "./ui/Meer";
 import { Login, PinKiezen, Slot } from "./ui/Login";
 import { Bovenbalk } from "./ui/Bovenbalk";
 import { ExemplaarSheet } from "./ui/ExemplaarSheet";
-import { ArtikelSheet } from "./ui/ArtikelSheet";
+import { ArtikelSheet, Artikelen } from "./ui/Artikelen";
 import { Toevoegen } from "./ui/Toevoegen";
 import { Kassa } from "./ui/Kassa";
 import { BeursRapport, Overzicht, TransactieSheet } from "./ui/Beurs";
@@ -22,7 +22,7 @@ const TABS: { id: Tab; label: string; icoon: string }[] = [
 ];
 
 export function App() {
-  const { fase, open, toasts, bezig, online, backend, tab, wachtrij, mandje } = useApp();
+  const { fase, open, toasts, bezig, online, backend, tab, wachtrij, mandje, beurzen } = useApp();
 
   useEffect(() => { void start(); }, []);
   useEffect(() => {
@@ -44,6 +44,7 @@ export function App() {
   if (fase === "pin") return <><PinKiezen /><Toasts toasts={toasts} /></>;
 
   const inMandje = mandje.regels.length;
+  const beursBezig = beurzen.some((b) => b.status === "actief");
 
   return (
     <div className="app">
@@ -67,13 +68,15 @@ export function App() {
             <span className="tab-icoon">
               <Icoon naam={t.icoon} maat={t.id === "scan" ? 28 : 24} />
               {t.id === "kassa" && inMandje > 0 && <span className="tab-teller">{inMandje}</span>}
+              {t.id === "kassa" && beursBezig && !inMandje && <span className="tab-live" aria-label="Beurs bezig" />}
             </span>
             <span>{t.label}</span>
           </button>
         ))}
       </nav>
       {open?.soort === "exemplaar" && <ExemplaarSheet id={open.id} />}
-      {open?.soort === "artikel" && <ArtikelSheet key={open.id ?? "nieuw"} id={open.id} />}
+      {open?.soort === "artikel" && <ArtikelSheet key={open.id ?? `nieuw-${open.type}`} id={open.id} type={open.type} vanLijst={open.vanLijst} />}
+      {open?.soort === "artikelen" && <Artikelen type={open.type} />}
       {open?.soort === "toevoegen" && <Toevoegen key={open.kaartId || "nieuw"} kaartId={open.kaartId} catalogus={open.catalogus} opslag={open.opslag} />}
       {open?.soort === "labels" && <Sheet titel="Labels" onSluit={sluit} vol><Labels inSheet /></Sheet>}
       {open?.soort === "transactie" && <TransactieSheet id={open.id} />}

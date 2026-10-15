@@ -9,8 +9,10 @@ import { INSTAGRAM, SUPABASE_KEY, SUPABASE_URL } from "../config";
 // Afbeeldingen en gegevens zoeken we relatief aan dit script (catalogus/app.js).
 const BASIS = new URL("../", import.meta.url).href;
 import { TALEN } from "../types";
-import { euro } from "../lib/format";
+import { euro, vandaag as vandaagLokaal } from "../lib/format";
 import { kantel, kantelVrij } from "../lib/kantel";
+import { veiligeFoto } from "../lib/eigenfoto";
+import { TECHNIEKEN } from "../lib/categorie";
 import { fotoBronnen, setLogo, type FotoKaart } from "../lib/foto";
 import { SetKiezer } from "../gedeeld/SetKiezer";
 import {
@@ -40,7 +42,12 @@ interface VitrineRij {
   sinds: string | null;       // datum van het hartje
   toegevoegd?: string | null; // sinds wanneer in de catalogus (nieuwer schema)
 }
-interface ArtikelRij { id: string; naam: string; soort: string; prijs: number | string; aantal: number }
+interface ArtikelRij {
+  id: string; naam: string; soort: string; prijs: number | string; aantal: number;
+  // Sinds versie 0.5 (ouder schema: ontbreken ze)
+  foto?: string | null; type?: string | null; merk?: string | null; grootte?: string | null; toploader?: boolean | null;
+  techniek?: string | null; artwork?: string | null; uitgestald?: boolean | null;
+}
 
 /** Eén ding in de catalogus: een kaart (één exemplaar) of een artikel (met een aantal). */
 interface Stuk extends Toonbaar {
@@ -49,6 +56,9 @@ interface Stuk extends Toonbaar {
   afbeelding: string | null;
   aantal: number;
   catalogus?: "en" | "asia" | null;
+  foto?: string | null;                 // eigen foto van een artikel
+  binder?: Pick<ArtikelRij, "merk" | "grootte" | "toploader" | "techniek" | "artwork"> | null;
+  uitgestald?: boolean;                 // artikel ligt op de stand (binders in de vault: "vraag ernaar")
 }
 
 interface KomendeBeurs { naam: string; datum: string; locatie: string | null }
@@ -74,11 +84,20 @@ function vanKaart(k: VitrineRij): Stuk {
   };
 }
 function vanArtikel(a: ArtikelRij): Stuk {
+  const binder = a.type === "binder" || (!a.type && a.soort === "eigen product" && /binder/i.test(a.naam));
   return {
     id: a.id, bron: "artikel", kaart_id: null, soort: a.soort === "eigen product" ? "eigen product" : "sealed", naam: a.naam,
     set_naam: null, set_code: null, nummer: null, taal: "", conditie: null, variant: "normaal", grader: null, grade: null,
-    prijs: Number(a.prijs), toegevoegd: null, afbeelding: null, aantal: a.aantal,
+    prijs: Number(a.prijs), toegevoegd: null, afbeelding: null, aantal: a.aantal, foto: veiligeFoto(a.foto),
+    binder: binder ? { merk: a.merk ?? null, grootte: a.grootte ?? null, toploader: a.toploader ?? null, techniek: a.techniek ?? null, artwork: a.artwork ?? null } : null,
+    uitgestald: a.uitgestald ?? true,
   };
+}
+
+const TECHNIEK_NAAM: Record<string, string> = Object.fromEntries(TECHNIEKEN.map((t) => [t.id, t.label]));
+/** "9-pocket · toploader · lasergravure" */
+function binderTekst(b: NonNullable<Stuk["binder"]>, metArtwork = false): string {
+  return [metArtwork ? b.artwork : null, b.grootte, b.toploader ? "toploader" : null, b.techniek ? TECHNIEK_NAAM[b.techniek]?.toLowerCase() : null].filter(Boolean).join(" · ");
 }
 
 async function haal<T>(pad: string): Promise<T> {
@@ -95,18 +114,19 @@ function laadDemo(): Data | null {
   try {
     const d = JSON.parse(localStorage.getItem("bindr-demo-v1") || "null");
     if (!d) return { stukken: [], instagram: INSTAGRAM, beurzen: [] };
-    // Zoals de publieke weergaven: enkel aangevinkte omgevingen, en geen kaarten waarvan het hartje moet wisselen.
+    // Zoals de publieke weergaven: enkel aangevinkte omgevingen, geen kaarten waarvan het hartje moet wisselen of het label nog niet hangt.
     const zichtbaar = new Set(((d.omgevingen ?? []) as { id: string; zichtbaar_voor_klanten: boolean }[]).filter((o) => o.zichtbaar_voor_klanten).map((o) => o.id));
     const toon = (r: { omgeving_id?: string | null }) => !zichtbaar.size || !r.omgeving_id || zichtbaar.has(r.omgeving_id);
-    type DemoEx = VitrineRij & { opslag: string; status: string; hartjesprijs: number | null; hartjesdatum: string | null; vitrine_sinds?: string | null; nieuw_hartje?: number | null; omgeving_id?: string | null };
+    type DemoEx = VitrineRij & { opslag: string; status: string; hartjesprijs: number | null; hartjesdatum: string | null; vitrine_sinds?: string | null; nieuw_hartje?: number | null; omgeving_id?: string | null; label_status?: string };
     const kaarten = (d.exemplaren as DemoEx[])
-      .filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null && e.nieuw_hartje == null && toon(e))
+      .filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null && e.nieuw_hartje == null && e.label_status === "gestickerd" && toon(e))
       .map((e) => vanKaart({ ...e, prijs: e.hartjesprijs!, sinds: e.hartjesdatum, toegevoegd: e.vitrine_sinds ?? e.hartjesdatum }));
-    const artikelen = (d.artikelen as (ArtikelRij & { opslag: string; omgeving_id?: string | null })[])
-      .filter((a) => a.opslag === "vitrine" && a.aantal > 0 && a.prijs != null && toon(a))
-      .map(vanArtikel);
+    type DemoArt = ArtikelRij & { opslag: string; omgeving_id?: string | null; details?: Record<string, unknown> | null };
+    const artikelen = (d.artikelen as DemoArt[])
+      .filter((a) => (a.opslag === "vitrine" || a.details?.type === "binder") && a.aantal > 0 && a.prijs != null && toon(a))
+      .map((a) => vanArtikel({ ...a, ...(a.details ?? {}), uitgestald: a.opslag === "vitrine" } as ArtikelRij));
     const ig = d.instellingen?.instagram;
-    const vandaag = new Date().toISOString().slice(0, 10);
+    const vandaag = vandaagLokaal();
     const beurzen = ((d.beurzen ?? []) as (KomendeBeurs & { status: string; omgeving_id?: string | null })[])
       .filter((b) => (b.status === "gepland" || b.status === "actief") && b.datum >= vandaag && toon(b))
       .map((b) => ({ naam: b.naam, datum: b.datum, locatie: b.locatie ?? null }))
@@ -153,14 +173,22 @@ function Catalogus() {
   useEffect(() => {
     fetch(`${BASIS}data/sets.json`).then((r) => (r.ok ? r.json() : null)).then(setSets).catch(() => setSets(null));
     if (demo) { setData(demo); return; }
+    // Eerst alles zonder foto's (snel, ook op 4G aan de stand); de foto's van artikels komen daarna.
+    const artikelKolommen = "id,naam,soort,prijs,aantal,type,merk,grootte,toploader,techniek,artwork,uitgestald";
     Promise.all([
       haal<VitrineRij[]>("publieke_vitrine?select=*"),
-      haal<ArtikelRij[]>("publieke_artikelen?select=*").catch(() => []),
+      haal<ArtikelRij[]>(`publieke_artikelen?select=${artikelKolommen}`).catch(() => haal<ArtikelRij[]>("publieke_artikelen?select=*")).catch(() => []),
       haal<{ sleutel: string; waarde: unknown }[]>("publieke_instellingen?select=*").catch(() => []),
       haal<KomendeBeurs[]>("publieke_beurzen?select=*").catch(() => []),
     ]).then(([kaarten, artikelen, inst, beurzen]) => {
       const ig = inst.find((x) => x.sleutel === "instagram")?.waarde;
       setData({ stukken: [...kaarten.map(vanKaart), ...artikelen.map(vanArtikel)], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, beurzen });
+      if (artikelen.length) {
+        haal<{ id: string; foto: string | null }[]>("publieke_artikelen?select=id,foto&foto=not.is.null").then((fotos) => {
+          const per = new Map(fotos.map((f) => [f.id, veiligeFoto(f.foto)]));
+          if (per.size) setData((d) => d && { ...d, stukken: d.stukken.map((x) => (x.bron === "artikel" && per.get(x.id) ? { ...x, foto: per.get(x.id) } : x)) });
+        }).catch(() => undefined);
+      }
     }).catch(() => setFout("De catalogus kon niet geladen worden. Probeer het straks opnieuw."));
   }, [demo]);
 
@@ -192,18 +220,22 @@ function Catalogus() {
     return [...m.values()].sort((a, b) => b.release.localeCompare(a.release) || a.naam.localeCompare(b.naam));
   }, [stukken, sets]);
 
+  // Binders apart en groot bovenaan (bij "Alles" en "Bind'r", zonder zoeken of filters); dan niet nog eens in het raster.
+  const binderVitrine = (cat === "alles" || cat === "bindr") && !zoek.trim() && !filters.size && !set;
   const groepen = useMemo(() => {
     const woorden = zoekWoorden(zoek);
     const zichtbaar = stukken.filter((s) =>
+      !(binderVitrine && s.binder) &&
       (cat === "alles" || catVan(s) === cat) &&
       (!set || setIdVan(s) === set) &&
       pastFilters(s, filters) &&
       (!woorden.length || pastZoek(zoekTekst(s), woorden)));
     const g = groepeer(zichtbaar, (s) => (s.bron === "artikel" ? `a|${s.id}` : groepSleutel(s)));
     return sorteer(g, sort, (x) => x.eerste, sets);
-  }, [stukken, cat, set, filters, zoek, sort, sets]);
+  }, [stukken, cat, set, filters, zoek, sort, sets, binderVitrine]);
 
   const actief = filters.size + (set ? 1 : 0) + (zoek.trim() ? 1 : 0) + (cat !== "alles" ? 1 : 0);
+  const binderGroepen = useMemo(() => (binderVitrine ? groepeer(stukken.filter((s) => s.binder), (s) => `a|${s.id}`) : []), [stukken, binderVitrine]);
   const wisAlles = () => { setFilters(new Set()); setSet(""); setZoek(""); setCat("alles"); };
   const wissel = (f: Snelfilter) => {
     const n = new Set(filters);
@@ -269,6 +301,8 @@ function Catalogus() {
         )}
       </section>
 
+      {binderGroepen.length > 0 && <Binders binders={binderGroepen} onOpen={setOpen} />}
+
       {fout && <p className="klant-fout">{fout}</p>}
       {!data && !fout && (
         <div className="raster laad-raster" aria-label="Catalogus laden">
@@ -313,12 +347,12 @@ function Catalogus() {
               ))}
             </div>
             <div className="klant-resultaat">
-              <span>{groepen.reduce((s, g) => s + aantalVan(g), 0)} {groepen.length === 1 && aantalVan(groepen[0]) === 1 ? "item" : "items"} · {SORTERINGEN.find((x) => x.id === sort)?.label.toLowerCase()}</span>
+              <span>{(() => { const n = groepen.reduce((s, g) => s + aantalVan(g), 0); return `${n} ${n === 1 ? "stuk" : "stuks"}`; })()} · {SORTERINGEN.find((x) => x.id === sort)?.label.toLowerCase()}</span>
               {actief > 0 && <button className="tekstknop klein" onClick={wisAlles}>Wis filters</button>}
             </div>
           </div>
 
-          {!groepen.length ? (
+          {!groepen.length && binderGroepen.length ? null : !groepen.length ? (
             <div className="klant-leeg">
               <img src={`${BASIS}img/eend.png`} alt="" width={96} height={96} />
               <p>{stukken.length ? "Niets gevonden met deze filters. Haal er een weg:" : "De catalogus is nog leeg. Kom zeker eens langs op de beurs!"}</p>
@@ -368,18 +402,22 @@ function KlantTegel({ g, i, onOpen }: { g: Groep<Stuk>; i: number; onOpen: () =>
   const s = g.eerste;
   const n = aantalVan(g);
   const nieuw = isNieuw(s);
-  const holo = s.bron === "kaart" && s.prijs >= 50;
+  const slab = s.bron === "kaart" && s.soort === "slab";
+  const holo = s.bron === "kaart" && s.prijs >= 50 && !slab;
   return (
-    <button className={`tegel${holo ? " holo" : ""}${s.bron === "artikel" ? " artikel-tegel" : ""}`} style={{ ["--i" as string]: Math.min(i, 24) }} onClick={onOpen} {...kantel}
+    <button className={`tegel${holo ? " holo" : ""}${slab ? " slab" : ""}${s.bron === "artikel" ? " artikel-tegel" : ""}`} style={{ ["--i" as string]: Math.min(i, 24) }} onClick={onOpen} {...kantel}
       aria-label={`${s.naam}, ${euro(s.prijs)}${n > 1 ? `, ${n} stuks` : ""}`}>
       {s.bron === "artikel"
-        ? <div className={`artikel-vlak ${s.soort === "eigen product" ? "bindr" : "sealed"}`}><span className="artikel-glyph">{s.soort === "eigen product" ? "B" : "✦"}</span><span className="glans" /></div>
-        : <Foto kaart={s} alt={s.naam} />}
+        ? <ArtikelBeeld s={s} />
+        : s.soort === "slab"
+          ? <div className="slab-hoes"><span className="slab-label"><b>{s.grader || "Graded"}</b><em>{s.grade}</em></span><Foto kaart={s} alt={s.naam} /></div>
+          : <Foto kaart={s} alt={s.naam} />}
+      {s.bron === "artikel" && !s.uitgestald && <span className="vraag-merk">Vraag ernaar</span>}
       {n > 1 && <span className="aantal-merk" aria-hidden="true">×{n}</span>}
       {nieuw && <span className="nieuw-merk">Nieuw</span>}
       <div className="tegel-info">
         <div className="tegel-naam">{s.naam}</div>
-        <div className="tegel-set">{s.bron === "artikel" ? (s.soort === "eigen product" ? "Bind'r" : "Sealed") : [s.set_code, s.nummer].filter(Boolean).join(" ") || (s.soort === "eigen product" ? "Bind'r" : "")}</div>
+        <div className="tegel-set">{s.bron === "artikel" ? (s.binder ? binderTekst(s.binder) || "Bind'r-binder" : s.soort === "eigen product" ? "Bind'r" : "Sealed") : [s.set_code, s.nummer].filter(Boolean).join(" ") || (s.soort === "eigen product" ? "Bind'r" : "")}</div>
         <div className="tegel-onder">
           <span className="badges">
             {s.bron === "kaart" && (s.soort === "slab" ? <span className="badge">{[s.grader, s.grade].filter(Boolean).join(" ") || "Graded"}</span> : s.conditie && <span className="badge">{s.conditie}</span>)}
@@ -390,6 +428,47 @@ function KlantTegel({ g, i, onOpen }: { g: Groep<Stuk>; i: number; onOpen: () =>
         </div>
       </div>
     </button>
+  );
+}
+
+/** Een artikel: de eigen foto, of anders een vlak met de B van Bind'r of een sterretje voor sealed. */
+function ArtikelBeeld({ s }: { s: Stuk }) {
+  const bindr = s.soort === "eigen product";
+  return (
+    <div className={`artikel-vlak ${bindr ? "bindr" : "sealed"}${s.foto ? " met-foto" : ""}`}>
+      {s.foto ? <img src={s.foto} alt={s.naam} loading="lazy" /> : <span className="artikel-glyph">{bindr ? "B" : "✦"}</span>}
+      <span className="glans" />
+    </div>
+  );
+}
+
+/** Onze binders, groot in beeld: ook die niet uitgestald liggen. */
+function Binders({ binders, onOpen }: { binders: Groep<Stuk>[]; onOpen: (g: Groep<Stuk>) => void }) {
+  return (
+    <section className="binders" aria-label="Onze binders">
+      <div className="binders-kop">
+        <h2>Onze binders</h2>
+        <p>Handgemaakt door Bind'r. Staat er één niet op de stand? Vraag ernaar, we hebben ze mee.</p>
+      </div>
+      <div className="binders-rij">
+        {binders.map((g, i) => {
+          const s = g.eerste;
+          return (
+            <button key={g.sleutel} className="binder-kaart" style={{ ["--i" as string]: i }} onClick={() => onOpen(g)}>
+              <ArtikelBeeld s={s} />
+              <span className="binder-tekst">
+                <strong>{s.binder?.artwork || s.naam}</strong>
+                <span>{s.binder ? binderTekst(s.binder) : ""}</span>
+              </span>
+              <span className="binder-onder">
+                <Prijs p={s.prijs} />
+                <em>{s.uitgestald ? `nog ${aantalVan(g)}` : "vraag ernaar"}</em>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -435,14 +514,17 @@ function Detail({ g, beurzen, onSluit }: { g: Groep<Stuk>; beurzen: KomendeBeurs
           <div className="klant-detail">
             <div className="klant-detail-links">
             {s.bron === "kaart" ? (
-              <div className={`klant-detail-foto zweeft${s.prijs >= 50 ? " holo" : ""}`}><div className="kantel-vlak" {...kantelVrij}><Foto kaart={s} alt={s.naam} groot /></div></div>
+              <div className={`klant-detail-foto zweeft${s.prijs >= 50 && s.soort !== "slab" ? " holo" : ""}`}><div className="kantel-vlak" {...kantelVrij}>
+                {s.soort === "slab"
+                  ? <div className="slab-hoes groot"><span className="slab-label"><b>{s.grader || "Graded"}</b><em>{s.grade}</em></span><Foto kaart={s} alt={s.naam} groot /></div>
+                  : <Foto kaart={s} alt={s.naam} groot />}
+              </div></div>
             ) : (
-              <div className="klant-detail-foto zweeft"><div className={`artikel-vlak ${s.soort === "eigen product" ? "bindr" : "sealed"}`}><span className="artikel-glyph">{s.soort === "eigen product" ? "B" : "✦"}</span></div></div>
+              <div className="klant-detail-foto zweeft"><div className="kantel-vlak" {...kantelVrij}><ArtikelBeeld s={s} /></div></div>
             )}
             </div>
             <div className="klant-detail-rechts">
             <div className="detail-prijsrij">
-              <Prijs p={s.prijs} groot />
               {n > 1 && <span className="aantal-label">{n} beschikbaar</span>}
               {isNieuw(s) && <span className="nieuw-label">Nieuw binnen</span>}
             </div>
@@ -450,8 +532,12 @@ function Detail({ g, beurzen, onSluit }: { g: Groep<Stuk>; beurzen: KomendeBeurs
             <dl className="gegevens">
               {s.bron === "artikel" ? (
                 <>
-                  <dt>Soort</dt><dd>{s.soort === "eigen product" ? "Bind'r-product" : "Sealed"}</dd>
-                  <dt>Beschikbaar</dt><dd>{n > 5 ? "ja" : `nog ${n}`}</dd>
+                  <dt>Soort</dt><dd>{s.binder ? "Bind'r-binder" : s.soort === "eigen product" ? "Bind'r-product" : "Sealed"}</dd>
+                  {s.binder?.artwork && <><dt>Artwork</dt><dd>{s.binder.artwork}</dd></>}
+                  {s.binder?.techniek && <><dt>Techniek</dt><dd>{TECHNIEK_NAAM[s.binder.techniek] ?? s.binder.techniek}</dd></>}
+                  {s.binder?.grootte && <><dt>Grootte</dt><dd>{s.binder.grootte}{s.binder.toploader ? ", voor toploaders" : ""}</dd></>}
+                  {s.binder?.merk && <><dt>Binder</dt><dd>{s.binder.merk}</dd></>}
+                  <dt>Beschikbaar</dt><dd>{n > 5 ? "ja" : `nog ${n}`}{s.uitgestald === false ? " (niet uitgestald: vraag ernaar aan onze stand)" : ""}</dd>
                 </>
               ) : (
                 <>
@@ -470,7 +556,11 @@ function Detail({ g, beurzen, onSluit }: { g: Groep<Stuk>; beurzen: KomendeBeurs
           <Prijs p={s.prijs} groot />
           <div className="detail-stand">
             <strong>Interesse? Vraag ernaar aan onze stand.</strong>
-            <span>{beurzen.length ? <>Volgende beurs: {beurzen[0].naam}, {datumMooi(beurzen[0].datum)}{beurzen[0].locatie ? ` · ${beurzen[0].locatie}` : ""}</> : "Je vindt ons op de komende beurzen."}</span>
+            <span>{beurzen.length
+              ? beurzen[0].datum === vandaagLokaal()
+                ? <>Vandaag op {beurzen[0].naam}{beurzen[0].locatie ? ` · ${beurzen[0].locatie}` : ""}</>
+                : <>Volgende beurs: {beurzen[0].naam}, {datumMooi(beurzen[0].datum)}{beurzen[0].locatie ? ` · ${beurzen[0].locatie}` : ""}</>
+              : "Je vindt ons op de komende beurzen."}</span>
           </div>
         </div>
       </div>

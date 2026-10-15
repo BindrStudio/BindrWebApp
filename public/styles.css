@@ -7,7 +7,7 @@
   --wit: #ffffff;
   --inkt: #3b2a12;
   --inkt-2: #6e5a3f;
-  --inkt-3: #a08d72;
+  --inkt-3: #7d6a52;
   --lijn: #ecd9bf;
   --zee: #4c7f87;
   --zee-donker: #3c6a72;
@@ -937,3 +937,182 @@ a.knop { text-decoration: none; }
 .kant-kop h2 { white-space: nowrap; }
 .kant-kop-knoppen { margin-left: auto; }
 .login:has(.pinpad) .login-logo img { width: 128px; height: auto; }
+
+/* Exemplaar: waarom klanten deze kaart (nog) niet zien */
+.klant-ziet { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border-radius: 14px; background: var(--zee-licht); color: var(--zee-donker); font-size: 14px; }
+.klant-ziet span { flex: 1; min-width: 180px; }
+
+/* Tegels in één rij even hoog, met de prijs altijd onderaan op dezelfde lijn. */
+.tegel-info { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.tegel-onder { margin-top: auto; padding-top: 3px; }
+
+/* ── Kassa: beurs bezig, live cijfers en historiek ─────────────────────────── */
+.tab-live { position: absolute; top: -2px; right: 6px; width: 10px; height: 10px; border-radius: 50%; background: #3fb06a; box-shadow: 0 0 0 2px var(--room); animation: knipper 1.6s ease-in-out infinite; }
+.beurs-live { display: inline-flex; align-items: center; gap: 7px; margin: 6px 0 0; padding: 5px 12px 5px 10px; border-radius: 999px; background: #dff1e3; color: #2f6b40; font-size: 14px; font-weight: 700; max-width: 100%; }
+.live-stip { width: 9px; height: 9px; border-radius: 50%; background: #3fb06a; flex: none; box-shadow: 0 0 0 0 rgba(63, 176, 106, .6); animation: live 1.8s ease-out infinite; }
+@keyframes live { 0% { box-shadow: 0 0 0 0 rgba(63, 176, 106, .55); } 80%, 100% { box-shadow: 0 0 0 9px rgba(63, 176, 106, 0); } }
+.kassa .beurs-balk:not(.leeg) { box-shadow: 0 0 0 3px #bfe3c9, var(--schaduw); }
+.pil-knop { display: inline-flex; align-items: center; gap: 6px; min-height: 42px; padding: 0 14px; border-radius: 999px; background: var(--room); color: var(--inkt); font-weight: 700; font-size: 14px; box-shadow: var(--schaduw); }
+.beurs-meer { flex: 1 1 100%; display: flex; align-items: center; justify-content: center; gap: 6px; margin: 2px -4px -4px; padding: 8px; border-radius: 12px; background: rgba(255, 255, 255, .1); color: var(--boter); font-weight: 700; font-size: 14px; }
+.beurs-meer svg { transition: transform .3s var(--veer); }
+.beurs-meer.open svg { transform: rotate(180deg); }
+
+.beurs-dashboard { display: grid; gap: 10px; padding: 14px; border-radius: var(--rond); background: var(--room); box-shadow: var(--schaduw); animation: verschijn .35s var(--veer) both; }
+.bd-raster { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.bd-tegel { display: grid; gap: 2px; padding: 10px 12px; border-radius: 14px; background: var(--wit); }
+.bd-tegel.groot { grid-column: 1 / -1; }
+.bd-tegel strong { font-family: var(--titel); font-weight: 600; font-size: 22px; line-height: 1.1; }
+.bd-tegel.groot strong { font-size: 30px; }
+.bd-tegel em { font-style: normal; font-size: 13px; color: var(--inkt-2); }
+.bd-kop { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.bd-tegel.verkoop .bd-kop { color: var(--groen); }
+.bd-tegel.inkoop .bd-kop { color: #b4532a; }
+.bd-tegel.ruil .bd-kop { color: var(--zee); }
+.bd-soorten { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+.bd-soort { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; padding: 8px 10px; border-radius: 12px; background: var(--perzik); }
+.bd-soort svg { grid-row: 1 / 3; color: var(--zee); }
+.bd-soort em { font-style: normal; font-size: 13px; color: var(--inkt-2); }
+.bd-regels .afsluit-rij { font-size: 14px; }
+.bd-titel { font-size: 16px; margin: 4px 0 0; }
+.groen-tekst { color: var(--groen); }
+.rood-tekst { color: var(--hart); }
+
+/* Transacties met een pijltje per soort */
+.tr-icoon { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+.tr-icoon.verkoop { background: #dff1e3; color: var(--groen); }
+.tr-icoon.inkoop { background: #fbe4d8; color: #b4532a; }
+.tr-icoon.ruil { background: var(--zee-licht); color: var(--zee-donker); }
+.tr-icoon.retour { background: #ece5da; color: var(--inkt-2); }
+.transactie-tekst > strong { display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; }
+.tr-merk { font-style: normal; font-size: 11px; font-weight: 800; padding: 1px 6px; border-radius: 6px; background: #ece5da; color: var(--inkt-2); }
+.tr-merk.rood { background: var(--hart); color: #fff; }
+.transactie-bedrag.plus strong { color: var(--groen); }
+.transactie-bedrag.min strong { color: #b4532a; }
+.filterchips { margin-top: 4px; }
+.filterchips .chip { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.dag-groep { display: grid; gap: 6px; }
+.dag-kop { font-size: 15px; margin: 8px 0 0; text-transform: capitalize; }
+.dag-kop .zacht { text-transform: none; font-weight: 500; }
+.beurs-rij { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; background: var(--wit); text-align: left; }
+.beurs-rij .lijst-naam { flex: 1; min-width: 0; display: grid; }
+.beurs-rij.actief { box-shadow: inset 0 0 0 2px #bfe3c9; }
+.beurs-rij-bedrag { display: grid; justify-items: end; }
+.beurs-rij-bedrag strong { font-family: var(--titel); font-weight: 600; font-size: 17px; }
+.beurs-rij-bedrag em { font-style: normal; font-size: 12px; color: var(--inkt-2); }
+
+/* Meer: snelle tegels bovenaan */
+.meer-tegels { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.meer-tegel { display: grid; gap: 4px; align-content: start; justify-items: start; padding: 14px; border-radius: var(--rond); background: var(--room); box-shadow: var(--schaduw); text-align: left; color: var(--inkt); }
+.meer-tegel:first-child { grid-column: 1 / -1; background: var(--zee); color: var(--room); }
+.meer-tegel:first-child span { color: rgba(255, 253, 248, .85); }
+.meer-tegel svg { color: var(--zee); }
+.meer-tegel:first-child svg { color: var(--boter); }
+.meer-tegel strong { font-family: var(--titel); font-weight: 600; font-size: 18px; }
+.meer-tegel span { font-size: 13px; color: var(--inkt-2); line-height: 1.3; }
+
+/* Artikels */
+.artikel-types { margin-bottom: 2px; }
+.artikel-types .chip { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.chip-aantal { min-width: 20px; padding: 0 6px; border-radius: 10px; background: rgba(59, 42, 18, .1); font-size: 12px; }
+.chip.aan .chip-aantal { background: rgba(255, 255, 255, .25); }
+.artikel-lijst { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.artikel-rij { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 16px; background: var(--wit); text-align: left; }
+.artikel-rij.op { opacity: .55; }
+.artikel-rij-tekst { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.artikel-rij-tekst > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artikel-rij-aantal { display: grid; justify-items: center; flex: none; min-width: 44px; }
+.artikel-rij-aantal strong { font-family: var(--titel); font-weight: 600; font-size: 22px; line-height: 1; }
+.artikel-rij-aantal em { font-style: normal; font-size: 12px; color: var(--inkt-2); }
+.artikel-foto { width: 56px; height: 56px; border-radius: 12px; object-fit: cover; flex: none; background: var(--perzik); }
+.artikel-foto.leeg { display: grid; place-items: center; color: var(--zee); background: var(--zee-licht); }
+.artikel-foto.groot { width: 112px; height: 112px; border-radius: 18px; }
+.artikel-kop { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; }
+.artikel-kop-tekst { display: grid; gap: 4px; }
+.artikel-kop-tekst p { margin: 0; }
+.artikel-mandje { grid-column: 1 / -1; }
+.foto-kiezer { display: flex; align-items: center; gap: 12px; }
+.foto-kiezer img, .foto-kiezer-leeg { width: 84px; height: 84px; border-radius: 14px; object-fit: cover; flex: none; }
+.foto-kiezer-leeg { display: grid; place-items: center; background: var(--zee-licht); color: var(--zee); border: 2px dashed rgba(76, 127, 135, .35); }
+.foto-kiezer-knoppen { display: grid; gap: 4px; justify-items: start; }
+.sealed-zoeker { display: grid; gap: 8px; padding: 12px; border-radius: 14px; background: var(--wit); }
+.sealed-prijs { display: grid; gap: 8px; }
+.markt-cijfers.klein { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.markt-cijfers.klein > div { display: grid; padding: 8px; border-radius: 10px; background: var(--wit); }
+.markt-cijfers.klein span { font-size: 12px; color: var(--inkt-2); }
+.tekstknop.inline { display: inline; padding: 0; min-height: 0; }
+.artikel-vlak.met-foto { overflow: hidden; }
+.artikel-vlak.met-foto > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.artikel-vlak .artikel-aantal { z-index: 3; }
+
+/* Bod: slider van 65 tot 95% en afronden */
+.bod-keuzes { grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); }
+.bod-slider { display: grid; gap: 4px; }
+.bod-slider-kop { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; font-weight: 700; color: var(--inkt-2); }
+.bod-slider-kop strong { font-family: var(--titel); font-weight: 600; font-size: 26px; color: var(--zee-donker); }
+.bod-slider input[type="range"] { width: 100%; height: 34px; accent-color: var(--zee); margin: 0; }
+.bod-schaal { display: flex; justify-content: space-between; padding: 0 2px; font-size: 11px; font-weight: 700; color: var(--inkt-3); }
+.regel-markt { display: block; font-family: var(--tekst); font-size: 11.5px; font-weight: 600; color: var(--inkt-2); white-space: nowrap; }
+
+/* Kaart van de klant: idee van de markt en de marktwaarde */
+.markt-idee { display: grid; gap: 8px; padding: 12px; border-radius: 14px; background: var(--wit); }
+.markt-idee .knop { justify-self: start; }
+.euro-invoer.groot-invoer input { font-size: 26px; font-family: var(--titel); font-weight: 600; }
+
+/* Graded: velden, links naar verkochte advertenties, laatste verkopen */
+.graded-velden { display: grid; gap: 10px; }
+.sold-links { display: flex; flex-wrap: wrap; gap: 6px; }
+.sold-links .knop { min-height: 36px; padding: 0 12px; font-size: 13px; }
+.verkopen-blok { display: grid; gap: 10px; }
+.verkopen { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.verkopen li { display: grid; grid-template-columns: auto 1fr auto auto; gap: 10px; align-items: center; padding: 6px 6px 6px 12px; border-radius: 12px; background: var(--wit); }
+.verkopen strong { font-family: var(--titel); font-weight: 600; }
+.verkoop-invoer { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.verkoop-invoer input[type="date"], .verkoop-invoer select { min-height: 44px; }
+.verkoop-invoer .euro-invoer.mini { width: auto; }
+.schatting { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px; background: #e2f1e4; color: #2f6b3c; font-weight: 600; }
+.schatting strong { font-family: var(--titel); font-size: 22px; }
+
+/* Slab: de kaart in een doorzichtige hoes met een label bovenaan (grader en grade) */
+.slab-hoes { position: relative; padding: 30px 7px 7px; border-radius: 12px;
+  background: linear-gradient(160deg, rgba(255, 255, 255, .96), rgba(222, 233, 238, .92));
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .95), inset 0 0 0 3.5px rgba(110, 135, 148, .35), 0 3px 10px rgba(59, 42, 18, .14); }
+.slab-hoes::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0) 30%, rgba(255, 255, 255, .45) 45%, rgba(255, 255, 255, 0) 60%); }
+.slab-label { position: absolute; top: 6px; left: 7px; right: 7px; height: 19px; display: flex; align-items: stretch; overflow: hidden; border-radius: 5px; background: #fff; box-shadow: 0 0 0 1px rgba(59, 42, 18, .18); font-size: 11px; line-height: 19px; }
+.slab-label b { padding: 0 7px; background: var(--inkt); color: var(--boter); font-weight: 800; letter-spacing: .04em; }
+.slab-label em { flex: 1; text-align: right; padding: 0 7px; font-style: normal; font-family: var(--titel); font-weight: 600; font-size: 14px; color: var(--inkt); }
+.slab-hoes .foto, .slab-hoes .foto-vak { border-radius: 6px; }
+.slab-hoes.groot { padding: 44px 10px 10px; border-radius: 16px; }
+.slab-hoes.groot .slab-label { top: 9px; left: 10px; right: 10px; height: 27px; line-height: 27px; font-size: 14px; }
+.slab-hoes.groot .slab-label em { font-size: 19px; }
+.tegel.slab { background: linear-gradient(180deg, var(--room), #f1ede6); }
+.bod-instelling select { width: auto; min-width: 92px; min-height: 40px; padding: 4px 10px; border-radius: 10px; }
+
+/* ── Na de UI-review: ruimte boven de scanknop, grotere tikvlakken, rustige euro-velden ── */
+.app { padding-bottom: calc(112px + var(--onder)); }
+.rond-knop { width: 40px; height: 40px; }
+.rond-knop::before { content: ""; position: absolute; inset: -4px; }
+.chip { min-height: 40px; }
+.marge-knop { min-height: 40px; }
+.prijs-knop { min-height: 44px; align-content: center; }
+.toast button { min-height: 44px; padding: 0 12px; }
+.stapper button { width: 44px; height: 40px; }
+/* Een euro-veld is neutraal; enkel het hartje (prijssticker) is rood. */
+.euro-invoer { border-color: var(--lijn); color: var(--inkt-2); }
+.euro-invoer:focus-within { border-color: var(--zee); }
+.hartje-blok .euro-invoer, .mandje-actie .euro-invoer { border-color: var(--hart); color: var(--hart); }
+.bod-eigen .euro-invoer.mini.aan { border-color: var(--zee); background: var(--zee-licht); }
+.bod-pct { color: #2f6b3c; }
+/* Duim van de bod-slider groot genoeg voor een vinger */
+.bod-slider input[type="range"] { -webkit-appearance: none; appearance: none; height: 34px; background: transparent; }
+.bod-slider input[type="range"]::-webkit-slider-runnable-track { height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--zee-licht), var(--zee)); }
+.bod-slider input[type="range"]::-moz-range-track { height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--zee-licht), var(--zee)); }
+.bod-slider input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 30px; height: 30px; margin-top: -11px; border-radius: 50%; background: var(--room); border: 3px solid var(--zee); box-shadow: 0 3px 8px rgba(59, 42, 18, .25); }
+.bod-slider input[type="range"]::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; background: var(--room); border: 3px solid var(--zee); box-shadow: 0 3px 8px rgba(59, 42, 18, .25); }
+.dag-kop { text-transform: none; }
+.dag-kop::first-letter { text-transform: uppercase; }
+.gelukt .knoppenrij { width: 100%; }
+.gelukt .volgende-klant { width: 100%; }
+.beurs-balk.compact { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 14px; text-align: left; font-size: 14px; color: var(--room); }
+.beurs-balk.compact strong { font-family: var(--titel); font-weight: 600; font-size: 17px; color: var(--boter); }
+.beurs-balk.compact svg { margin-left: auto; color: var(--boter); }

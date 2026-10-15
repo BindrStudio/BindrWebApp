@@ -7,7 +7,7 @@ import { useSyncExternalStore } from "react";
 import { isNetwerkFout, type Alles, type Backend, type PrijsMarkering } from "./store/backend";
 import { DemoBackend } from "./store/demo";
 import { SupabaseBackend } from "./store/supabase";
-import type { Aanwezig, Artikel, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Transactie } from "./types";
+import type { Aanwezig, Artikel, ArtikelType, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Transactie } from "./types";
 import { bewaarPin, controleerPin, isVergrendeld, leesPin, markeerActief, wisPin, VERGRENDEL_NA_MS } from "./lib/pin";
 import { laadPrijsgids, type Prijsgids } from "./lib/prices";
 import { prijscheck, STANDAARD_INSTELLINGEN, type Instellingen, type TeWijzigen } from "./lib/pricing";
@@ -24,7 +24,7 @@ import {
   type Betaling,
 } from "./lib/kassa";
 import { toonCode } from "./lib/code";
-import { pasBodToe } from "./lib/bod";
+import { bodBedrag, marktwaarde, pasBodToe, PCT_MAX, PCT_MIN, type BodInstelling } from "./lib/bod";
 import { INSTAGRAM } from "./config";
 
 export interface Toast {
@@ -39,7 +39,8 @@ export type Tab = "catalogus" | "vault" | "scan" | "kassa" | "meer";
 export type Open =
   | { soort: "exemplaar"; id: string }
   | { soort: "toevoegen"; kaartId?: string; catalogus?: "en" | "asia"; opslag?: "vitrine" | "stockdoos" }
-  | { soort: "artikel"; id: string | null }
+  | { soort: "artikel"; id: string | null; type?: ArtikelType; vanLijst?: boolean }
+  | { soort: "artikelen"; type?: ArtikelType }
   | { soort: "labels" }
   | { soort: "transactie"; id: string }
   | { soort: "beurs"; id: string }
@@ -48,6 +49,7 @@ export type Open =
 
 export interface Mandje {
   regels: Regel[];
+  bod?: BodInstelling | null; // het bod op de kaarten van de klant (percentage en afronding)
 }
 
 export interface State {
@@ -243,7 +245,10 @@ function fout(e: unknown) {
 // ── Navigatie binnen de app ──────────────────────────────────────────────────
 export function naarTab(tab: Tab) { zet({ tab, open: null }); }
 export function openExemplaar(id: string) { zet({ open: { soort: "exemplaar", id } }); }
-export function openArtikel(id: string | null) { zet({ open: { soort: "artikel", id } }); }
+export function openArtikel(id: string | null, type?: ArtikelType) {
+  zet({ open: { soort: "artikel", id, type, vanLijst: state.open?.soort === "artikelen" } });
+}
+export function openArtikelen(type?: ArtikelType) { zet({ open: { soort: "artikelen", type } }); }
 export function openToevoegen(kaartId?: string, catalogus?: "en" | "asia", opslag?: "vitrine" | "stockdoos") {
   zet({ open: { soort: "toevoegen", kaartId, catalogus, opslag } });
 }
@@ -261,8 +266,11 @@ function bewaarKopieLater() {
   if (!b || b.soort !== "supabase" || state.fase !== "klaar") return;
   if (kopieTimer) clearTimeout(kopieTimer);
   kopieTimer = setTimeout(() => {
+    // Zonder foto's (die zijn groot en komen terug van de server): zo blijft er plaats voor de wachtrij.
+    const alles = alleRijen();
     schrijf(kopieSleutel(b), {
-      op: new Date().toISOString(), ...alleRijen(), omgevingen: state.omgevingen, omgeving: state.omgeving, serverTijd,
+      op: new Date().toISOString(), ...alles, artikelen: alles.artikelen.map(({ foto: _f, ...a }) => a),
+      omgevingen: state.omgevingen, omgeving: state.omgeving, serverTijd,
     });
   }, 800);
 }
@@ -303,7 +311,17 @@ function laadRij(b: Backend) {
   zet({ wachtrij: rij.length });
 }
 function bewaarRij() {
-  if (state.backend) schrijf(rijSleutel(state.backend), rij);
+  const b = state.backend;
+  if (b) {
+    try {
+      localStorage.setItem(rijSleutel(b), JSON.stringify(rij));
+    } catch {
+      // Toestel vol: de kopie van de voorraad mag weg (die komt terug van de server), de wachtrij niet.
+      try { localStorage.removeItem(kopieSleutel(b)); localStorage.setItem(rijSleutel(b), JSON.stringify(rij)); } catch {
+        meld("Het geheugen van deze gsm is vol: wat nog moet doorgaan, staat enkel in de app. Sluit de app niet tot er internet is.", "fout", undefined, 12000);
+      }
+    }
+  }
   zet({ wachtrij: rij.length });
 }
 function inRij(op: Op) {
@@ -465,7 +483,13 @@ export async function start() {
   const pin = leesPin();
   wachtend = backend;
   laadRij(backend); // zodat uitloggen vanop het slotscherm weet wat er nog moet doorgaan
-  if (!pin || pin.user_id !== backend.gebruikerId()) return zet({ fase: "pin", backend: null });
+  if (!pin || pin.user_id !== backend.gebruikerId()) {
+    // Geen pincode op dit toestel (bv. "Later" gekozen): niet zomaar open laten, opnieuw inloggen.
+    // De wachtrij blijft bewaard en gaat door na de login.
+    wachtend = null;
+    await backend.logUit();
+    return zet({ fase: "login" });
+  }
   if (isVergrendeld()) return zet({ fase: "slot", backend: null });
   await gebruik(backend);
 }
@@ -512,15 +536,17 @@ export async function logInMetPin(email: string, pin: string) {
 export async function logInMetWachtwoord(email: string, wachtwoord: string) {
   const b = await SupabaseBackend.logIn(email, wachtwoord);
   localStorage.setItem(MODUS, "supabase");
-  if (!eigenPin(b)) wisPin(); // de pincode van iemand anders opent deze sessie niet
+  wisPin(); // met het wachtwoord inloggen = de pincode opnieuw instellen (ook als je ze vergat)
   wachtend = b;
   zet({ fase: "pin" });
 }
 
 /** Een nieuwe pincode instellen (online): wordt het wachtwoord van je account. */
-export async function kiesPincode(pin: string) {
+export async function kiesPincode(pin: string, huidige?: string) {
   const b = (state.backend?.soort === "supabase" ? state.backend : wachtend) as SupabaseBackend | null;
   if (!b) throw new Error("Log eerst in");
+  // Wie de gsm even vasthoudt, mag de pincode (= het wachtwoord) niet zomaar veranderen.
+  if (eigenPin(b) && !(huidige && (await controleerPin(huidige)))) throw new Error("Je huidige pincode klopt niet.");
   await b.wijzigPincode(pin);
   await bewaarPin(b.sessieInfo(), pin);
   markeerActief();
@@ -532,6 +558,9 @@ export async function kiesPincode(pin: string) {
 export async function pincodeLater() {
   if (wachtend) await gebruik(wachtend);
 }
+
+/** Heeft dit toestel een eigen pincode voor wie ingelogd is? */
+export const heeftEigenPin = () => !!eigenPin();
 
 /** Wie dit toestel gebruikt (voor het slotscherm). */
 export const pinGebruiker = () => eigenPin();
@@ -561,8 +590,8 @@ async function gebruik(backend: Backend) {
     void meldAanwezig();
     if ((backend as { schemaOud?: boolean }).schemaOud) {
       meld("De database is nog niet bijgewerkt voor de kassa. Voer supabase/schema.sql opnieuw uit in Supabase.", "fout", undefined, 15000);
-    } else if (backend.soort === "supabase" && (backend as SupabaseBackend).versie === 2) {
-      meld("De database is nog niet bijgewerkt voor omgevingen en pincodes. Voer supabase/schema.sql opnieuw uit in Supabase.", "fout", undefined, 15000);
+    } else if (backend.soort === "supabase" && ((backend as SupabaseBackend).versie ?? 4) < 4) {
+      meld("De database is nog niet bijgewerkt (omgevingen, artikels, graded). Voer supabase/schema.sql opnieuw uit in Supabase.", "fout", undefined, 15000);
     }
   } catch (e) {
     const kopie = backend.soort === "supabase" && isNetwerkFout(e) ? leesKopie(backend) : null;
@@ -630,6 +659,8 @@ export async function logUit() {
     && !confirm(`Er wachten nog ${rij.length} wijzigingen op internet. Ze blijven op deze gsm en gaan door zodra jij hier weer inlogt. Toch uitloggen?`)) return;
   await b?.logUit();
   if (b?.soort === "demo") localStorage.removeItem(rijSleutel(b));
+  // De kopie op het toestel (voorraad, aankoopprijzen) gaat weg, tenzij er nog iets moet doorgaan.
+  if (b?.soort === "supabase" && !rij.length) try { localStorage.removeItem(kopieSleutel(b)); } catch { /* */ }
   rij = [];
   // Het mandje van elke omgeving leegmaken: de volgende gebruiker begint met een leeg mandje.
   try {
@@ -1027,7 +1058,42 @@ export function bewaarBeurs(b: Beurs) {
 }
 
 // ── Mandje en kassa ──────────────────────────────────────────────────────────
-const zetRegels = (regels: Regel[]) => zet({ mandje: { regels } });
+/** Het percentage dat geldt: zelf gekozen, of de standaard voor ruil (er gaat ook iets weg) of inkoop. */
+export function bodPct(m: Mandje = state.mandje, i: Instellingen = state.instellingen): number {
+  if (m.bod?.pct) return m.bod.pct;
+  const ruil = m.regels.some((r) => r.richting === "uit");
+  const std = ruil ? i.ruilPct : i.inkoopPct;
+  return Math.min(PCT_MAX, Math.max(PCT_MIN, Math.round(std / 5) * 5));
+}
+
+/**
+ * Het mandje bijwerken. Is er een bod op de kaarten van de klant, dan wordt het opnieuw
+ * verdeeld (in verhouding tot de marktwaarde), zodat "wat we per kaart betalen" altijd klopt.
+ */
+function zetRegels(regels: Regel[], gekozen: BodInstelling | null | undefined = state.mandje.bod) {
+  const metMarkt = regels.some((r) => r.richting === "in" && (r.referentie ?? 0) > 0);
+  // Standaard: het exacte bedrag aan het standaardpercentage, tot de beheerder zelf kiest.
+  let bod = gekozen ?? (metMarkt ? { afronding: "exact" as const } : null);
+  // Een zelf getypt bedrag hoort bij die kaarten: komt er een kaart bij of gaat er een weg,
+  // dan rekenen we opnieuw met het percentage (anders betaal je 70 euro voor één kaart van 40).
+  if (bod?.afronding === "eigen" && gekozen === state.mandje.bod && marktwaarde(regels).totaal !== marktwaarde(state.mandje.regels).totaal) {
+    bod = { pct: bod.pct, afronding: "exact" };
+    meld("Andere kaarten: het bod is opnieuw berekend met het percentage", "info");
+  }
+  const m: Mandje = { regels, bod };
+  if (bod && metMarkt) {
+    const markt = marktwaarde(regels).totaal;
+    m.regels = pasBodToe(regels, bodBedrag(markt, bodPct(m), bod));
+  }
+  if (!regels.some((r) => r.richting === "in")) m.bod = null;
+  zet({ mandje: m });
+}
+
+/** Het bod kiezen: percentage (slider) en afronding. */
+export function zetBod(b: Partial<BodInstelling>) {
+  const nu: BodInstelling = { afronding: "exact", ...(state.mandje.bod ?? {}), ...b };
+  zetRegels(state.mandje.regels, nu);
+}
 
 export function inMandje(r: Regel) {
   const dubbel = r.exemplaar_id && state.mandje.regels.some((x) => x.exemplaar_id === r.exemplaar_id && x.richting === r.richting);
@@ -1036,15 +1102,29 @@ export function inMandje(r: Regel) {
     const i = state.mandje.regels.findIndex((x) => x.artikel_id === r.artikel_id && x.richting === "uit");
     if (i >= 0) {
       const x = state.mandje.regels[i];
-      const per = (x.hartjesprijs ?? 0) / (x.aantal ?? 1);
-      const aantal = (x.aantal ?? 1) + (r.aantal ?? 1);
       const regels = state.mandje.regels.slice();
-      regels[i] = { ...x, aantal, hartjesprijs: per * aantal, prijs: Math.round(per * aantal * 100) / 100 };
+      regels[i] = artikelAantal(x, (x.aantal ?? 1) + (r.aantal ?? 1));
       return zetRegels(regels);
     }
   }
   zetRegels([...state.mandje.regels, r]);
 }
+/** Een artikel in het mandje: ander aantal, aan de prijs per stuk (en de aankoopprijs per stuk). */
+function artikelAantal(x: Regel, aantal: number): Regel {
+  const n = x.aantal ?? 1;
+  const per = (x.hartjesprijs ?? 0) / n;
+  return {
+    ...x, aantal, hartjesprijs: per * aantal, prijs: Math.round(per * aantal * 100) / 100,
+    aankoopprijs: x.aankoopprijs == null ? x.aankoopprijs : Math.round((x.aankoopprijs / n) * aantal * 100) / 100,
+  };
+}
+export function zetArtikelAantal(i: number, aantal: number) {
+  const regels = state.mandje.regels.slice();
+  if (!regels[i]) return;
+  regels[i] = artikelAantal(regels[i], Math.max(1, aantal));
+  zetRegels(regels);
+}
+
 export function wijzigRegel(i: number, w: Partial<Regel>) {
   const regels = state.mandje.regels.slice();
   regels[i] = { ...regels[i], ...w };
@@ -1058,7 +1138,7 @@ export function totaalAanpassen(richting: "uit" | "in", totaal: number) {
 }
 /** Eén bod voor alle kaarten van de klant met een marktprijs (verdeeld volgens die prijs). */
 export function bodToepassen(bod: number) {
-  zetRegels(pasBodToe(state.mandje.regels, bod));
+  zetRegels(state.mandje.regels, { ...(state.mandje.bod ?? {}), afronding: "eigen", eigen: bod });
 }
 export function leegMandje() {
   zetRegels([]);
@@ -1066,9 +1146,10 @@ export function leegMandje() {
 /** Het mandje leegmaken met een knop om het terug te zetten (in plaats van een vraag vooraf). */
 export function mandjeLegen() {
   const vorige = state.mandje.regels;
+  const vorigBod = state.mandje.bod;
   if (!vorige.length) return;
   zetRegels([]);
-  meld("Mandje leeggemaakt", "info", { label: "Terugzetten", doe: () => zetRegels(vorige) }, 5000);
+  meld("Mandje leeggemaakt", "info", { label: "Terugzetten", doe: () => zetRegels(vorige, vorigBod) }, 5000);
 }
 
 /** Boekt een transactie: meteen op dit toestel, daarna via de wachtrij naar de server. */
