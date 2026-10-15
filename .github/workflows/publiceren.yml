@@ -13,6 +13,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: write # om de nachtelijke planning actief te houden (zie onderaan)
 
 concurrency:
   group: pages
@@ -22,9 +23,9 @@ jobs:
   bouwen:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
 
@@ -40,9 +41,30 @@ jobs:
             "https://thnrmrvpkcrujxtwwqhy.supabase.co/rest/v1/publieke_vitrine?select=naam&limit=1" \
             -H "apikey: sb_publishable_rFo0QZlgdsQTMOU7buKHJg_hMBrCSPV"
 
-      - uses: actions/configure-pages@v5
+      - name: Staat GitHub Pages aan?
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/pages" > /dev/null 2>&1 || {
+            echo "::error::GitHub Pages staat nog niet aan. De repo moet openbaar zijn; zet dan Settings › Pages › Source op 'GitHub Actions' en start deze workflow opnieuw."
+            exit 1
+          }
 
-      - uses: actions/upload-pages-artifact@v3
+      # GitHub zet geplande workflows in een openbare repo stil na 60 dagen zonder activiteit.
+      # Ze opnieuw 'aanzetten' via de API start die 60 dagen opnieuw, zonder extra commits.
+      - name: Nachtelijke planning actief houden
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for wf in publiceren.yml catalogus.yml; do
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/$wf/enable"
+          done
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: public
 
@@ -54,4 +76,4 @@ jobs:
       url: ${{ steps.pages.outputs.page_url }}
     steps:
       - id: pages
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

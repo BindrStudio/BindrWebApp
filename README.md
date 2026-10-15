@@ -26,7 +26,15 @@ Verkopen, ruilen en inkopen aan de stand, de kassa (cash en SumUp), de klantenca
 
 Labelrol: 50 × 15 mm (aanpasbaar in *Labels*). Met *Proeflabel printen* controleer je maat en scherpte; scan het proeflabel daarna met *Scan*.
 
-## Eenmalig klaarzetten (Supabase)
+## Eenmalig klaarzetten
+
+### GitHub
+
+1. Settings › General › Danger Zone › **Change visibility › Public**. GitHub Pages is gratis enkel voor openbare repo's. In de repo staat niets geheims: de voorraad, prijzen en aankopen zitten in Supabase achter de login.
+2. Settings › Pages › Build and deployment › Source: **GitHub Actions**.
+3. Actions › *App publiceren* › **Run workflow**.
+
+### Supabase
 
 1. Supabase › **SQL Editor** › New query › plak `supabase/schema.sql` › **Run**.
 2. Authentication › Sign In / Providers › **Allow new users to sign up: uit**.
