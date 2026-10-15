@@ -77,36 +77,69 @@ export function afbeelding(k: { catalogus: Catalogus | null; serie?: string; set
   return `${TCGDEX_ASSETS}/${taal}/${k.serie}/${k.setId}/${k.nummer}/${kwaliteit}.webp`;
 }
 
-/** Zoeken op naam (Engels, Japans of Chinees), set + nummer (PFL 130) of nummer/totaal (130/94). */
+/**
+ * Zoeken in de catalogus. Werkt met:
+ *   - naam (Engels, Japans of Chinees), ook gedeeltelijk: "chariz"
+ *   - naam + (deel van) het nummer: "charizard 153", "pikachu 17", "umbreon 215/203"
+ *   - set + nummer: "PFL 130", "sv2a 173"
+ *   - nummer/totaal: "130/94"
+ */
 export function zoek(idx: Index, vraag: string, limiet = 40): CatalogusKaart[] {
-  const q = zonderAccenten(vraag.trim());
+  const ruw = vraag.trim();
+  const q = zonderAccenten(ruw);
   if (!q) return [];
-  const setNr = /^([a-z0-9.]{2,7})\s+#?([a-z]*\d+[a-z]?)$/i.exec(vraag.trim());
+  const setNr = /^([a-z0-9.]{2,7})\s+#?([a-z]*\d+[a-z]?)$/i.exec(ruw);
   if (setNr) {
     const code = setNr[1].toUpperCase();
     const nr = normNummer(setNr[2]);
     const hits = (idx.perNummer.get(nr) || []).filter((k) => k.setCode.toUpperCase() === code || k.setId.toUpperCase() === code);
     if (hits.length) return hits;
   }
-  const nrTot = /^#?([a-z]*\d+[a-z]?)\s*\/\s*([a-z]*\d+)$/i.exec(vraag.trim());
+  const nrTot = /^#?([a-z]*\d+[a-z]?)\s*\/\s*([a-z]*\d+)$/i.exec(ruw);
   if (nrTot) {
     const tot = Number(nrTot[2].replace(/\D/g, ""));
     const hits = (idx.perNummer.get(normNummer(nrTot[1])) || []).filter((k) => k.setTotaal === tot);
     if (hits.length) return sorteerNieuw(hits).slice(0, limiet);
   }
-  const woorden = q.split(/\s+/);
-  const hits: CatalogusKaart[] = [];
+
+  // Woorden met een cijfer kunnen een (deel van een) kaartnummer zijn, of een set ("151", "sv2a").
+  const tekst: string[] = [];
+  const nummers: { nr: string; cijfers: string; totaal: number | null; ruw: string }[] = [];
+  for (const w of q.split(/\s+/)) {
+    const m = /^#?([a-z]{0,4}\d+[a-z]?)(?:\/([a-z]*\d+))?$/.exec(w);
+    if (m) nummers.push({ nr: normNummer(m[1]), cijfers: String(Number(m[1].replace(/\D/g, ""))), totaal: m[2] ? Number(m[2].replace(/\D/g, "")) : null, ruw: m[1] });
+    else tekst.push(w);
+  }
+
+  const scores: { k: CatalogusKaart; s: number }[] = [];
   for (let i = 0; i < idx.kaarten.length; i++) {
     const t = idx.zoektekst[i];
-    if (woorden.every((w) => t.includes(w))) hits.push(idx.kaarten[i]);
+    if (!tekst.every((w) => t.includes(w))) continue;
+    const k = idx.kaarten[i];
+    let s = 0;
+    let ok = true;
+    for (const n of nummers) {
+      const kn = normNummer(k.nummer);
+      const kCijfers = String(Number(k.nummer.replace(/\D/g, "") || "0"));
+      if (n.totaal != null && k.setTotaal !== n.totaal) { ok = false; break; }
+      if (kn === n.nr.toUpperCase() || kn === n.nr) s += 100;
+      else if (kCijfers === n.cijfers) s += 80;          // "tg5" of "05" tegen TG05
+      else if (kCijfers.startsWith(n.cijfers)) s += 40;  // deel van het nummer: 15 → 153
+      else if (t.includes(n.ruw)) s += 20;               // set zoals "151" of "sv2a"
+      else { ok = false; break; }
+    }
+    if (!ok) continue;
+    if (tekst.length) {
+      // Voorrang voor treffers in de naam boven treffers in de setnaam ("Detective Pikachu").
+      const naam = zonderAccenten([k.naam, k.naamJa, k.naamZhTw, k.naamZhCn].filter(Boolean).join(" "));
+      if (tekst.every((w) => naam.includes(w))) s += 200;
+      if (zonderAccenten(k.naam) === tekst.join(" ")) s += 10;
+    }
+    scores.push({ k, s });
   }
-  const naamQ = q;
-  hits.sort((a, b) => {
-    const ea = zonderAccenten(a.naam) === naamQ ? 0 : 1;
-    const eb = zonderAccenten(b.naam) === naamQ ? 0 : 1;
-    return ea - eb || (b.release || "").localeCompare(a.release || "") || Number(a.nummer.replace(/\D/g, "")) - Number(b.nummer.replace(/\D/g, ""));
-  });
-  return hits.slice(0, limiet);
+  scores.sort((a, b) => b.s - a.s || (b.k.release || "").localeCompare(a.k.release || "") ||
+    Number(a.k.nummer.replace(/\D/g, "")) - Number(b.k.nummer.replace(/\D/g, "")));
+  return scores.slice(0, limiet).map((x) => x.k);
 }
 
 function sorteerNieuw(l: CatalogusKaart[]) {

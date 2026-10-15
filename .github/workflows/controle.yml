@@ -30,7 +30,7 @@ jobs:
       - name: Is public/app.js up-to-date?
         run: |
           npm run build
-          git diff --stat --exit-code public/app.js public/sw.js || {
-            echo "::error::Voer 'npm run build' uit en commit public/app.js en public/sw.js mee."
+          git diff --stat --exit-code public/app.js public/catalogus/app.js public/sw.js || {
+            echo "::error::Voer 'npm run build' uit en commit public/app.js, public/catalogus/app.js en public/sw.js mee."
             exit 1
           }

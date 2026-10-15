@@ -1,4 +1,5 @@
-// Doorloopt de app in demomodus op gsm-formaat, met Playwright en Chromium.
+// Doorloopt de volledige "Testcase beursdag" in de echte app (demomodus, gsm-formaat),
+// met Playwright en Chromium. Op het einde moeten kassa en voorraad exact kloppen.
 //   npm run serve            (in een ander venster: http://localhost:8080)
 //   node tests/e2e/walkthrough.cjs [map-voor-screenshots]
 // De QR-scan gebruikt een nep-camera die een label toont (vereist ffmpeg).
@@ -12,8 +13,6 @@ const BASIS = process.env.BASIS || "http://localhost:8080/";
 const SHOTS = path.resolve(process.argv[2] || ".tests/shots");
 fs.mkdirSync(SHOTS, { recursive: true });
 const toestel = { ...devices["iPhone 13"], locale: "nl-BE" };
-const foto = (page, naam) => page.screenshot({ path: path.join(SHOTS, `${naam}.png`) });
-const wacht = (page, ms = 400) => page.waitForTimeout(ms);
 
 function fouten(page) {
   const lijst = [];
@@ -22,107 +21,309 @@ function fouten(page) {
   return lijst;
 }
 
-async function geenHorizontaleScroll(page, waar) {
-  const breed = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  assert.ok(breed <= 0, `${waar}: pagina scrolt ${breed}px horizontaal`);
-}
-
 (async () => {
   const browser = await chromium.launch();
   const ctx = await browser.newContext(toestel);
   const page = await ctx.newPage();
   const f = fouten(page);
+  page.on("dialog", (d) => d.accept());
+  const foto = (naam) => page.screenshot({ path: path.join(SHOTS, `${naam}.png`) });
+  const wacht = (ms = 300) => page.waitForTimeout(ms);
+  const tab = (naam) => page.locator(".tabbalk button").filter({ hasText: naam }).click();
+  const sheet = () => page.locator(".sheet").last();
+  const geenHorizontaleScroll = async (waar, p = page) => {
+    // Op een gsm zoomt de browser uit als iets te breed is: dan wordt innerWidth groter dan het scherm.
+    const { breed, vw } = await p.evaluate(() => ({ breed: document.documentElement.scrollWidth - window.innerWidth, vw: window.innerWidth }));
+    assert.ok(breed <= 0 && vw === toestel.viewport.width, `${waar}: te breed (${vw}px, scrolt ${breed}px)`);
+  };
+  const stap = (t) => console.log("·", t);
 
-  // 1. Demo starten en testset inladen
+  // ── Kassa-hulpjes ──────────────────────────────────────────────────────────
+  const wijGeven = () => page.locator(".mandje-kant").nth(0);
+  const wijKrijgen = () => page.locator(".mandje-kant").nth(1);
+  async function scan(...codes) {
+    await wijGeven().getByRole("button", { name: "Scan" }).click();
+    await sheet().getByRole("button", { name: "Code typen" }).click();
+    for (const c of codes) { await sheet().locator(".code-veld").fill(c); await wacht(200); }
+  }
+  async function scanKlaar() { await sheet().getByRole("button", { name: "Klaar" }).last().click(); await wacht(200); }
+  async function verkoop(...codes) { await scan(...codes); await scanKlaar(); }
+  async function artikel(naam) {
+    await wijGeven().getByRole("button", { name: "Artikel" }).click();
+    await sheet().locator(".lijst-knop", { hasText: naam }).click();
+    await sheet().getByRole("button", { name: "Klaar" }).click();
+  }
+  async function klantKaart(kaarten) {
+    await wijKrijgen().getByRole("button", { name: "Kaart van klant" }).click();
+    for (const k of kaarten) {
+      await sheet().getByRole("button", { name: "Handmatig", exact: true }).click();
+      await sheet().getByRole("button", { name: "Handmatig invullen" }).click();
+      await sheet().getByLabel("Naam (Engels)").fill(k.naam);
+      if (k.taal) await sheet().locator("select").first().selectOption(k.taal);
+      if (k.conditie) await sheet().getByRole("button", { name: k.conditie, exact: true }).click();
+      if (k.waarde != null) await sheet().getByLabel("Ruilwaarde of inkoopprijs (€)").fill(String(k.waarde));
+      await sheet().getByRole("button", { name: "In het mandje" }).click();
+      await wacht(150);
+    }
+    await sheet().getByRole("button", { name: "Klaar", exact: true }).click();
+  }
+  async function klantBulk(naam, aantal, prijs) {
+    await wijKrijgen().getByRole("button", { name: "Bulk of artikel" }).click();
+    const opt = await sheet().locator("select option", { hasText: naam }).first().getAttribute("value");
+    await sheet().getByLabel("Artikel").selectOption(opt);
+    await sheet().getByLabel("Aantal").fill(String(aantal));
+    await sheet().getByLabel("Prijs voor alles (€)").fill(String(prijs));
+    await sheet().getByRole("button", { name: "In het mandje" }).click();
+  }
+  async function prijs(naam, bedrag) {
+    const r = page.locator(".regel", { hasText: naam });
+    await r.locator(".prijs-knop").click();
+    await r.locator("input").fill(String(bedrag));
+    await r.locator("input").press("Enter");
+  }
+  async function totaal(kant, bedrag) {
+    await kant.locator(".totaal-rij .prijs-knop").click();
+    await kant.locator(".totaal-rij input").fill(String(bedrag));
+    await kant.locator(".totaal-rij input").press("Enter");
+    await wacht(150);
+  }
+  async function afrekenen(wijze = "cash", { cashDeel, klantGeeft } = {}) {
+    await page.getByRole("button", { name: "Afrekenen" }).click();
+    if (wijze === "sumup") await sheet().getByRole("button", { name: "SumUp", exact: true }).click();
+    if (wijze === "beide") { await sheet().getByRole("button", { name: "Beide" }).click(); await sheet().getByLabel("Deel in cash (€)").fill(String(cashDeel)); }
+    if (klantGeeft) {
+      await sheet().locator(".wisselgeld .chip", { hasText: String(klantGeeft) }).click();
+      await sheet().locator(".wisselgeld-bedrag").waitFor();
+    }
+    const tekst = klantGeeft ? await sheet().locator(".wisselgeld-bedrag").innerText() : null;
+    await sheet().getByRole("button", { name: /^(Betaald|Betaald met SumUp|Uitbetaald|Bevestigen)$/ }).click();
+    await page.locator(".gelukt").waitFor();
+    return tekst;
+  }
+  async function volgende() { await page.getByRole("button", { name: "Volgende klant" }).click(); await wacht(150); }
+  async function kas() { return page.locator(".beurs-balk").innerText(); }
+
+  // ── A. Voorbereiding ───────────────────────────────────────────────────────
+  stap("demo en testset");
   await page.goto(BASIS);
   await page.getByText("Uitproberen zonder account").click();
-  await page.getByRole("button", { name: "Meer" }).click();
+  await tab("Meer");
+  await geenHorizontaleScroll("meer");
   await page.getByText("Testset inladen").click();
   await page.getByText(/exemplaren en \d+ artikelen ingeladen/).waitFor();
-  await page.getByRole("button", { name: "Voorraad" }).click();
-  await wacht(page, 900);
-  const kop = await page.locator(".kop-sub").first().innerText();
-  assert.match(kop, /85 exemplaren/);
-  assert.match(kop, /7\.719/);
-  await foto(page, "01-voorraad");
-  await geenHorizontaleScroll(page, "voorraad");
+  await page.locator(".instagram-veld input").fill("bindr.test");
+  await page.locator(".instagram-veld").getByRole("button", { name: "Bewaar" }).click();
+  await tab("Catalogus");
+  await wacht(800);
+  assert.match(await page.locator(".kop-sub").first().innerText(), /85 exemplaren/);
+  await foto("01-catalogus");
+  await geenHorizontaleScroll("catalogus");
 
-  // 2. Prijzen nakijken: 6 kaarten lichten op
-  await page.getByText("Prijzen nakijken").click();
+  stap("A4/A5: prijzen nakijken en zes nieuwe hartjes");
+  await page.getByRole("button", { name: /Prijzen nakijken/ }).click();
   await page.getByText("6 hartjes moeten wisselen").waitFor();
   assert.equal(await page.locator(".tegel.wijzig").count(), 6);
-  await wacht(page, 600);
-  await foto(page, "02-prijscheck");
+  await wacht(500);
+  await foto("02-prijscheck");
+  for (let i = 0; i < 6; i++) {
+    await page.locator(".tegel.wijzig").first().click();
+    await sheet().getByRole("button", { name: "Nieuw hartje" }).click();
+    await sheet().getByRole("button", { name: "Bewaar hartje" }).click();
+    await page.keyboard.press("Escape");
+    await wacht(200);
+  }
+  assert.equal(await page.locator(".tegel.wijzig").count(), 0);
 
-  // 3. Nieuw hartje voor Gengar VMAX (A5)
-  await page.locator(".tegel.wijzig", { hasText: "Gengar VMAX" }).click();
-  await page.getByText("Nieuw hartje nodig").waitFor();
-  await wacht(page, 500);
-  await foto(page, "03-exemplaar");
-  await page.getByRole("button", { name: "Nieuw hartje" }).click();
-  assert.equal(await page.locator(".euro-invoer input").inputValue(), "1080");
-  await page.getByRole("button", { name: "Bewaar hartje" }).click();
-  await page.getByText("Hartje van 1080 euro bewaard").waitFor();
-  await page.keyboard.press("Escape");
-  await wacht(page);
-  assert.equal(await page.locator(".tegel.wijzig").count(), 5);
-  assert.match(await page.locator(".kop-sub").first().innerText(), /7\.441/);
+  stap("vault en categorieën");
+  await page.locator(".categorieen button", { hasText: "Sealed" }).click();
+  await wacht(300);
+  await foto("03-catalogus-sealed");
+  await tab("Vault");
+  await wacht(500);
+  assert.match(await page.locator(".kop-sub").first().innerText(), /20 exemplaren/);
+  await foto("04-vault");
+  await geenHorizontaleScroll("vault");
 
-  // 4. Labels: 8 te printen, het label bevat een leesbare QR-code
-  await page.getByRole("button", { name: "Labels" }).click();
-  await wacht(page, 600);
-  assert.equal(await page.locator(".labelrij").count(), 8);
-  await foto(page, "04-labels");
-  const gelezen = await page.evaluate(async () => {
-    const img = document.querySelector(".labelrij img");
-    const c = document.createElement("canvas");
-    c.width = img.naturalWidth; c.height = img.naturalHeight;
-    const ctx = c.getContext("2d");
-    ctx.drawImage(img, 0, 0);
-    const d = ctx.getImageData(0, 0, c.width, c.height);
-    return window.jsQR(d.data, c.width, c.height)?.data ?? null;
-  });
-  assert.match(gelezen || "", /^BR:[0-9A-HJKMNP-TV-Z]{6}$/);
+  // ── B. Beurs starten ───────────────────────────────────────────────────────
+  stap("B1/B4: beurs starten met startkas 150");
+  await tab("Kassa");
+  await page.getByRole("button", { name: "Beurs starten" }).click();
+  await sheet().getByLabel("Naam").fill("Testbeurs Gent");
+  await sheet().getByLabel("Standgeld (€)").fill("40");
+  await sheet().getByLabel(/Startbedrag in de cashkoffer/).fill("150");
+  const startStand = await sheet().locator(".stand-rij").innerText();
+  assert.match(startStand, /85 stuks/);
+  assert.match(startStand, /7\.400/);
+  await foto("05-beurs-starten");
+  await geenHorizontaleScroll("beurs starten");
+  await sheet().getByRole("button", { name: "Beurs starten" }).click();
+  await wacht(200);
 
-  // 5. Code typen opent het exemplaar (G6)
-  await page.getByRole("button", { name: "Scan" }).click();
+  // ── C. Verkopen ────────────────────────────────────────────────────────────
+  stap("C1: Psyduck cash, klant geeft 60");
+  await verkoop("FYA-Y74");
+  await foto("06-mandje");
+  await geenHorizontaleScroll("kassa");
+  const wissel = await afrekenen("cash", { klantGeeft: 60 });
+  assert.match(wissel, /10/);
+  await foto("07-verkocht");
+  await volgende();
+  stap("C2 SumUp, C3 cash, C4 beide");
+  await verkoop("EGH-0JA"); await afrekenen("sumup"); await volgende();
+  await verkoop("7FV-EDH"); await afrekenen("cash"); await volgende();
+  await verkoop("2Y9-YS7"); await afrekenen("beide", { cashDeel: 50 }); await volgende();
+  stap("C5–C8");
+  await verkoop("EPX-R3M"); await afrekenen("cash"); await volgende();
+  await verkoop("AS3-4XT"); await afrekenen("sumup"); await volgende();
+  await artikel("Booster pack Pitch Black"); await artikel("3D-print deckbox"); await afrekenen("cash"); await volgende();
+  await verkoop("KRG-PWF"); await afrekenen("cash"); await volgende();
+  assert.match(await kas(), /€\s?350/, "cashkoffer na C");
+  assert.match(await kas(), /€\s?131/, "SumUp na C");
+
+  // ── D. Onderhandelen ───────────────────────────────────────────────────────
+  stap("D1: 12 → 10");
+  await verkoop("YG4-AFZ"); await prijs("Pikachu", 10); await afrekenen("cash"); await volgende();
+  stap("D2: 25 → 24 over twee kaarten");
+  await verkoop("AK5-T86", "TBV-4GF"); await totaal(wijGeven(), 24);
+  const d2 = await wijGeven().innerText();
+  assert.match(d2, /11,52/); assert.match(d2, /12,48/);
+  await foto("08-combo-korting");
+  await afrekenen("sumup"); await volgende();
+  stap("D3: 11 → 10 over drie kaarten");
+  await verkoop("N02-E7H", "7W2-PX2", "TQW-C3T"); await totaal(wijGeven(), 10);
+  assert.match(await wijGeven().innerText(), /4,54/);
+  await afrekenen("cash"); await volgende();
+  stap("D4: tegenbod 440");
+  await verkoop("EAM-VNM"); await prijs("Team Rocket", 440); await afrekenen("sumup"); await volgende();
+
+  // ── E. Ruilen ──────────────────────────────────────────────────────────────
+  stap("E1: gelijke ruil");
+  await verkoop("2QW-2C2"); await klantKaart([{ naam: "Ruilkaart E1", waarde: 15 }]);
+  await foto("09-ruil");
+  await afrekenen(); await volgende();
+  stap("E2: klant betaalt 24 bij");
+  await verkoop("GXJ-TGD"); await klantKaart([{ naam: "Ruilkaart E2a", waarde: 20 }, { naam: "Ruilkaart E2b", waarde: 10 }]);
+  await afrekenen("cash"); await volgende();
+  stap("E3: wij betalen 54");
+  await verkoop("Z78-0R5"); await klantKaart([{ naam: "Ruilkaart E3", waarde: 70 }]);
+  await afrekenen(); await volgende();
+  stap("E4: drie kaarten tegen een binder, totaal 45");
+  await verkoop("KAR-CW5"); await klantKaart([{ naam: "Ruilkaart E4a" }, { naam: "Ruilkaart E4b" }, { naam: "Ruilkaart E4c" }]);
+  await totaal(wijKrijgen(), 45);
+  await afrekenen(); await volgende();
+  stap("E5: kaart tegen een 3D-print, wij geven 2 terug");
+  await artikel("3D-print toploaderstandaard"); await klantKaart([{ naam: "Ruilkaart E5", waarde: 10 }]);
+  await afrekenen(); await volgende();
+  assert.match(await kas(), /€\s?(?:\d+\.)?\d+/);
+
+  // ── F. Inkopen ─────────────────────────────────────────────────────────────
+  stap("F1: vijf kaarten voor 24");
+  await klantKaart([6, 5, 5, 4, 4].map((w, i) => ({ naam: `Inkoop F1-${i + 1}`, waarde: w })));
+  await afrekenen(); await volgende();
+  stap("F2 LP, F3 bulk, F4 Chinees");
+  await klantKaart([{ naam: "Inkoop LP", conditie: "LP", waarde: 30 }]); await afrekenen(); await volgende();
+  await klantBulk("Bulkkaarten", 50, 5); await afrekenen(); await volgende();
+  await klantKaart([{ naam: "Pikachu", taal: "CN-T", waarde: 8 }]); await afrekenen(); await volgende();
+
+  // ── G. Uitzonderingen ──────────────────────────────────────────────────────
+  stap("G1: gereserveerde kaart, toevallige klant");
+  await scan("XS7-6TS");
+  await sheet().getByText(/Gereserveerd voor/).waitFor();
+  await foto("10-gereserveerd");
+  await sheet().getByRole("button", { name: "Nee, niet verkopen" }).click();
+  await scanKlaar();
+  assert.equal(await page.locator(".regel").count(), 0, "niets in het mandje");
+  stap("G2: reservatie ophalen");
+  await scan("XS7-6TS");
+  await sheet().getByRole("button", { name: "Ja, reservatie ophalen" }).click();
+  await scanKlaar();
+  await afrekenen("cash"); await volgende();
+  stap("G3: verkeerd gescand, ongedaan maken");
+  await verkoop("C99-983"); await afrekenen("cash");
+  await page.getByRole("button", { name: "Ongedaan maken" }).last().click();
+  await page.getByRole("heading", { name: "Ongedaan gemaakt" }).waitFor();
+  await volgende();
+  stap("G4: retour deckbox");
+  await page.getByRole("button", { name: "Transacties" }).click();
+  await sheet().locator(".transactie-rij", { hasText: "3D-print deckbox" }).click();
+  await sheet().getByRole("button", { name: "Retour" }).click();
+  await sheet().locator(".regel", { hasText: "Booster" }).locator("input[type=checkbox]").uncheck();
+  await sheet().getByRole("button", { name: /^Retour: € ?12/ }).click();
+  await page.keyboard.press("Escape"); await wacht(150);
+  await page.keyboard.press("Escape"); await wacht(150);
+  stap("G5: twee Mega Starmie ex (zonder offline conflict in de demo)");
+  await verkoop("BWC-7YR"); await afrekenen("cash"); await volgende();
+  await verkoop("XT6-6CZ"); await afrekenen("cash"); await volgende();
+  stap("G6/G7: code typen, eigen prijs 1150 met slotje");
+  await tab("Scan");
   await page.getByRole("button", { name: "Code typen" }).click();
   await page.locator(".code-veld").fill("0j6 8vc");
-  await page.locator(".sheet-titel", { hasText: "0J6-8VC" }).waitFor();
-  const label = await page.locator(".label-voorbeeld").getAttribute("src");
+  await sheet().locator(".sheet-titel", { hasText: "0J6-8VC" }).waitFor();
+  const label = await sheet().locator(".label-voorbeeld").getAttribute("src");
   fs.writeFileSync(path.join(SHOTS, "label-0J6-8VC.png"), Buffer.from(label.split(",")[1], "base64"));
+  await sheet().getByRole("button", { name: "Nieuw hartje" }).click();
+  await sheet().locator(".euro-invoer input").fill("1150");
+  await sheet().getByRole("button", { name: "Bewaar hartje" }).click();
+  await sheet().getByText("eigen prijs").waitFor();
+  await foto("11-eigen-prijs");
+  await page.keyboard.press("Escape");
+  stap("G8: kaart uit de vault, hartje 60");
+  await tab("Kassa");
+  await scan("6RX-Y19");
+  await sheet().getByText("Deze kaart ligt in de vault.").waitFor();
+  await sheet().locator(".mandje-actie input").fill("60");
+  await sheet().getByRole("button", { name: "Naar catalogus en in het mandje" }).click();
+  await scanKlaar();
+  await afrekenen("cash"); await volgende();
+
+  // ── H. Afsluiting ──────────────────────────────────────────────────────────
+  stap("H1–H4: kas tellen en afsluiten");
+  const balk = await kas();
+  assert.match(balk, /€\s?344/, `cashkoffer: ${balk}`);
+  assert.match(balk, /€\s?595/, `SumUp: ${balk}`);
+  await page.getByRole("button", { name: "Afsluiten" }).click();
+  await sheet().getByLabel("Geteld in de cashkoffer (€)").fill("344");
+  await sheet().getByText("De kas klopt.").waitFor();
+  await sheet().getByLabel("Klopt met het totaal in de SumUp-app").check();
+  await foto("12-afsluiten");
+  await sheet().getByRole("button", { name: "Beurs stoppen" }).click();
+  const rapport = await sheet().innerText();
+  await foto("13-rapport");
+  for (const [w, re] of [
+    ["verkocht 18", /Verkocht\s*18/], ["weggeruild 4", /Weggeruild\s*4/], ["nieuw 15", /15 \(8 via ruil, 7 via inkoop\)/],
+    ["voorraad", /105 → 98/], ["catalogus", /85 → 64 stuks/], ["waarde", /7\.400\s*→\s*€\s?6\.479/],
+  ]) assert.match(rapport, re, w);
   await page.keyboard.press("Escape");
 
-  // 6. Toevoegen: Charizard V BRS 153, twee exemplaren met elk een eigen code
-  await page.getByRole("button", { name: "Voorraad" }).click();
-  await page.getByRole("button", { name: "Kaart toevoegen" }).first().click();
-  await page.locator(".sheet .zoekbalk input").fill("BRS 153");
-  await page.locator(".resultaten button", { hasText: "Charizard V" }).first().click();
-  await page.locator(".stapper button", { hasText: "+" }).click();
-  await wacht(page);
-  await foto(page, "05-toevoegen");
-  await page.getByRole("button", { name: "2 exemplaren toevoegen" }).click();
-  await page.getByText("2 exemplaren toegevoegd").waitFor();
-  const codes = await page.locator(".klaar .code").allInnerTexts();
-  assert.equal(codes.length, 2);
-  assert.notEqual(codes[0], codes[1]);
-  await wacht(page, 500);
-  await foto(page, "06-toegevoegd");
-  await page.getByRole("button", { name: "Klaar" }).click();
-  await page.getByRole("button", { name: /^Stockdoos/ }).click();
-  assert.match(await page.getByRole("button", { name: /^Stockdoos/ }).innerText(), /22/);
-
-  // 7. Meer
-  await page.getByRole("button", { name: "Meer" }).click();
-  await wacht(page);
-  await foto(page, "07-meer");
-  await geenHorizontaleScroll(page, "meer");
+  // ── Klantenpagina ──────────────────────────────────────────────────────────
+  stap("klantencatalogus (demo)");
+  const klant = await ctx.newPage();
+  const fk = fouten(klant);
+  await klant.goto(BASIS + "catalogus/?demo=1");
+  await klant.locator(".tegel").first().waitFor();
+  const verwacht = await klant.evaluate(() => {
+    const d = JSON.parse(localStorage.getItem("bindr-demo-v1"));
+    return d.exemplaren.filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null).length
+      + d.artikelen.filter((a) => a.opslag === "vitrine" && a.aantal > 0 && a.prijs != null).length;
+  });
+  assert.equal(await klant.locator(".tegel").count(), verwacht, "klant ziet precies de catalogus");
+  assert.equal(await klant.locator(".tabbalk, .kop-knoppen, .beurs-balk").count(), 0, "geen beheer op de klantenpagina");
+  await klant.screenshot({ path: path.join(SHOTS, "14-klant.png") });
+  await geenHorizontaleScroll("klantenpagina", klant);
+  await klant.locator(".tegel").first().click();
+  await klant.getByRole("button", { name: "Reserveer via Instagram" }).waitFor();
+  await klant.waitForTimeout(500);
+  await geenHorizontaleScroll("klantendetail", klant);
+  await klant.screenshot({ path: path.join(SHOTS, "15-klant-detail.png") });
+  assert.deepEqual(fk, [], "geen fouten op de klantenpagina");
+  await klant.close();
 
   assert.deepEqual(f, [], "geen JavaScript-fouten");
   const demo = await page.evaluate(() => localStorage.getItem("bindr-demo-v1"));
   await browser.close();
 
-  // 8. QR scannen met een nep-camera die het label van 0J6-8VC toont
+  // ── QR scannen met een nep-camera die het label van 0J6-8VC toont ─────────
+  stap("QR-scan met nep-camera");
   const y4m = path.join(SHOTS, "label.y4m");
   execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-loop", "1", "-i", path.join(SHOTS, "label-0J6-8VC.png"),
     "-vf", "scale=576:-2,pad=640:480:(ow-iw)/2:(oh-ih)/2:white,format=yuv420p", "-t", "2", "-r", "15", y4m]);
@@ -133,9 +334,9 @@ async function geenHorizontaleScroll(page, waar) {
   const f2 = fouten(p2);
   await p2.goto(BASIS + "#scan");
   await p2.locator(".sheet-titel", { hasText: "0J6-8VC" }).waitFor({ timeout: 15000 });
-  await wacht(p2, 500);
-  await foto(p2, "08-qr-gescand");
+  await p2.waitForTimeout(400);
+  await p2.screenshot({ path: path.join(SHOTS, "16-qr-gescand.png") });
   assert.deepEqual(f2, [], "geen JavaScript-fouten bij scannen");
   await b2.close();
-  console.log("Alles in orde. Screenshots in", SHOTS);
+  console.log("Alles in orde: de testcase beursdag klopt. Screenshots in", SHOTS);
 })().catch((e) => { console.error(e); process.exit(1); });

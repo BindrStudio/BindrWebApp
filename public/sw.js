@@ -1,6 +1,6 @@
 // Service worker: de app start ook zonder (goed) internet op de beurs.
 // VERSIE wordt bij elke build aangepast door scripts/build.mjs.
-const VERSIE = "f90e70256a";
+const VERSIE = "e1e1482bcb";
 const APP = `bindr-app-${VERSIE}`;
 const DATA = "bindr-data-v1";
 const FOTOS = "bindr-fotos-v1";
@@ -79,6 +79,9 @@ self.addEventListener("fetch", (e) => {
       e.respondWith(eerstNet(req, DATA));
     } else if (url.pathname.includes("/data/")) {
       e.respondWith(cacheDanNet(req, DATA));
+    } else if (url.pathname.includes("/catalogus/")) {
+      // De klantenpagina: altijd vers als het kan.
+      e.respondWith(eerstNet(req, DATA));
     } else if (req.mode === "navigate") {
       e.respondWith(caches.match("index.html").then((hit) => hit || fetch(req)).catch(() => fetch(req)));
     } else {

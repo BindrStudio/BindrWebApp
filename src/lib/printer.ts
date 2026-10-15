@@ -64,7 +64,7 @@ export async function verbindPrinter(): Promise<string> {
   if (!window.Niimbot) throw new Error("Printerdriver niet geladen");
   if (!bluetoothMogelijk()) {
     throw new Error(isIphone()
-      ? "Safari kan geen Bluetooth gebruiken. Open de app in de gratis browser Bluefy om te printen."
+      ? "Op iPhone kan geen enkele gewone browser (ook Chrome niet) Bluetooth gebruiken. Open de app in de gratis browser Bluefy om te printen."
       : "Deze browser kan geen Bluetooth gebruiken. Gebruik Chrome.");
   }
   const info = await window.Niimbot.identify({ name_prefixes: ["B1"] });

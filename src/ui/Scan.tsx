@@ -122,7 +122,7 @@ function CameraFout({ tekst, onOpnieuw }: { tekst: string; onOpnieuw: () => void
   );
 }
 
-function QrScanner({ gepauzeerd, onCode }: { gepauzeerd: boolean; onCode: (ex: Exemplaar) => void }) {
+export function QrScanner({ gepauzeerd, onCode }: { gepauzeerd: boolean; onCode: (ex: Exemplaar) => void }) {
   const { video, fout, klaar, opnieuw, lamp, zetLamp } = useCamera(true);
   const canvas = useRef<HTMLCanvasElement>(document.createElement("canvas"));
   const laatste = useRef<{ code: string; tijd: number }>({ code: "", tijd: 0 });
@@ -192,7 +192,7 @@ function Recent({ ids }: { ids: string[] }) {
               <span className="vinkje"><Icoon naam="check" maat={16} /></span>
               <span className="code">{toonCode(ex.code)}</span>
               <span className="lijst-naam">{ex.naam}</span>
-              <span className="rechts zacht">{ex.opslag}</span>
+              <span className="rechts zacht">{ex.opslag === "vitrine" ? "catalogus" : "vault"}</span>
             </button>
           </li>
         );
@@ -201,7 +201,7 @@ function Recent({ ids }: { ids: string[] }) {
   );
 }
 
-function FotoScanner({ gepauzeerd }: { gepauzeerd: boolean }) {
+export function FotoScanner({ gepauzeerd, kies }: { gepauzeerd: boolean; kies?: (ex: Exemplaar) => void }) {
   const [res, setRes] = useState<{ kandidaten: Kandidaat[]; zeker: boolean; foto: string } | null>(null);
   const { video, fout, klaar, opnieuw } = useCamera(!gepauzeerd && !res);
   const invoer = useRef<HTMLInputElement>(null);
@@ -249,12 +249,12 @@ function FotoScanner({ gepauzeerd }: { gepauzeerd: boolean }) {
         </div>
       )}
       {status && <p className="status center">{status}</p>}
-      {res && <Kandidaten res={res} onOpnieuw={() => { setRes(null); setStatus(null); }} />}
+      {res && <Kandidaten res={res} kies={kies} onOpnieuw={() => { setRes(null); setStatus(null); }} />}
     </>
   );
 }
 
-function Kandidaten({ res, onOpnieuw }: { res: { kandidaten: Kandidaat[]; zeker: boolean; foto: string }; onOpnieuw: () => void }) {
+function Kandidaten({ res, onOpnieuw, kies }: { res: { kandidaten: Kandidaat[]; zeker: boolean; foto: string }; onOpnieuw: () => void; kies?: (ex: Exemplaar) => void }) {
   const [open, setOpen] = useState<string | null>(res.zeker ? res.kandidaten[0]?.kaart.id ?? null : null);
   return (
     <div className="kandidaten">
@@ -277,7 +277,7 @@ function Kandidaten({ res, onOpnieuw }: { res: { kandidaten: Kandidaat[]; zeker:
               </span>
               <Icoon naam="pijlRechts" maat={18} />
             </button>
-            {open === kaart.id && <InVoorraad kaart={kaart} />}
+            {open === kaart.id && <InVoorraad kaart={kaart} kies={kies} />}
           </li>
         ))}
       </ul>
@@ -285,7 +285,7 @@ function Kandidaten({ res, onOpnieuw }: { res: { kandidaten: Kandidaat[]; zeker:
   );
 }
 
-function InVoorraad({ kaart }: { kaart: CatalogusKaart }) {
+function InVoorraad({ kaart, kies }: { kaart: CatalogusKaart; kies?: (ex: Exemplaar) => void }) {
   const { exemplaren } = useApp();
   const lijst = useMemo(() => exemplaren.filter((e) => e.kaart_id === kaart.id && (e.status === "in voorraad" || e.status === "gereserveerd")), [exemplaren, kaart.id]);
   return (
@@ -294,21 +294,21 @@ function InVoorraad({ kaart }: { kaart: CatalogusKaart }) {
         <ul className="lijst">
           {lijst.map((ex) => (
             <li key={ex.id}>
-              <button className="lijst-knop" onClick={() => openExemplaar(ex.id)}>
+              <button className="lijst-knop" onClick={() => (kies ? kies(ex) : openExemplaar(ex.id))}>
                 <span className="code">{toonCode(ex.code)}</span>
                 <Badges ex={ex} />
-                <span className="rechts">{ex.opslag === "vitrine" ? <Hartje prijs={ex.hartjesprijs} /> : <span className="zacht">doos · {euro(ex.verkoopprijs)}</span>}</span>
+                <span className="rechts">{ex.opslag === "vitrine" ? <Hartje prijs={ex.hartjesprijs} /> : <span className="zacht">vault · {euro(ex.verkoopprijs)}</span>}</span>
               </button>
             </li>
           ))}
         </ul>
       ) : <p className="zacht">Niet in voorraad.</p>}
-      <button className="knop zacht" onClick={() => openToevoegen(kaart.id, kaart.catalogus)}><Icoon naam="plus" maat={18} /> Exemplaar toevoegen</button>
+      {!kies && <button className="knop zacht" onClick={() => openToevoegen(kaart.id, kaart.catalogus)}><Icoon naam="plus" maat={18} /> Exemplaar toevoegen</button>}
     </div>
   );
 }
 
-function CodeInvoer() {
+export function CodeInvoer({ kies }: { kies?: (ex: Exemplaar) => void }) {
   const [tekst, setTekst] = useState("");
   const [gevonden, setGevonden] = useState<Exemplaar | null>(null);
   const invoer = useRef<HTMLInputElement>(null);
@@ -320,7 +320,7 @@ function CodeInvoer() {
     if (!code) { setGevonden(null); return; }
     const ex = verwerkCode(code);
     setGevonden(ex);
-    if (ex) { openExemplaar(ex.id); setTekst(""); }
+    if (ex) { if (kies) kies(ex); else openExemplaar(ex.id); setTekst(""); }
   };
 
   return (

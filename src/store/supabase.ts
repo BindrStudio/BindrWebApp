@@ -1,11 +1,10 @@
 // Supabase via de REST- en login-API, zonder extra bibliotheek.
 import { SUPABASE_KEY, SUPABASE_URL } from "../config";
-import type { Artikel, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar } from "../types";
-import { Fout, type Backend } from "./backend";
+import type { Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Transactie } from "../types";
+import { Fout, type Alles, type Backend, type Beheerder } from "./backend";
 
 const SESSIE_SLEUTEL = "bindr-sessie-v1";
 const PAGINA = 1000;
-const KOPIE_SLEUTEL = "bindr-kopie-v1"; // laatst geladen voorraad, om zonder internet te kunnen kijken
 
 interface Sessie {
   access_token: string;
@@ -137,39 +136,45 @@ export class SupabaseBackend implements Backend {
     return uit;
   }
 
-  /** True als de laatste laadAlles() de bewaarde kopie gaf omdat er geen verbinding was. */
-  uitKopie = false;
+  /** True als de database nog het schema van fase 1 heeft (geen beurzen en transacties). */
+  schemaOud = false;
 
-  async laadAlles() {
-    try {
-      const [exemplaren, artikelen] = await Promise.all([
-        this.alles<Exemplaar>("exemplaren", "aangemaakt_op.asc"),
-        this.alles<Artikel>("artikelen", "naam.asc"),
-      ]);
-      this.uitKopie = false;
-      try {
-        localStorage.setItem(KOPIE_SLEUTEL, JSON.stringify({ user_id: this.sessie.user_id, op: new Date().toISOString(), exemplaren, artikelen }));
-      } catch { /* toestel vol: dan maar zonder kopie */ }
-      return { exemplaren, artikelen };
-    } catch (e) {
-      // Geen verbinding (geen HTTP-status): toon de laatst geladen voorraad.
-      if (e instanceof Fout && e.status === undefined) {
-        try {
-          const k = JSON.parse(localStorage.getItem(KOPIE_SLEUTEL) || "null");
-          if (k && k.user_id === this.sessie.user_id) {
-            this.uitKopie = true;
-            return { exemplaren: k.exemplaren as Exemplaar[], artikelen: k.artikelen as Artikel[] };
-          }
-        } catch { /* kapotte kopie */ }
-      }
+  async laadAlles(): Promise<Alles> {
+    // Zonder de tabellen van fase 2 werkt de voorraad gewoon verder; de kassa vraagt om het schema.
+    const fase2 = <T>(p: Promise<T[]>) => p.catch((e) => {
+      if (e instanceof Fout && e.status === 404) { this.schemaOud = true; return [] as T[]; }
       throw e;
-    }
+    });
+    this.schemaOud = false;
+    const [exemplaren, artikelen, beurzen, transacties] = await Promise.all([
+      this.alles<Exemplaar>("exemplaren", "aangemaakt_op.asc"),
+      this.alles<Artikel>("artikelen", "naam.asc"),
+      fase2(this.alles<Beurs>("beurzen", "datum.desc")),
+      fase2(this.alles<Transactie>("transacties", "tijd.asc")),
+    ]);
+    return { exemplaren, artikelen, beurzen, transacties: transacties.map(getallen) };
+  }
+
+  laadBeheerders() {
+    return this.vraag<Beheerder[]>("GET", "beheerders?select=user_id,naam");
+  }
+
+  async laadInstellingen() {
+    const rijen = await this.vraag<{ sleutel: string; waarde: unknown }[]>("GET", "instellingen?select=sleutel,waarde");
+    return Object.fromEntries(rijen.map((r) => [r.sleutel, r.waarde]));
+  }
+
+  async bewaarInstelling(sleutel: string, waarde: unknown) {
+    await this.vraag("POST", "instellingen?on_conflict=sleutel", [{ sleutel, waarde }], { Prefer: "resolution=merge-duplicates,return=minimal" });
   }
 
   async voegExemplarenToe(rijen: NieuwExemplaar[]) {
     const uit: Exemplaar[] = [];
     for (let i = 0; i < rijen.length; i += 200) {
-      uit.push(...(await this.vraag<Exemplaar[]>("POST", "exemplaren", rijen.slice(i, i + 200), { Prefer: "return=representation,missing=default" })));
+      // Met een id van de gsm zelf: opnieuw versturen (na een netwerkfout) maakt geen dubbels.
+      uit.push(...(await this.vraag<Exemplaar[]>("POST", "exemplaren?on_conflict=id", rijen.slice(i, i + 200), {
+        Prefer: "return=representation,missing=default,resolution=ignore-duplicates",
+      })));
     }
     return uit;
   }
@@ -187,12 +192,47 @@ export class SupabaseBackend implements Backend {
 
   async voegArtikelenToe(rijen: NieuwArtikel[]) {
     if (!rijen.length) return [];
-    return this.vraag<Artikel[]>("POST", "artikelen", rijen, { Prefer: "return=representation,missing=default" });
+    return this.vraag<Artikel[]>("POST", "artikelen?on_conflict=id", rijen, {
+      Prefer: "return=representation,missing=default,resolution=ignore-duplicates",
+    });
   }
 
   async wijzigArtikel(id: string, wijziging: Partial<Artikel>) {
     const r = await this.vraag<Artikel[]>("PATCH", `artikelen?id=eq.${id}`, wijziging, { Prefer: "return=representation" });
     return r[0];
+  }
+
+  async bewaarBeurs(b: Beurs) {
+    const { id, naam, datum, standgeld, startkas, status, gestart_op, afgesloten_op, getelde_kas, sumup_bevestigd, stand_start, stand_einde, opmerking } = b;
+    const r = await this.vraag<Beurs[]>("POST", "beurzen?on_conflict=id", [
+      { id, naam, datum, standgeld, startkas, status, gestart_op, afgesloten_op, getelde_kas, sumup_bevestigd, stand_start, stand_einde, opmerking },
+    ], { Prefer: "return=representation,resolution=merge-duplicates" });
+    return r[0] ?? b;
+  }
+
+  private rpc(naam: string, args: Record<string, unknown>) {
+    return this.vraag<Transactie>("POST", `rpc/${naam}`, args).then(getallen);
+  }
+
+  boekTransactie(t: Transactie) {
+    const { id, beurs_id, soort, tijd, regels, totaal, cash, sumup, opmerking } = t;
+    return this.rpc("boek_transactie", { t: { id, beurs_id, soort, tijd, regels, totaal, cash, sumup, opmerking } });
+  }
+
+  maakOngedaan(id: string) {
+    return this.rpc("maak_ongedaan", { tid: id });
+  }
+
+  losConflictOp(id: string, oud: string, nieuw: string) {
+    return this.rpc("los_conflict_op", { tid: id, oud, nieuw });
+  }
+
+  aanvaardConflict(id: string, item: string) {
+    return this.rpc("aanvaard_conflict", { tid: id, item });
+  }
+
+  gebruikerId() {
+    return this.sessie.user_id || null;
   }
 
   async logUit() {
@@ -203,6 +243,10 @@ export class SupabaseBackend implements Backend {
       });
     } catch { /* offline: lokaal toch uitloggen */ }
     localStorage.removeItem(SESSIE_SLEUTEL);
-    localStorage.removeItem(KOPIE_SLEUTEL);
   }
+}
+
+// PostgREST geeft numeric-kolommen soms als tekst; de kassa rekent met getallen.
+function getallen(t: Transactie): Transactie {
+  return { ...t, totaal: Number(t.totaal), cash: Number(t.cash), sumup: Number(t.sumup), conflicten: t.conflicten ?? [] };
 }

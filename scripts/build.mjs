@@ -23,14 +23,18 @@ if (!esbuild) throw new Error("esbuild niet gevonden: voer `npm install` uit");
 
 const watch = process.argv.includes("--watch");
 const options = {
-  entryPoints: [path.join(root, "src/main.tsx")],
+  // De beheer-app en de aparte klantenpagina (die niets van het beheer bevat).
+  entryPoints: [
+    { in: path.join(root, "src/main.tsx"), out: "app" },
+    { in: path.join(root, "src/klant/main.tsx"), out: "catalogus/app" },
+  ],
   bundle: true,
   format: "esm",
   target: ["es2020", "safari15", "chrome100"],
   jsx: "automatic",
   minify: !watch,
   sourcemap: watch ? "inline" : false,
-  outfile: path.join(root, "public/app.js"),
+  outdir: path.join(root, "public"),
   nodePaths: extraPaths,
   define: { "process.env.NODE_ENV": watch ? '"development"' : '"production"' },
   legalComments: "none",
@@ -44,7 +48,7 @@ if (watch) {
   await esbuild.build(options);
   // Nieuwe versie van de service worker, zodat telefoons de nieuwe app ophalen.
   const hash = createHash("sha256");
-  for (const f of ["public/app.js", "public/styles.css", "public/index.html"]) hash.update(await readFile(path.join(root, f)));
+  for (const f of ["public/app.js", "public/styles.css", "public/index.html", "public/catalogus/app.js", "public/catalogus/klant.css"]) hash.update(await readFile(path.join(root, f)));
   const versie = hash.digest("hex").slice(0, 10);
   const sw = path.join(root, "public/sw.js");
   const inhoud = await readFile(sw, "utf8");

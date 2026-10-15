@@ -115,3 +115,17 @@ export function verdeelTotaal(prijzen: number[], nieuwTotaal: number): number[] 
   }
   return delen;
 }
+
+/** De vault: welke exemplaren zijn volgens de prijsgids duidelijk meer waard dan genoteerd. */
+export function waardeStijgers(exemplaren: Exemplaar[], gids: Prijsgids | null, inst: Instellingen): Map<string, TeWijzigen> {
+  const uit = new Map<string, TeWijzigen>();
+  for (const ex of exemplaren) {
+    if (ex.opslag !== "stockdoos" || (ex.status !== "in voorraad" && ex.status !== "gereserveerd")) continue;
+    const v = voorstelVoor(ex, gids, inst);
+    if (!v) continue;
+    const basis = ex.verkoopprijs ?? ex.aankoopprijs;
+    if (basis == null) continue;
+    if (v.voorstel - basis >= drempelVoor(basis, inst)) uit.set(ex.id, { id: ex.id, oud: basis, nieuw: v.voorstel, richting: "op" });
+  }
+  return uit;
+}

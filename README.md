@@ -4,25 +4,33 @@ De voorraad-app van Bind'r: elk exemplaar in de vitrine en de stockdoos, met een
 
 **App:** https://bindrstudio.github.io/BindrWebApp/
 
-## Wat fase 1 kan
+## Wat de app kan
 
-- **Voorraad** per exemplaar, gesplitst in vitrine (klanten zien die) en stockdoos. Duplicaten krijgen elk een eigen code.
-- **Toevoegen** via zoeken (naam, `PFL 130`, `130/94`, ook Japans en Chinees), een foto van de kaart, of handmatig (slabs, eigen producten). Stapelmodus onthoudt taal, conditie en plaats.
-- **Scannen**: QR-code achteraan de toploader, een foto van de voorkant, of de code typen (`7K2-QX9`).
-- **Prijzen**: Cardmarket-prijsgids van de nacht ervoor. Voorstel = trend × conditiefactor, afgerond op hele euro. Je kiest altijd zelf; wijk je af, dan krijgt de kaart een slotje.
-- **Prijzen nakijken**: één knop. Vitrinekaarten waarvan het hartje te ver afwijkt (drempel in euro, per prijsklasse) pulseren rood. De datum van elk hartje wordt bewaard.
-- **Labels printen** op een Niimbot B1 / B1 Pro via Bluetooth, rechtstreeks vanuit de app. 50 × 15 mm, zonder prijs. Na het plakken scan je het label; dan staat het op "hangt erop".
-- **Artikelen** (sealed, binders, 3D-prints, bulk) geteld per stuk.
-- **Demomodus** met een testset van 100 kaarten, zonder account.
+**Voorraad: Catalogus en Vault**
+- **Catalogus** is wat te koop ligt op de beurs (klanten zien dit). **Vault** is jullie eigen stock (klanten zien dit niet). Beide ingedeeld in Singles, Slabs, Sealed en Bind'r-producten.
+- Elk exemplaar heeft een eigen code en QR-label; sealed, 3D-prints en bulk gaan per aantal.
+- Toevoegen via zoeken (naam, naam + nummer zoals `charizard 153`, `PFL 130`, `130/94`, ook Japans en Chinees), een foto of handmatig.
+- **Prijzen nakijken**: één knop; hartjes die te ver afwijken pulseren rood. De vault toont welke kaarten in waarde stegen.
 
-Verkopen, ruilen en inkopen aan de stand, de kassa (cash en SumUp), de klantencatalogus en rapportering komen in de volgende fases.
+**Kassa (beurs)**
+- Beurs starten met het startbedrag in de cashkoffer; de app noteert de stand van de catalogus.
+- Mandje met twee kanten: *wij geven* (scannen, zoeken, artikelen) en *wij krijgen* (kaarten of bulk van de klant). Daaruit volgt vanzelf verkoop, ruil of inkoop.
+- Onderhandelen per kaart of op het totaal (de app verdeelt op de cent). Betalen cash, SumUp of beide, met wisselgeld. 5 seconden "Ongedaan maken", retour, waarschuwing voor gereserveerde kaarten en kaarten uit de vault.
+- Werkt zonder internet: wijzigingen wachten op het toestel en gaan door zodra er verbinding is. Verkochten twee toestellen offline hetzelfde exemplaar, dan toont de app een conflict om op te lossen.
+- Afsluiten: kas tellen, SumUp nakijken, samenvatting met omzet, korting, marge en de stand van de voorraad.
+
+**Klantencatalogus en overzicht**
+- Een aparte pagina zonder login (`/catalogus/`): enkel de catalogus met foto, conditie en prijs, en reserveren via Instagram. Geen vault, aankoopprijzen, reservaties of kassa.
+- Overzicht van beurzen en voorraadwaarde, en export van alle transacties als CSV.
+
+**Labels** op een Niimbot B1 / B1 Pro via Bluetooth, rechtstreeks vanuit de app (50 × 15 mm, zonder prijs).
 
 ## Printen
 
 | Toestel | Hoe |
 |---|---|
 | Android | Chrome. Tik *Labels › Verbinden* en kies de printer. |
-| iPhone | Safari kan geen Bluetooth. Installeer de gratis app [Bluefy](https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055), open daarin het adres van de app en log in. |
+| iPhone | Geen enkele gewone browser op iPhone kan Bluetooth (ook Chrome niet). Installeer de gratis app [Bluefy](https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055), open daarin het adres van de app en log in. Alles behalve printen werkt ook in Safari of Chrome. |
 
 Labelrol: 50 × 15 mm (aanpasbaar in *Labels*). Met *Proeflabel printen* controleer je maat en scherpte; scan het proeflabel daarna met *Scan*.
 
@@ -36,7 +44,7 @@ Labelrol: 50 × 15 mm (aanpasbaar in *Labels*). Met *Proeflabel printen* control
 
 ### Supabase
 
-1. Supabase › **SQL Editor** › New query › plak `supabase/schema.sql` › **Run**.
+1. Supabase › **SQL Editor** › New query › plak `supabase/schema.sql` › **Run**. Doe dit opnieuw na elke update van het schema (het script is veilig om te herhalen; gegevens blijven staan).
 2. Authentication › Sign In / Providers › **Allow new users to sign up: uit**.
 3. Authentication › Users › **Add user** voor elke beheerder (e-mail + wachtwoord).
 4. Voer onderaan `schema.sql` het `insert into public.beheerders`-stuk uit met jullie e-mailadressen en namen.
@@ -51,7 +59,7 @@ npm run watch      # bouwt public/app.js bij elke wijziging
 npm run serve      # http://localhost:8080
 npm test           # unit tests
 npm run typecheck
-npm run e2e        # doorloopt de app in Chromium (Playwright en ffmpeg nodig)
+npm run e2e        # de volledige testcase beursdag in Chromium (Playwright en ffmpeg nodig)
 ```
 
 `public/app.js` staat mee in git: **voer `npm run build` uit voor je commit**. De workflow *Controle* kijkt dat na.
@@ -60,11 +68,12 @@ npm run e2e        # doorloopt de app in Chromium (Playwright en ffmpeg nodig)
 
 ```
 src/
-  lib/       prijsregels, codes, catalogus en herkenning, labels, printer, camera, OCR
-  store/     Supabase (REST) en de demo (localStorage), met dezelfde interface
-  ui/        schermen: Voorraad, Scan, Labels, Meer, Toevoegen, ExemplaarSheet
-  state.ts   centrale toestand en acties
-public/      wat online komt (index.html, styles.css, app.js, sw.js, data/, vendor/, img/)
+  lib/       prijsregels, kassa (rekenkern), codes, catalogus en herkenning, labels, printer, camera, OCR
+  store/     Supabase (REST + RPC) en de demo (localStorage), met dezelfde interface
+  ui/        Catalogus/Vault, Scan, Kassa, Beurs, Meer, Toevoegen, ExemplaarSheet, ArtikelSheet, Labels
+  klant/     de aparte klantenpagina (eigen bundel, niets van het beheer)
+  state.ts   centrale toestand, acties en de offline wachtrij
+public/      wat online komt (index.html, app.js, catalogus/, sw.js, data/, vendor/, img/)
 scripts/     build, tests, catalogus (TCGdex) en prijsgids (Cardmarket)
 supabase/    databaseschema
 tests/       unit tests en de e2e-doorloop

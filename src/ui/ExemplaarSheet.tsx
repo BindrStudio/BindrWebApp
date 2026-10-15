@@ -8,6 +8,8 @@ import { voorstelVoor } from "../lib/pricing";
 import { labelDataUrl } from "../lib/label";
 import { huidigeMaat } from "../lib/printer";
 import { Badges, Hartje, Icoon, KaartFoto, Kiezer, Sheet, Veld } from "./common";
+import { MandjeActie } from "./MandjeActie";
+import { PLAATS } from "../lib/categorie";
 
 export function ExemplaarSheet({ id }: { id: string }) {
   const { exemplaren, gids, instellingen, teWijzigen, printer } = useApp();
@@ -33,6 +35,8 @@ export function ExemplaarSheet({ id }: { id: string }) {
           </div>
         </div>
       </div>
+
+      <MandjeActie ex={ex} />
 
       {wijzigNodig && (
         <div className={`melding-kaart ${wijzigNodig.richting}`}>
@@ -97,7 +101,7 @@ export function ExemplaarSheet({ id }: { id: string }) {
                 <button className="lijst-knop" onClick={() => openExemplaar(d.id)}>
                   <span className="code">{toonCode(d.code)}</span>
                   <Badges ex={d} />
-                  <span className="zacht">{d.opslag}</span>
+                  <span className="zacht">{PLAATS[d.opslag].naam}</span>
                   <span className="rechts">{d.opslag === "vitrine" ? euro(d.hartjesprijs) : euro(d.verkoopprijs)}</span>
                 </button>
               </li>
@@ -124,15 +128,15 @@ function OpslagKnop({ ex }: { ex: Exemplaar }) {
     <button className={`plaats ${ex.opslag}`} onClick={() => {
       if (naarVitrine && ex.hartjesprijs == null) {
         const p = ex.verkoopprijs ?? null;
-        void wijzig(ex.id, { opslag: "vitrine", hartjesprijs: p, hartjesdatum: p != null ? new Date().toISOString().slice(0, 10) : null }, "Naar de vitrine. Schrijf het hartje en kijk de prijs na.", true);
+        void wijzig(ex.id, { opslag: "vitrine", hartjesprijs: p, hartjesdatum: p != null ? new Date().toISOString().slice(0, 10) : null }, "Naar de catalogus. Schrijf het hartje en kijk de prijs na.", true);
       } else {
-        void wijzig(ex.id, { opslag: naarVitrine ? "vitrine" : "stockdoos" }, naarVitrine ? "Naar de vitrine" : "Naar de stockdoos", true);
+        void wijzig(ex.id, { opslag: naarVitrine ? "vitrine" : "stockdoos" }, naarVitrine ? "Naar de catalogus" : "Naar de vault", true);
       }
     }}>
       <Icoon naam={ex.opslag === "vitrine" ? "vitrine" : "doos"} maat={18} />
       <span className="plaats-tekst">
-        <strong>{ex.opslag === "vitrine" ? "In de vitrine" : "In de stockdoos"}</strong>
-        <span>{naarVitrine ? "Tik om naar de vitrine te verplaatsen" : "Tik om naar de stockdoos te verplaatsen"}</span>
+        <strong>{PLAATS[ex.opslag].lang}</strong>
+        <span>{naarVitrine ? "Tik om naar de catalogus te verplaatsen" : "Tik om naar de vault te verplaatsen"}</span>
       </span>
     </button>
   );
@@ -156,7 +160,7 @@ function HartjeBlok({ ex, voorstelPrijs }: { ex: Exemplaar; voorstelPrijs: numbe
     <section className="blok hartje-blok">
       <div className="hartje-rij">
         <div>
-          <h3>{ex.opslag === "vitrine" ? "Prijs op het hartje" : "Verkoopprijs"}</h3>
+          <h3>{ex.opslag === "vitrine" ? "Prijs op het hartje" : "Waarde in de vault"}</h3>
           <div className="hartje-groot">
             {ex.opslag === "vitrine" ? <Hartje prijs={ex.hartjesprijs} groot /> : <span className="waarde groot">{euro(ex.verkoopprijs)}</span>}
             {ex.prijs_handmatig && <span className="slot" title="Eigen prijs: de herprijsknop slaat deze kaart over"><Icoon naam="slot" maat={16} /> eigen prijs</span>}
@@ -254,18 +258,13 @@ function Bewerk({ ex }: { ex: Exemplaar }) {
 
 function UitVoorraad({ ex }: { ex: Exemplaar }) {
   const [open, setOpen] = useState(false);
+  if (ex.status !== "in voorraad" && ex.status !== "gereserveerd") return null;
   if (!open) return <button className="knop zacht rood" onClick={() => setOpen(true)}><Icoon naam="uit" maat={18} /> Uit voorraad</button>;
-  const zet = (status: Exemplaar["status"], tekst: string) => {
-    void wijzig(ex.id, { status }, tekst, true);
-    sluit();
-  };
   return (
     <div className="uit-keuze">
-      <p className="zacht">Verkopen aan de stand komt in de beursmodus (fase 2). Nu kun je een kaart enkel uit de voorraad halen:</p>
+      <p className="zacht">Verkopen en ruilen gaan via de kassa (In het mandje). Hier haal je een kaart uit de voorraad zonder verkoop: kwijt, beschadigd of voor de eigen collectie.</p>
       <div className="knoppenrij">
-        <button className="knop zacht" onClick={() => zet("verkocht", "Als verkocht gemarkeerd")}>Verkocht</button>
-        <button className="knop zacht" onClick={() => zet("geruild", "Als geruild gemarkeerd")}>Geruild</button>
-        <button className="knop zacht" onClick={() => zet("weg", "Uit de voorraad gehaald")}>Weg</button>
+        <button className="knop zacht rood" onClick={() => { void wijzig(ex.id, { status: "weg" }, "Uit de voorraad gehaald", true); sluit(); }}>Uit voorraad halen</button>
         <button className="tekstknop" onClick={() => setOpen(false)}>Annuleer</button>
       </div>
     </div>

@@ -1,15 +1,14 @@
 import { useState } from "react";
 import {
-  importeerTestset, logUit, offlineKlaarzetten, useApp, vernieuwPrijsgids, voegArtikelToe, wijzigArtikel, wisDemo, zetInstellingen,
+  importeerTestset, logUit, offlineKlaarzetten, openOverzicht, synchroniseer, useApp, vernieuwPrijsgids, wisDemo, zetInstagram, zetInstellingen,
 } from "../state";
-import type { Artikel } from "../types";
-import { APP_VERSIE } from "../config";
+import { APP_VERSIE, klantUrl } from "../config";
 import { datumKort, euro, getal } from "../lib/format";
 import { STANDAARD_INSTELLINGEN, type Drempel } from "../lib/pricing";
-import { Icoon, Kiezer, Veld } from "./common";
+import { Icoon, QrBeeld, Sheet } from "./common";
 
 export function Meer() {
-  const { backend, gids, exemplaren, instellingen } = useApp();
+  const { backend, gids, exemplaren, instellingen, wachtrij, online } = useApp();
   const demo = backend?.soort === "demo";
   const gebruiker = backend?.gebruiker();
 
@@ -24,13 +23,21 @@ export function Meer() {
 
       <Groep titel="Account">
         <Rij label={demo ? "Demomodus" : "Ingelogd als"} waarde={demo ? "gegevens blijven op dit toestel" : gebruiker?.email} />
+        {!demo && <Rij label="Synchronisatie" waarde={wachtrij ? `${wachtrij} wijzigingen wachten${online ? "" : " op internet"}` : "alles is doorgestuurd"} />}
+        {!demo && <button className="rij-knop" onClick={() => void synchroniseer()}><Icoon naam="vernieuw" maat={18} /> Nu synchroniseren</button>}
         <button className="rij-knop" onClick={() => void logUit()}><Icoon naam="uit" maat={18} /> {demo ? "Demo verlaten" : "Uitloggen"}</button>
+      </Groep>
+
+      <Klantencatalogus />
+
+      <Groep titel="Overzicht">
+        <button className="rij-knop" onClick={openOverzicht}><Icoon naam="grafiek" maat={18} /> Beurzen, omzet en voorraadwaarde</button>
       </Groep>
 
       <Groep titel="Prijzen">
         <Rij label="Cardmarket-prijsgids" waarde={gids ? `${datumKort(gids.datum)} · ${gids.prijzen.size.toLocaleString("nl-BE")} producten` : "nog niet geladen"} />
         <button className="rij-knop" onClick={() => void vernieuwPrijsgids()}><Icoon naam="vernieuw" maat={18} /> Prijsgids opnieuw laden</button>
-        <p className="groep-uitleg">De prijsgids komt elke nacht automatisch binnen. "Prijzen nakijken" in Voorraad vergelijkt de hartjes in de vitrine ermee.</p>
+        <p className="groep-uitleg">De prijsgids komt elke nacht automatisch binnen. "Prijzen nakijken" in de catalogus vergelijkt de hartjes ermee; de vault toont wat in waarde stijgt.</p>
       </Groep>
 
       <Offline />
@@ -43,8 +50,6 @@ export function Meer() {
           <span>Label meteen printen bij toevoegen</span>
         </label>
       </Groep>
-
-      <Artikelen />
 
       <Groep titel="Testen">
         <p className="groep-uitleg">
@@ -82,7 +87,7 @@ function Offline() {
         const r = await offlineKlaarzetten();
         setStand({ op: new Date().toISOString(), fotos: r.fotos, aantal: exemplaren.length });
       }}><Icoon naam="vernieuw" maat={18} /> Offline klaarzetten</button>
-      <p className="groep-uitleg">Doe dit thuis met wifi, op elke gsm. De app, de kaarten, de foto's en de tekstherkenning staan dan op het toestel. Wijzigingen bewaren zonder internet komt in fase 2.</p>
+      <p className="groep-uitleg">Doe dit thuis met wifi, op elke gsm. De app, de kaarten, de foto's en de tekstherkenning staan dan op het toestel. Op de beurs werkt alles ook zonder internet; wijzigingen wachten op het toestel en gaan door zodra er weer verbinding is.</p>
     </Groep>
   );
 }
@@ -148,60 +153,48 @@ function Prijsregels() {
   );
 }
 
-function Artikelen() {
-  const { artikelen } = useApp();
-  const [nieuw, setNieuw] = useState(false);
-  const totaal = artikelen.reduce((s, a) => s + (a.prijs ?? 0) * a.aantal, 0);
+function Klantencatalogus() {
+  const { instagram, backend } = useApp();
+  const [naam, setNaam] = useState(instagram);
+  const [qr, setQr] = useState(false);
+  const url = klantUrl();
+  const bekijk = klantUrl(backend?.soort === "demo");
   return (
-    <Groep titel="Artikelen">
-      <p className="groep-uitleg">Sealed, binders, 3D-prints en bulk: geteld per stuk, zonder eigen label. Samen {euro(totaal, true)}.</p>
-      <ul className="artikelen">
-        {artikelen.map((a) => <ArtikelRij key={a.id} a={a} />)}
-      </ul>
-      {nieuw ? <NieuwArtikelForm onKlaar={() => setNieuw(false)} /> : (
-        <button className="rij-knop" onClick={() => setNieuw(true)}><Icoon naam="plus" maat={18} /> Artikel toevoegen</button>
+    <Groep titel="Klantencatalogus">
+      <p className="groep-uitleg">Een aparte pagina voor klanten, zonder login: enkel wat in de catalogus ligt, met foto, conditie en prijs, en een knop om te reserveren via Instagram.</p>
+      <a className="rij-knop" href={bekijk} target="_blank" rel="noreferrer"><Icoon naam="oog" maat={18} /> Bekijk als klant{backend?.soort === "demo" ? " (met de demo)" : ""}</a>
+      <button className="rij-knop" onClick={() => setQr(true)}><Icoon naam="qr" maat={18} /> QR-code voor aan de stand</button>
+      <div className="rij instagram-rij">
+        <span><Icoon naam="instagram" maat={18} /> Instagram</span>
+        <span className="instagram-veld">
+          @<input value={naam} onChange={(e) => setNaam(e.target.value)} placeholder="bindr" autoCapitalize="none" autoCorrect="off" />
+          {naam.trim().replace(/^@/, "") !== instagram && <button className="tekstknop klein" onClick={() => zetInstagram(naam)}>Bewaar</button>}
+        </span>
+      </div>
+      <details className="wie-ziet-wat">
+        <summary>Wie ziet wat?</summary>
+        <table>
+          <thead><tr><th></th><th>Klant</th><th>Beheerder</th></tr></thead>
+          <tbody>
+            <tr><td>Catalogus: foto, naam, set, conditie, prijs</td><td>ja</td><td>ja</td></tr>
+            <tr><td>Referentiecode om te reserveren</td><td>ja</td><td>ja</td></tr>
+            <tr><td>Gereserveerde kaarten</td><td>nee</td><td>ja</td></tr>
+            <tr><td>Vault</td><td>nee</td><td>ja</td></tr>
+            <tr><td>Aankoopprijs, bron, marge</td><td>nee</td><td>ja</td></tr>
+            <tr><td>Kassa, beurzen, transacties</td><td>nee</td><td>ja</td></tr>
+            <tr><td>Wijzigen, printen, verkopen</td><td>nee</td><td>ja</td></tr>
+          </tbody>
+        </table>
+      </details>
+      {qr && (
+        <Sheet titel="Catalogus voor klanten" onSluit={() => setQr(false)}>
+          <div className="stand-qr">
+            <QrBeeld tekst={url} />
+            <p><strong>Scan en bekijk onze catalogus</strong></p>
+            <p className="zacht klein">{url}</p>
+          </div>
+        </Sheet>
       )}
     </Groep>
-  );
-}
-
-function ArtikelRij({ a }: { a: Artikel }) {
-  return (
-    <li className="artikel">
-      <div className="artikel-tekst">
-        <strong>{a.naam}</strong>
-        <span className="zacht klein">{a.soort} · {a.opslag} · {euro(a.prijs)}</span>
-      </div>
-      <div className="stapper klein">
-        <button onClick={() => void wijzigArtikel(a.id, { aantal: Math.max(0, a.aantal - 1) })} aria-label="Eén minder">−</button>
-        <span>{a.aantal}</span>
-        <button onClick={() => void wijzigArtikel(a.id, { aantal: a.aantal + 1 })} aria-label="Eén meer">+</button>
-      </div>
-    </li>
-  );
-}
-
-function NieuwArtikelForm({ onKlaar }: { onKlaar: () => void }) {
-  const [v, setV] = useState({ naam: "", soort: "eigen product" as Artikel["soort"], aantal: "1", prijs: "", opslag: "vitrine" as Artikel["opslag"] });
-  return (
-    <div className="formulier compact">
-      <Veld label="Naam"><input autoFocus value={v.naam} onChange={(e) => setV({ ...v, naam: e.target.value })} placeholder="Binder 9-pocket, gravure naar keuze" /></Veld>
-      <Veld label="Soort">
-        <Kiezer waarde={v.soort} onKies={(s) => setV({ ...v, soort: s })}
-          opties={[{ waarde: "eigen product", label: "Eigen product" }, { waarde: "sealed", label: "Sealed" }, { waarde: "bulk", label: "Bulk" }, { waarde: "andere", label: "Andere" }]} />
-      </Veld>
-      <div className="twee">
-        <Veld label="Aantal"><input inputMode="numeric" value={v.aantal} onChange={(e) => setV({ ...v, aantal: e.target.value })} /></Veld>
-        <Veld label="Prijs per stuk (€)"><input inputMode="decimal" value={v.prijs} onChange={(e) => setV({ ...v, prijs: e.target.value })} /></Veld>
-      </div>
-      <Veld label="Waar?"><Kiezer waarde={v.opslag} onKies={(o) => setV({ ...v, opslag: o })} opties={[{ waarde: "vitrine", label: "Vitrine" }, { waarde: "stockdoos", label: "Stockdoos" }]} /></Veld>
-      <div className="knoppenrij">
-        <button className="knop" disabled={!v.naam.trim()} onClick={async () => {
-          await voegArtikelToe({ naam: v.naam.trim(), soort: v.soort, aantal: Math.max(0, Math.round(getal(v.aantal) ?? 1)), prijs: getal(v.prijs), opslag: v.opslag });
-          onKlaar();
-        }}>Toevoegen</button>
-        <button className="tekstknop" onClick={onKlaar}>Annuleren</button>
-      </div>
-    </div>
   );
 }

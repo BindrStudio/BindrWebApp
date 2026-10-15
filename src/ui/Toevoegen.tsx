@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { huidig, meld, openExemplaar, print, sluit, useApp, voegToe, zetInstellingen } from "../state";
+import { huidig, meld, openArtikel, openExemplaar, print, sluit, useApp, voegToe, zetInstellingen } from "../state";
 import type { Catalogus, CatalogusKaart, Exemplaar, NieuwExemplaar, Opslag, Soort } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
 import { afbeelding, herken, laadCatalogus, zoek, type Index, type Kandidaat } from "../lib/catalog";
@@ -15,7 +15,7 @@ type Bron = "zoeken" | "foto" | "handmatig";
 // Wat de vorige kaart had, zodat een stapel snel gaat (stapelmodus).
 const vorige = { taal: "EN", conditie: "NM", opslag: "stockdoos" as Opslag, aankoopbron: "" };
 
-export function Toevoegen({ kaartId, catalogus }: { kaartId?: string; catalogus?: Catalogus }) {
+export function Toevoegen({ kaartId, catalogus, opslag }: { kaartId?: string; catalogus?: Catalogus; opslag?: Opslag }) {
   const [kaart, setKaart] = useState<CatalogusKaart | null>(null);
   const [handmatig, setHandmatig] = useState(false);
   const [klaar, setKlaar] = useState<Exemplaar[] | null>(null);
@@ -35,7 +35,7 @@ export function Toevoegen({ kaartId, catalogus }: { kaartId?: string; catalogus?
       {klaar ? (
         <Klaar nieuw={klaar} onVolgende={opnieuw} />
       ) : kaart || handmatig ? (
-        <Details kaart={kaart} onTerug={opnieuw} onKlaar={setKlaar} />
+        <Details kaart={kaart} opslag={opslag} onTerug={opnieuw} onKlaar={setKlaar} />
       ) : (
         <KiesKaart onKies={setKaart} onHandmatig={() => setHandmatig(true)} />
       )}
@@ -43,7 +43,7 @@ export function Toevoegen({ kaartId, catalogus }: { kaartId?: string; catalogus?
   );
 }
 
-function KiesKaart({ onKies, onHandmatig }: { onKies: (k: CatalogusKaart) => void; onHandmatig: () => void }) {
+export function KiesKaart({ onKies, onHandmatig, metArtikel = true, handmatigTekst }: { onKies: (k: CatalogusKaart) => void; onHandmatig: () => void; metArtikel?: boolean; handmatigTekst?: string }) {
   const [bron, setBron] = useState<Bron>("zoeken");
   const [cat, setCat] = useState<Catalogus>(vorige.taal === "JP" || vorige.taal.startsWith("CN") ? "asia" : "en");
   const [idx, setIdx] = useState<Index | null>(null);
@@ -84,8 +84,14 @@ function KiesKaart({ onKies, onHandmatig }: { onKies: (k: CatalogusKaart) => voi
       {bron === "foto" && <FotoHerkenning cat={cat} onKies={onKies} />}
       {bron === "handmatig" && (
         <div className="blok">
-          <p>Staat de kaart niet in de catalogus, of is het een slab of een eigen product? Vul dan zelf de gegevens in.</p>
+          <p>{handmatigTekst ?? "Staat de kaart niet in de catalogus, of is het een slab of een eigen product? Vul dan zelf de gegevens in."}</p>
           <button className="knop" onClick={onHandmatig}>Handmatig invullen</button>
+        </div>
+      )}
+      {bron === "handmatig" && metArtikel && (
+        <div className="blok">
+          <p>Sealed, 3D-prints of bulk die per aantal gaan, zonder eigen label?</p>
+          <button className="knop zacht" onClick={() => openArtikel(null)}>Artikel per aantal toevoegen</button>
         </div>
       )}
     </div>
@@ -160,7 +166,7 @@ function FotoHerkenning({ cat, onKies }: { cat: Catalogus; onKies: (k: Catalogus
   );
 }
 
-function Details({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart | null; onTerug: () => void; onKlaar: (n: Exemplaar[]) => void }) {
+function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | null; opslag?: Opslag; onTerug: () => void; onKlaar: (n: Exemplaar[]) => void }) {
   const { gids, instellingen, exemplaren } = useApp();
   const asia = kaart?.catalogus === "asia";
   const [soort, setSoort] = useState<Soort>("kaart");
@@ -173,7 +179,7 @@ function Details({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart | null; on
     conditie: vorige.conditie,
     variant: "normaal",
     aantal: 1,
-    opslag: vorige.opslag,
+    opslag: opslag ?? vorige.opslag,
     prijs: "",
     aankoopprijs: "",
     aankoopbron: vorige.aankoopbron,
@@ -199,7 +205,7 @@ function Details({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart | null; on
   const bewaar = async () => {
     const prijs = getal(v.prijs);
     if (!v.naam.trim()) return meld("Vul een naam in", "fout");
-    if (v.opslag === "vitrine" && prijs == null) return meld("Een kaart in de vitrine heeft een hartjesprijs nodig", "fout");
+    if (v.opslag === "vitrine" && prijs == null) return meld("Een kaart in de catalogus heeft een hartjesprijs nodig", "fout");
     setBezig(true);
     try {
       const codes = new Set(huidig().exemplaren.map((e) => e.code));
@@ -220,7 +226,7 @@ function Details({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart | null; on
           label_status: "te printen", opmerking: v.opmerking.trim() || null,
         };
       });
-      const nieuw = await voegToe(rijen);
+      const nieuw = voegToe(rijen);
       Object.assign(vorige, { taal: v.taal, conditie: v.conditie, opslag: v.opslag, aankoopbron: v.aankoopbron });
       if (printen) void print(nieuw.map((e) => e.id));
       onKlaar(nieuw);
@@ -280,7 +286,7 @@ function Details({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart | null; on
       )}
 
       <Veld label="Waar ligt het?">
-        <Kiezer waarde={v.opslag} opties={[{ waarde: "vitrine", label: "Vitrine (met hartje)" }, { waarde: "stockdoos", label: "Stockdoos" }]} onKies={(o) => setV({ ...v, opslag: o })} />
+        <Kiezer waarde={v.opslag} opties={[{ waarde: "vitrine", label: "Catalogus (met hartje)" }, { waarde: "stockdoos", label: "Vault" }]} onKies={(o) => setV({ ...v, opslag: o })} />
       </Veld>
 
       <div className="twee">

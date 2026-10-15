@@ -1,72 +1,79 @@
-import { useEffect, useState } from "react";
-import { sluitToast, start, useApp } from "./state";
+import { useEffect } from "react";
+import { naarTab, sluit, sluitToast, start, useApp, type Tab } from "./state";
 import { Voorraad } from "./ui/Voorraad";
 import { Scan } from "./ui/Scan";
 import { Labels } from "./ui/Labels";
 import { Meer } from "./ui/Meer";
 import { Login } from "./ui/Login";
 import { ExemplaarSheet } from "./ui/ExemplaarSheet";
+import { ArtikelSheet } from "./ui/ArtikelSheet";
 import { Toevoegen } from "./ui/Toevoegen";
-import { Icoon } from "./ui/common";
+import { Kassa } from "./ui/Kassa";
+import { BeursRapport, Overzicht, TransactieSheet } from "./ui/Beurs";
+import { Icoon, Sheet } from "./ui/common";
 
-type Tab = "voorraad" | "scan" | "labels" | "meer";
 const TABS: { id: Tab; label: string; icoon: string }[] = [
-  { id: "voorraad", label: "Voorraad", icoon: "doos" },
+  { id: "catalogus", label: "Catalogus", icoon: "vitrine" },
+  { id: "vault", label: "Vault", icoon: "doos" },
   { id: "scan", label: "Scan", icoon: "scan" },
-  { id: "labels", label: "Labels", icoon: "label" },
+  { id: "kassa", label: "Kassa", icoon: "kassa" },
   { id: "meer", label: "Meer", icoon: "meer" },
 ];
 
-function beginTab(): Tab {
-  const h = location.hash.replace("#", "") as Tab;
-  return TABS.some((t) => t.id === h) ? h : "voorraad";
-}
-
 export function App() {
-  const { fase, open, toasts, bezig, online, backend, exemplaren } = useApp();
-  const [tab, setTab] = useState<Tab>(beginTab);
+  const { fase, open, toasts, bezig, online, backend, tab, wachtrij, mandje } = useApp();
 
   useEffect(() => { void start(); }, []);
   useEffect(() => {
-    history.replaceState(null, "", tab === "voorraad" ? location.pathname : `#${tab}`);
+    history.replaceState(null, "", tab === "catalogus" ? location.pathname : `#${tab}`);
     window.scrollTo(0, 0);
   }, [tab]);
 
   if (fase === "start" || fase === "laden") {
     return (
       <div className="splash">
-        <img src="img/logo.png" alt="Bind'r" width={180} />
+        <img src="img/logo.png" alt="Bind'r" width={200} />
         <div className="laadbalk"><span /></div>
       </div>
     );
   }
   if (fase === "login") return <><Login /><Toasts toasts={toasts} /></>;
 
-  const tePrinten = exemplaren.filter((e) => e.label_status === "te printen" && (e.status === "in voorraad" || e.status === "gereserveerd")).length;
+  const inMandje = mandje.regels.length;
 
   return (
     <div className="app">
       {backend?.soort === "demo" && <div className="demo-band">Demo · alleen op dit toestel</div>}
-      {!online && backend?.soort === "supabase" && <div className="offline-band">Geen internet · wijzigingen lukken pas weer met verbinding</div>}
+      {backend?.soort === "supabase" && (!online || wachtrij > 0) && (
+        <div className={`offline-band${online ? " bezig" : ""}`}>
+          {online ? `Wijzigingen doorsturen… (${wachtrij})` : `Offline${wachtrij ? ` · ${wachtrij} ${wachtrij === 1 ? "wijziging wacht" : "wijzigingen wachten"}` : ""} · alles werkt verder`}
+        </div>
+      )}
       <main key={tab} className="tab-inhoud">
-        {tab === "voorraad" && <Voorraad />}
+        {tab === "catalogus" && <Voorraad opslag="vitrine" />}
+        {tab === "vault" && <Voorraad opslag="stockdoos" />}
         {tab === "scan" && <Scan />}
-        {tab === "labels" && <Labels />}
+        {tab === "kassa" && <Kassa />}
         {tab === "meer" && <Meer />}
       </main>
       <nav className="tabbalk">
         {TABS.map((t) => (
-          <button key={t.id} className={tab === t.id ? "aan" : ""} onClick={() => setTab(t.id)} aria-current={tab === t.id ? "page" : undefined}>
+          <button key={t.id} className={`${tab === t.id ? "aan" : ""}${t.id === "scan" ? " scan-tab" : ""}`} onClick={() => naarTab(t.id)} aria-current={tab === t.id ? "page" : undefined}>
             <span className="tab-icoon">
-              <Icoon naam={t.icoon} maat={24} />
-              {t.id === "labels" && tePrinten > 0 && <span className="tab-teller">{tePrinten > 99 ? "99+" : tePrinten}</span>}
+              <Icoon naam={t.icoon} maat={t.id === "scan" ? 28 : 24} />
+              {t.id === "kassa" && inMandje > 0 && <span className="tab-teller">{inMandje}</span>}
             </span>
             <span>{t.label}</span>
           </button>
         ))}
       </nav>
       {open?.soort === "exemplaar" && <ExemplaarSheet id={open.id} />}
-      {open?.soort === "toevoegen" && <Toevoegen key={open.kaartId || "nieuw"} kaartId={open.kaartId} catalogus={open.catalogus} />}
+      {open?.soort === "artikel" && <ArtikelSheet key={open.id ?? "nieuw"} id={open.id} />}
+      {open?.soort === "toevoegen" && <Toevoegen key={open.kaartId || "nieuw"} kaartId={open.kaartId} catalogus={open.catalogus} opslag={open.opslag} />}
+      {open?.soort === "labels" && <Sheet titel="Labels" onSluit={sluit} vol><Labels inSheet /></Sheet>}
+      {open?.soort === "transactie" && <TransactieSheet id={open.id} />}
+      {open?.soort === "beurs" && <BeursRapport id={open.id} />}
+      {open?.soort === "overzicht" && <Overzicht />}
       {bezig && (
         <div className="bezig" role="status">
           <div className="bezig-kaart"><span className="draaier" />{bezig}</div>

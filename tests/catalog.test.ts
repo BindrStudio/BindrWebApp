@@ -33,3 +33,17 @@ test("foto van Charizard V (BRS 153) wordt zeker herkend", async () => {
   assert.equal(r.kandidaten[0].kaart.nummer, "153");
   assert.ok(r.zeker);
 });
+
+test("zoeken op naam met (een deel van) het nummer", async () => {
+  const en = await laadCatalogus("en");
+  const eerste = (q: string) => zoek(en, q)[0];
+  assert.equal(eerste("charizard 153")?.nummer, "153");
+  assert.equal(eerste("charizard 153")?.naam, "Charizard V");
+  assert.ok(zoek(en, "charizard 15").some((k) => k.nummer === "153" && k.naam === "Charizard V"), "deel van het nummer");
+  assert.match(eerste("pikachu 17")?.naam ?? "", /pikachu/i);
+  assert.ok(zoek(en, "pikachu 17").slice(0, 3).every((k) => /pikachu/i.test(k.naam)), "naam gaat voor setnaam");
+  assert.equal(eerste("gengar vmax 271")?.setCode, "FST");
+  assert.ok(zoek(en, "charizard 4/102").some((k) => k.setTotaal === 102 && k.nummer === "4"));
+  assert.ok(zoek(en, "mew 151").length > 0, "setnaam 151 blijft werken");
+  assert.equal(zoek(en, "PFL 130").length > 0, true);
+});
