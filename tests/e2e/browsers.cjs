@@ -108,9 +108,29 @@ async function doorloop(ctx, page, motor, naam, opties) {
         };
         const wie = [...document.querySelectorAll("body *")].filter((el) => el.getBoundingClientRect().right > w + 1 && getComputedStyle(el).position !== "fixed" && !geknipt(el))
           .slice(0, 4).map((el) => `${el.tagName.toLowerCase()}.${[...el.classList].join(".")} (${Math.round(el.getBoundingClientRect().right)})`);
-        return { teVeel: document.scrollingElement.scrollWidth - w, wie, w, iw: innerWidth };
+        const teVeel = document.scrollingElement.scrollWidth - w;
+        // Zoek het element dat de overloop veroorzaakt: verberg om beurten een kind en kijk of het weg is.
+        const pad = [];
+        if (teVeel > 1) {
+          let el = document.body;
+          for (let diepte = 0; diepte < 25 && el; diepte++) {
+            let schuldig = null;
+            for (const k of el.children) {
+              const oud = k.style.display;
+              k.style.display = "none";
+              const weg = document.scrollingElement.scrollWidth - w <= 1;
+              k.style.display = oud;
+              if (weg) { schuldig = k; break; }
+            }
+            if (!schuldig) break;
+            const cs = getComputedStyle(schuldig);
+            pad.push(`${schuldig.tagName.toLowerCase()}${schuldig.className ? "." + String(schuldig.className).trim().split(/\s+/).join(".") : ""}[${Math.round(schuldig.getBoundingClientRect().width)}w ${cs.overflowX} ${cs.display}]`);
+            el = schuldig;
+          }
+        }
+        return { teVeel, wie, w, iw: innerWidth, pad: pad.slice(-4).join(" > ") };
       });
-      assert.ok(r.teVeel <= 1, `${waar}: ${r.teVeel}px te breed bij ${r.w}px (innerWidth ${r.iw}): ${r.wie.join(", ") || "niets buiten een scrollvak"}`);
+      assert.ok(r.teVeel <= 1, `${waar}: ${r.teVeel}px te breed bij ${r.w}px (innerWidth ${r.iw}): ${r.wie.join(", ") || "niets buiten een scrollvak"}; oorzaak: ${r.pad || "?"}`);
     }
   };
   const tabbalk = (tab) => page.locator(".tabbalk button").filter({ hasText: tab }).click();
