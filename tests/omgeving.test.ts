@@ -50,7 +50,7 @@ test("marge: enkel regels met een gekende aankoopprijs, artikelen tellen niet me
   assert.equal(m.winst, 2);
   assert.equal(m.pct, 13);
   assert.equal(m.gekend, 2);
-  assert.equal(m.onbekend, 2);
+  assert.equal(m.onbekend, 1, "artikels tellen niet: hun kosten zitten apart in de boekhouding");
   assert.equal(marge([b]).winst, -4);
 });
 

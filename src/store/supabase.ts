@@ -1,11 +1,13 @@
 // Supabase via de REST- en login-API, zonder extra bibliotheek.
 import { SUPABASE_KEY, SUPABASE_URL } from "../config";
-import type { Aanwezig, Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
+import type { Aankoopfoto, Aanwezig, Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
 import { Fout, type Alles, type Backend, type Beheerder, type PrijsMarkering } from "./backend";
 import { schoonArtikel, schoonExemplaar } from "../lib/exemplaar";
 
 const SESSIE_SLEUTEL = "bindr-sessie-v1";
 const VERSIE_SLEUTEL = "bindr-schema-v1";
+/** De versie van het schema die alles van de app kan (supabase/schema.sql van 0.7). */
+export const NIEUWSTE = 6;
 const PAGINA = 1000;
 // Kolommen die pas bestaan na de update van het schema (omgevingen, prijscheck, beurslocatie).
 // Zolang de database ouder is, sturen we ze niet mee: anders weigert de server de hele wijziging.
@@ -178,8 +180,8 @@ export class SupabaseBackend implements Backend {
   /** True als de database nog het schema van fase 1 heeft (geen beurzen en transacties). */
   schemaOud = false;
 
-  /** 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
-  versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v >= 2 && v <= 5 ? v : null; })();
+  /** 6 = aankoopfoto's en privé (0.7), 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
+  versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v >= 2 && v <= 6 ? v : null; })();
 
   private async zekerVersie() {
     if (this.versie == null) await this.laadOmgevingen().catch(() => undefined);
@@ -207,14 +209,15 @@ export class SupabaseBackend implements Backend {
       // Bestaan de kolommen van versie 0.5 en 0.6 al? Een onbekende kolom geeft een fout 400.
       // (We filteren op de kolommen, zonder een foto te downloaden.)
       const bestaat = (pad: string) => this.vraag("GET", pad).then(() => true, (e) => {
-        if (e instanceof Fout && e.status === 400) return false;
+        if (e instanceof Fout && (e.status === 400 || e.status === 404)) return false; // onbekende kolom of tabel
         throw e;
       });
-      const [v4, v5] = await Promise.all([
+      const [v4, v5, v6] = await Promise.all([
         bestaat("artikelen?select=id&limit=1&details=not.is.null&foto=is.null"),
         bestaat("transacties?select=id&limit=1&tegenpartij=is.null").then((ok) => ok && bestaat("exemplaren?select=id&limit=1&foto=is.null")),
+        bestaat("aankoopfotos?select=id&limit=1"),
       ]);
-      this.zetVersie(v4 && v5 ? 5 : v4 ? 4 : 3);
+      this.zetVersie(v4 && v5 && v6 ? 6 : v4 && v5 ? 5 : v4 ? 4 : 3);
       return o;
     } catch (e) {
       if (e instanceof Fout && e.status === 404) {
@@ -418,28 +421,49 @@ export class SupabaseBackend implements Backend {
   }
 
   /** Wat pas kan na de update van het schema (0.6): wachten in plaats van weigeren (en kwijtraken). */
-  private async vraagVersie5(wat: string) {
+  private async vraagNieuw(wat: string) {
     await this.zekerVersie();
-    if ((this.versie ?? 0) < 5) {
+    if ((this.versie ?? 0) < NIEUWSTE) {
       // Opnieuw nakijken (misschien werd het schema net uitgevoerd); anders blijft het in de wachtrij.
       localStorage.removeItem(VERSIE_SLEUTEL);
       this.versie = null;
       await this.zekerVersie();
-      if ((this.versie ?? 0) < 5) throw new Fout(`${wat} kan pas na de update van de database. Voer supabase/schema.sql opnieuw uit.`, 404);
+      if ((this.versie ?? 0) < NIEUWSTE) throw new Fout(`${wat} kan pas na de update van de database. Voer supabase/schema.sql opnieuw uit.`, 404);
     }
   }
 
   async boekTransactie(t: Transactie) {
     const { id, beurs_id, soort, tijd, regels, totaal, cash, sumup, bank, tegenpartij, opmerking, omgeving_id } = t;
-    const nieuw = soort === "kas" || !!bank || !!tegenpartij || (soort === "retour" && regels.some((r) => r.richting === "uit"));
-    if (nieuw) await this.vraagVersie5(soort === "kas" ? "Geld in of uit de kas" : soort === "retour" ? "Een deal terugdraaien" : "Een borderel of overschrijving");
+    const nieuw = soort === "kas" || soort === "prive" || !!bank || !!tegenpartij || (soort === "retour" && regels.some((r) => r.richting === "uit"));
+    if (nieuw) await this.vraagNieuw(soort === "kas" ? "Geld in of uit de kas" : soort === "prive" ? "Kaarten van of naar privé" : soort === "retour" ? "Een deal terugdraaien" : "Een aankoopbewijs of overschrijving");
     return this.rpc("boek_transactie", { t: { id, beurs_id, soort, tijd, regels, totaal, cash, sumup, opmerking, omgeving_id, ...(nieuw ? { bank: bank ?? 0, tegenpartij: tegenpartij ?? null } : {}) } });
   }
 
   /** Het borderel aanvullen (naam, adres, handtekening) nadat de transactie geboekt is. */
   async zetTegenpartij(id: string, tegenpartij: Tegenpartij | null) {
-    await this.vraagVersie5("Een borderel bewaren");
+    await this.vraagNieuw("Een aankoopbewijs bewaren");
     await this.vraag("PATCH", `transacties?id=eq.${id}`, { tegenpartij }, { Prefer: "return=minimal" });
+  }
+
+  async laadAankoopfotos(ids: string[]): Promise<Aankoopfoto[]> {
+    if ((this.versie ?? 0) < 6 || !ids.length) return [];
+    const uit: Aankoopfoto[] = [];
+    for (let i = 0; i < ids.length; i += 40) {
+      uit.push(...await this.vraag<Aankoopfoto[]>("GET", `aankoopfotos?select=id,transactie_id,foto,aangemaakt_op&transactie_id=in.(${ids.slice(i, i + 40).join(",")})&order=aangemaakt_op.asc`));
+    }
+    return uit;
+  }
+
+  async bewaarAankoopfoto(f: Aankoopfoto) {
+    await this.vraagNieuw("Een foto bij een aankoop");
+    const { id, transactie_id, foto, omgeving_id } = f;
+    await this.vraag("POST", "aankoopfotos?on_conflict=id", [{ id, transactie_id, foto, ...(omgeving_id ? { omgeving_id } : {}) }],
+      { Prefer: "resolution=ignore-duplicates,return=minimal" });
+  }
+
+  async verwijderAankoopfoto(id: string) {
+    await this.vraagNieuw("Een foto verwijderen");
+    await this.vraag("DELETE", `aankoopfotos?id=eq.${id}`, undefined, { Prefer: "return=minimal" });
   }
 
   maakOngedaan(id: string) {

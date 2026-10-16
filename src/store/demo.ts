@@ -1,7 +1,7 @@
 // Demomodus: alles blijft op dit toestel (localStorage). Handig om de app uit te
 // proberen met de testset, zonder account en zonder de echte voorraad te raken.
 // De kassa gebruikt dezelfde rekenkern als de offline wachtrij (src/lib/kassa.ts).
-import type { Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
+import type { Aankoopfoto, Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
 import { Fout, type Alles, type Backend, type PrijsMarkering } from "./backend";
 import { metVitrineSinds, schoonArtikel, schoonExemplaar, standaardArtikel, standaardExemplaar } from "../lib/exemplaar";
 import { aanvaardConflict, losConflictOp, maakOngedaan, pasToe } from "../lib/kassa";
@@ -11,6 +11,7 @@ const SLEUTEL = "bindr-demo-v1";
 interface Opslag extends Alles {
   instellingen: Record<string, unknown>;
   omgevingen: Omgeving[];
+  aankoopfotos?: Aankoopfoto[];
 }
 
 // In de demo bestaan dezelfde twee omgevingen als in de echte database.
@@ -186,6 +187,21 @@ export class DemoBackend implements Backend {
     this.zetTransactie(r.transactie);
     this.bewaar();
     return r.transactie;
+  }
+
+  async laadAankoopfotos(ids: string[]) {
+    const set = new Set(ids);
+    return (this.data.aankoopfotos ?? []).filter((f) => set.has(f.transactie_id));
+  }
+
+  async bewaarAankoopfoto(f: Aankoopfoto) {
+    this.data.aankoopfotos = [...(this.data.aankoopfotos ?? []).filter((x) => x.id !== f.id), f];
+    this.bewaar();
+  }
+
+  async verwijderAankoopfoto(id: string) {
+    this.data.aankoopfotos = (this.data.aankoopfotos ?? []).filter((x) => x.id !== id);
+    this.bewaar();
   }
 
   async zetTegenpartij(id: string, tegenpartij: Tegenpartij | null) {

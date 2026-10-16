@@ -122,19 +122,22 @@ export interface Beurs {
  * cashkoffer gaat zonder dat er iets verkocht wordt (wisselgeld van een andere stand, geld bijleggen
  * of afhalen): geen omzet en geen kost.
  */
-export type TransactieSoort = "verkoop" | "ruil" | "inkoop" | "retour" | "kas";
+export type TransactieSoort = "verkoop" | "ruil" | "inkoop" | "retour" | "kas" | "prive";
+// "prive": kaarten tussen de privécollectie van de zaakvoerder en de zaak, zonder geld.
+//   in = inbreng uit privé (een aankoop, betaald met privémiddelen), uit = naar privé (onttrekking aan aankoopwaarde).
 
 /**
  * Met wie we zaken deden, voor het aankoop- of ruilborderel (enkel voor de beheerders, nooit publiek).
  * Geen rijksregisternummer of kopie van de identiteitskaart: enkel een vinkje dat we ze nakeken.
  */
 export interface Tegenpartij {
-  naam?: string | null;
-  adres?: string | null;
+  naam?: string | null;             // minstens een voornaam (boven € 250 liefst de volledige naam)
+  adres?: string | null;            // gemeente of adres (aangeraden boven € 250)
   type?: "particulier" | "handelaar";
+  kanaal?: "beurs" | "online" | "rommelmarkt" | "andere" | null; // waar we kochten (buiten een beurs)
   btw?: string | null;              // ondernemingsnummer van een handelaar
   factuur?: string | null;          // factuurnummer van de handelaar (dan is hun factuur het bewijs)
-  id_gecontroleerd?: boolean;
+  id_gecontroleerd?: boolean;       // niet meer gebruikt (0.6)
   handtekening?: string | null;     // de verkoper, als SVG-pad (getekend op de gsm)
   handtekening_ons?: string | null; // de beheerder
   getekend_op?: string | null;
@@ -188,6 +191,15 @@ export interface Transactie {
   conflicten: Conflict[];
   opmerking: string | null;
   omgeving_id?: string | null;
+}
+
+/** Een foto bij een aankoop (de gekochte kaarten, of een screenshot van het gesprek bij een online aankoop). */
+export interface Aankoopfoto {
+  id: string;
+  transactie_id: string;
+  foto: string;          // data-URL (verkleind)
+  omgeving_id?: string | null;
+  aangemaakt_op?: string;
 }
 
 /** Gegevens van de onderneming voor het borderel en de rapporten (per omgeving: Bind'r en Brent apart). */

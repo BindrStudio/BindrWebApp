@@ -32,6 +32,8 @@ export function netto(regels: Regel[]) {
  * we de aankoopprijs kennen. Alleen voor de beheerders, nooit voor de klant.
  */
 export function marge(regels: Regel[]) {
+  // Enkel kaarten (exemplaren): artikels zijn omzet, hun kosten zitten apart in de boekhouding.
+  regels = regels.filter((r) => !r.artikel_id);
   const gekend = regels.filter((r) => r.richting === "uit" && r.aankoopprijs != null);
   const verkoop = som(gekend.map((r) => r.prijs));
   const aankoop = som(gekend.map((r) => r.aankoopprijs!));
@@ -64,12 +66,10 @@ export function regelUit(e: Exemplaar, prijs?: number): Regel {
   };
 }
 
+/** Artikels (binders, sealed, 3D-prints) zijn omzet, geen winst: hun kosten zitten apart in Dexxter. */
 export function regelArtikelUit(a: Artikel, aantal = 1, prijs?: number): Regel {
   const lijst = rond2((a.prijs ?? 0) * aantal);
-  return {
-    richting: "uit", artikel_id: a.id, aantal, naam: a.naam, hartjesprijs: lijst, prijs: rond2(prijs ?? lijst),
-    ...(a.aankoopprijs != null ? { aankoopprijs: rond2(a.aankoopprijs * aantal) } : {}),
-  };
+  return { richting: "uit", artikel_id: a.id, aantal, naam: a.naam, hartjesprijs: lijst, prijs: rond2(prijs ?? lijst) };
 }
 
 /** Een kaart van de klant komt binnen (ruil of inkoop) als nieuw exemplaar. */
@@ -147,6 +147,20 @@ export function nieuweRetour(terugIn: Regel[], terug: number, beursId: string | 
   };
 }
 
+/**
+ * Kaarten tussen privé en de zaak, zonder geld. `in` = inbreng uit de privécollectie (nieuwe
+ * exemplaren, aan de gekozen waarde: een kost betaald met privémiddelen). `uit` = naar privé
+ * (onttrekking, aan de aankoopprijs: dat neutraliseert de kost). Geen omzet.
+ */
+export function nieuwePrive(binnen: Regel[], weg: Regel[], beursId: string | null, tijd = new Date().toISOString()): Transactie {
+  if (!binnen.length && !weg.length) throw new Error("Kies minstens één kaart");
+  return {
+    id: uuid(), beurs_id: beursId, soort: "prive", tijd,
+    regels: [...binnen.map((r) => ({ ...r, richting: "in" as const })), ...weg.map((r) => ({ ...r, richting: "uit" as const, nieuw: null }))],
+    totaal: 0, cash: 0, sumup: 0, bank: 0, status: "ok", conflicten: [], opmerking: null,
+  };
+}
+
 /** Wat een retour standaard kost: de prijs van wat terugkomt min wat we teruggeven. */
 export function retourBedrag(terugIn: Regel[], terugUit: Regel[] = []): number {
   return rond2(terugIn.reduce((s, r) => s + r.prijs, 0) - terugUit.reduce((s, r) => s + r.prijs, 0));
@@ -177,8 +191,8 @@ export function pasToe(v: Voorraad, t: Transactie): { voorraad: Voorraad; transa
 
   for (const r of t.regels) {
     if (t.soort === "kas") continue;
-    if (t.soort === "retour" && r.richting === "uit") {
-      // We geven hun stuk terug (een ruil of inkoop terugdraaien): het moet nog in voorraad zijn.
+    if ((t.soort === "retour" || t.soort === "prive") && r.richting === "uit") {
+      // We geven hun stuk terug (een ruil of inkoop terugdraaien), of het gaat naar privé: het moet nog in voorraad zijn.
       if (r.exemplaar_id) {
         const e = exemplaren.get(r.exemplaar_id);
         if (!e || !inVoorraad(e)) { conflicten.push({ exemplaar_id: r.exemplaar_id, reden: e ? `al ${e.status}` : "onbekend exemplaar" }); continue; }
@@ -230,7 +244,7 @@ export function pasToe(v: Voorraad, t: Transactie): { voorraad: Voorraad; transa
       if (r.nieuw) {
         if (!r.nieuw.id || exemplaren.has(r.nieuw.id)) continue; // al geboekt (opnieuw verstuurd)
         const e = standaardExemplaar({
-          aankoopbron: t.soort === "ruil" ? "ruil" : "beurs",
+          aankoopbron: t.soort === "ruil" ? "ruil" : t.soort === "prive" ? "privé" : "beurs",
           ...r.nieuw,
           aankoopprijs: r.prijs,
           aankoopdatum: datumVan(t.tijd),
@@ -266,7 +280,7 @@ export function maakOngedaan(v: Voorraad, t: Transactie): { voorraad: Voorraad; 
 
   for (const r of t.regels) {
     if (t.soort === "kas") continue;
-    if (t.soort === "retour" && r.richting === "uit") {
+    if ((t.soort === "retour" || t.soort === "prive") && r.richting === "uit") {
       if (r.exemplaar_id && !inConflict.has(r.exemplaar_id)) {
         const e = exemplaren.get(r.exemplaar_id);
         if (e && e.transactie_id === t.id) exemplaren.set(e.id, { ...e, status: "in voorraad", transactie_id: null, afgeboekt_op: null });
@@ -332,7 +346,7 @@ export function losConflictOp(v: Voorraad, t: Transactie, oudId: string, nieuwId
       : r,
   );
   const exemplaren = v.exemplaren.map((e) =>
-    e.id === nieuw.id ? { ...e, status: (t.soort === "ruil" ? "geruild" : t.soort === "retour" ? "weg" : "verkocht") as Exemplaar["status"], transactie_id: t.id, afgeboekt_op: t.tijd } : e,
+    e.id === nieuw.id ? { ...e, status: (t.soort === "ruil" ? "geruild" : t.soort === "retour" || t.soort === "prive" ? "weg" : "verkocht") as Exemplaar["status"], transactie_id: t.id, afgeboekt_op: t.tijd } : e,
   );
   const conflicten = t.conflicten.filter((c) => c.exemplaar_id !== oudId);
   return {
@@ -379,7 +393,7 @@ export function beursCijfers(beurs: Pick<Beurs, "startkas"> | null, transacties:
   const geldig = transacties.filter((t) => t.status !== "ongedaan");
   let korting = 0, marge = 0, metMarge = 0, verkocht = 0, weggeruild = 0, viaRuil = 0, viaInkoop = 0, omzet = 0, uit = 0;
   for (const t of geldig) {
-    if (t.soort === "kas") continue; // geld in of uit de koffer: telt wel in de kas, niet als omzet
+    if (t.soort === "kas" || t.soort === "prive") continue; // geen deal met een klant: telt niet als omzet
     for (const x of [t.cash, t.sumup, t.bank ?? 0]) { if (x > 0) omzet += x; else uit -= x; }
     for (const r of t.regels) {
       if (t.soort === "retour") continue;
@@ -407,7 +421,7 @@ export function beursCijfers(beurs: Pick<Beurs, "startkas"> | null, transacties:
     weggeruild,
     nieuwViaRuil: viaRuil,
     nieuwViaInkoop: viaInkoop,
-    transacties: geldig.filter((t) => t.soort !== "kas").length,
+    transacties: geldig.filter((t) => t.soort !== "kas" && t.soort !== "prive").length,
     conflicten: geldig.filter((t) => t.status === "conflict").length,
   };
 }
@@ -445,7 +459,7 @@ export function beursOverzicht(transacties: Transactie[], soortVan: (r: Regel) =
   const retour = leeg();
   const trades = { aantal: 0, weg: 0, binnen: 0, bijbetaaldDoorKlant: 0, bijbetaaldDoorOns: 0 };
   for (const t of transacties) {
-    if (t.status === "ongedaan" || t.soort === "kas") continue;
+    if (t.status === "ongedaan" || t.soort === "kas" || t.soort === "prive") continue;
     if (t.soort === "retour") { retour.aantal++; retour.bedrag += -t.totaal; continue; }
     if (t.soort === "ruil") {
       trades.aantal++;

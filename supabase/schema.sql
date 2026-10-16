@@ -1,4 +1,4 @@
--- Bind'r Stock & Beurs App — databaseschema (versie 0.6: eigen kaartfoto's en boekhouding)
+-- Bind'r Stock & Beurs App — databaseschema (versie 0.7: aankoopbewijs met foto's, privé)
 --
 -- Uitvoeren: Supabase-dashboard › SQL Editor › New query › dit hele bestand plakken › Run.
 -- Het script mag gerust een tweede keer lopen; het overschrijft geen gegevens.
@@ -243,7 +243,23 @@ alter table public.transacties add constraint transacties_tegenpartij_check
 -- "kas": geld in of uit de cashkoffer zonder verkoop (wisselgeld, bijleggen, afhalen). Geen omzet.
 alter table public.transacties drop constraint if exists transacties_soort_check;
 alter table public.transacties add constraint transacties_soort_check
-  check (soort in ('verkoop', 'ruil', 'inkoop', 'retour', 'kas'));
+  check (soort in ('verkoop', 'ruil', 'inkoop', 'retour', 'kas', 'prive'));
+-- "prive" (0.7): kaarten tussen de privécollectie van de zaakvoerder en de zaak, zonder geld.
+
+-- ── Versie 0.7: foto's bij een aankoop (het bewijs: de gekochte kaarten, een screenshot) ──
+-- Apart van de transacties: die worden bij elke synchronisatie geladen, de foto's enkel als je ze bekijkt.
+create table if not exists public.aankoopfotos (
+  id             uuid primary key,                 -- gemaakt op de gsm (veilig opnieuw te versturen)
+  transactie_id  uuid not null references public.transacties (id),
+  foto           text not null,
+  omgeving_id    uuid references public.omgevingen (id) default public.standaard_omgeving(),
+  aangemaakt_door uuid default auth.uid(),
+  aangemaakt_op  timestamptz not null default now()
+);
+alter table public.aankoopfotos drop constraint if exists aankoopfotos_foto_check;
+alter table public.aankoopfotos add constraint aankoopfotos_foto_check
+  check (length(foto) <= 900000 and foto ~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$');
+create index if not exists aankoopfotos_transactie_idx on public.aankoopfotos (transactie_id);
 
 -- ── Wie is er bezig? Elk toestel meldt zich om de minuut ────────────────────
 create table if not exists public.aanwezig (
@@ -436,15 +452,20 @@ create policy "beheerders toevoegen" on public.transacties
 create policy "beheerders wijzigen" on public.transacties
   for update to authenticated using (public.is_beheerder()) with check (public.is_beheerder());
 
+alter table public.aankoopfotos enable row level security;
+drop policy if exists "beheerders alles" on public.aankoopfotos;
+create policy "beheerders alles" on public.aankoopfotos
+  for all to authenticated using (public.is_beheerder()) with check (public.is_beheerder());
+
 -- ── Rechten voor de app (REST-API) ───────────────────────────────────────────
 -- Nieuwere Supabase-projecten geven nieuwe tabellen niet altijd automatisch vrij
 -- aan de API. Daarom expliciet: ingelogde gebruikers mogen de tabellen aanspreken
 -- (de rijbeveiliging hierboven beslist wat ze echt zien), de publieke sleutel niets.
 grant usage on schema public to anon, authenticated;
-grant select, insert, update, delete on public.exemplaren, public.artikelen, public.instellingen, public.beurzen, public.transacties, public.omgevingen, public.aanwezig to authenticated;
+grant select, insert, update, delete on public.exemplaren, public.artikelen, public.instellingen, public.beurzen, public.transacties, public.omgevingen, public.aanwezig, public.aankoopfotos to authenticated;
 grant select on public.beheerders, public.logboek to authenticated;
 grant execute on function public.is_beheerder(), public.standaard_omgeving() to authenticated;
-revoke all on public.beheerders, public.exemplaren, public.artikelen, public.instellingen, public.logboek, public.beurzen, public.transacties, public.omgevingen, public.aanwezig from anon;
+revoke all on public.beheerders, public.exemplaren, public.artikelen, public.instellingen, public.logboek, public.beurzen, public.transacties, public.omgevingen, public.aanwezig, public.aankoopfotos from anon;
 
 -- ── Kassa: transacties boeken, ongedaan maken en conflicten oplossen ─────────
 -- Dezelfde regels als src/lib/kassa.ts (pasToe, maakOngedaan, losConflictOp).
@@ -484,8 +505,8 @@ begin
       continue; -- geld in of uit de koffer: geen voorraad
     end if;
 
-    if v_soort = 'retour' and r->>'richting' = 'uit' then
-      -- Een ruil of inkoop terugdraaien: we geven hun stuk terug (het moet nog in voorraad zijn).
+    if v_soort in ('retour', 'prive') and r->>'richting' = 'uit' then
+      -- Een ruil of inkoop terugdraaien (we geven hun stuk terug), of naar privé: het moet nog in voorraad zijn.
       if r->>'exemplaar_id' is not null then
         select * into e from public.exemplaren where id = (r->>'exemplaar_id')::uuid for update;
         if not found then
@@ -557,7 +578,7 @@ begin
       if jsonb_typeof(r->'nieuw') = 'object' then
         nieuw := jsonb_build_object(
                    'soort', 'kaart', 'taal', 'EN', 'variant', 'normaal', 'opslag', 'stockdoos', 'prijs_handmatig', false,
-                   'aankoopbron', case when v_soort = 'ruil' then 'ruil' else 'beurs' end, 'omgeving_id', v_omgeving,
+                   'aankoopbron', case when v_soort = 'ruil' then 'ruil' when v_soort = 'prive' then 'privé' else 'beurs' end, 'omgeving_id', v_omgeving,
                    'aangemaakt_door', auth.uid(), 'aangemaakt_op', v_tijd, 'gewijzigd_op', v_tijd)
                  || jsonb_strip_nulls(r->'nieuw')
                  || jsonb_build_object('status', 'in voorraad', 'label_status', 'te printen', 'omgeving_id', v_omgeving,
@@ -607,8 +628,8 @@ begin
 
   for r in select value from jsonb_array_elements(t.regels) loop
     n := coalesce((r->>'aantal')::integer, 1);
-    if t.soort = 'retour' and r->>'richting' = 'uit' then
-      -- Het teruggegeven stuk komt weer in voorraad.
+    if t.soort in ('retour', 'prive') and r->>'richting' = 'uit' then
+      -- Het teruggegeven (of naar privé gebrachte) stuk komt weer in voorraad.
       if r->>'exemplaar_id' is not null and not (r->>'exemplaar_id' = any (in_conflict)) then
         update public.exemplaren
            set status = 'in voorraad', transactie_id = null, afgeboekt_op = null
@@ -676,7 +697,7 @@ begin
   end if;
 
   update public.exemplaren
-     set status = case when t.soort = 'ruil' then 'geruild' when t.soort = 'retour' then 'weg' else 'verkocht' end,
+     set status = case when t.soort = 'ruil' then 'geruild' when t.soort in ('retour', 'prive') then 'weg' else 'verkocht' end,
          transactie_id = tid, afgeboekt_op = t.tijd
    where id = e.id;
 

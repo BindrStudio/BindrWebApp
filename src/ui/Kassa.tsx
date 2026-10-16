@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   actieveBeurs, afrekenen, alleCodes, huidig, inMandje, mandjeLegen, meld, ongedaanMaken, openTransactie, print, totaalAanpassen,
-  bodPct, kanNieuweBoekhouding, kasbeweging, OUD_SCHEMA, useApp, verwijderRegel, wijzigRegel, zetArtikelAantal, zetBod, zetInstellingen, zetPerKaart, zetRegelPct,
+  bodPct, kanNieuweBoekhouding, kasbeweging, OUD_SCHEMA, sluit as sluitOpen, useApp, verwijderRegel, wijzigRegel, zetArtikelAantal, zetBod, zetInstellingen, zetPerKaart, zetRegelPct,
 } from "../state";
 import type { Artikel, CatalogusKaart, Exemplaar, Regel, Tegenpartij, Transactie } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
@@ -21,10 +21,11 @@ import { KiesKaart } from "./Toevoegen";
 import { BeursAfsluiten, BeursStart, geplandeBeurzen } from "./Beurs";
 import { BeursDashboard, BeurzenEnTransacties } from "./Historiek";
 import { GradedVelden, SoldLinks } from "./Graded";
-import { BorderelSheet, TegenpartijVelden } from "./Boekhouding";
-import { borderelNummer, borderelOntbreekt, heeftBorderel } from "../lib/boekhouding";
+import { BewijsKnop, BewijsSheet, TegenpartijVelden } from "./Boekhouding";
+import { BEWIJS_GROOT, heeftBewijs } from "../lib/boekhouding";
+import { FotoKnop, FotoRij } from "./Fotos";
 import { HandtekeningBeeld, HandtekeningPad } from "./Handtekening";
-import { cardmarketKentTaal, cardmarketLink, gradedZoektekst } from "../lib/markt";
+import { cardmarketKentTaal, cardmarketLink, gradedZoektekst, NIET_OP_CARDMARKET } from "../lib/markt";
 import { afrondKeuzes, exactBod, heeftEigenPct, marktwaarde, PCT_MAX, PCT_MIN, procentVan, samenPct, type BodInstelling } from "../lib/bod";
 import { GELUKT, kies, MANDJE_LEEG } from "../lib/grapjes";
 
@@ -41,6 +42,10 @@ export function Kassa() {
   const binnen = regels.map((r, i) => ({ r, i })).filter((x) => x.r.richting === "in");
   const n = netto(regels);
   const sluit = () => setPaneel(null);
+  // Vanuit Profiel "Ingekocht buiten een beurs": meteen een kaart van de klant toevoegen.
+  useEffect(() => {
+    if (s.open?.soort === "inkoopThuis") { setPaneel("klantkaart"); sluitOpen(); }
+  }, [s.open]);
   const naKlantKaarten = () => {
     sluit();
     setTimeout(() => document.querySelector(".bod-paneel")?.scrollIntoView({ behavior: "smooth", block: "center" }), 120);
@@ -624,18 +629,27 @@ function ArtikelKiezer({ onSluit }: { onSluit: () => void }) {
 // Wat de klant meebrengt bij een ruil of inkoop, met dezelfde taal en conditie als de vorige kaart.
 const vorigeKlantKaart = { taal: "EN", conditie: "NM" };
 
-function KlantKaart({ onSluit }: { onSluit: () => void }) {
+/**
+ * Kaarten van de klant toevoegen (kassa). Met `onRegel` gaan ze ergens anders heen (bv. inbreng uit privé);
+ * `bezet` zijn codes die al gebruikt worden maar nog niet in de voorraad staan.
+ */
+export function KlantKaart({ onSluit, onRegel, bezet = [], titel = "Kaart van de klant" }: {
+  onSluit: () => void; onRegel?: (r: Regel) => void; bezet?: string[]; titel?: string;
+}) {
   const { mandje } = useApp();
   const start = useRef(mandje.regels.filter((r) => r.richting === "in").length);
-  const erbij = mandje.regels.filter((r) => r.richting === "in").length - start.current;
+  const [eigen, setEigen] = useState(0);
+  const erbij = onRegel ? eigen : mandje.regels.filter((r) => r.richting === "in").length - start.current;
   const [kaart, setKaart] = useState<CatalogusKaart | null>(null);
   const [handmatig, setHandmatig] = useState(false);
   const [teller, setTeller] = useState(0);
   const reset = () => { setKaart(null); setHandmatig(false); setTeller((t) => t + 1); };
   return (
-    <Sheet titel={kaart || handmatig ? "Kaart van de klant" : "Welke kaart brengt de klant?"} onSluit={onSluit} vol>
+    <Sheet titel={kaart || handmatig ? titel : onRegel ? "Welke kaart?" : "Welke kaart brengt de klant?"} onSluit={onSluit} vol>
       {kaart || handmatig
-        ? <KlantKaartDetails key={teller} kaart={kaart} onTerug={reset} onKlaar={() => { reset(); meld("Kaart van de klant toegevoegd. Volgende kaart, of Klaar.", "ok", undefined, 1800); }} />
+        ? <KlantKaartDetails key={teller} kaart={kaart} onTerug={reset} bezet={bezet}
+          onRegel={onRegel ? (r) => { onRegel(r); setEigen((x) => x + 1); } : undefined}
+          onKlaar={() => { reset(); meld(`${onRegel ? "Kaart" : "Kaart van de klant"} toegevoegd. Volgende kaart, of Klaar.`, "ok", undefined, 1800); }} />
         : <KiesKaart onKies={setKaart} onHandmatig={() => setHandmatig(true)} metArtikel={false} handmatigTekst="Staat de kaart niet in de catalogus? Vul dan zelf naam, set en nummer in." />}
       {!(kaart || handmatig) && (
         <div className="sheet-actie">
@@ -651,7 +665,9 @@ function KlantKaart({ onSluit }: { onSluit: () => void }) {
  * marktwaarde (Cardmarket, of voor graded de laatste eBay-verkopen), zelf de marktwaarde
  * ingeven en toevoegen. Het percentage en het afronden gebeuren daarna voor alle kaarten samen.
  */
-function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart | null; onTerug: () => void; onKlaar: () => void }) {
+function KlantKaartDetails({ kaart, onTerug, onKlaar, onRegel, bezet = [] }: {
+  kaart: CatalogusKaart | null; onTerug: () => void; onKlaar: () => void; onRegel?: (r: Regel) => void; bezet?: string[];
+}) {
   const { gids, instellingen } = useApp();
   const asia = kaart?.catalogus === "asia";
   const [v, setV] = useState({
@@ -682,7 +698,7 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart 
   const toevoegen = () => {
     if (!v.naam.trim()) return meld("Vul een naam in", "fout");
     const s = huidig();
-    const codes = new Set([...alleCodes(), ...s.mandje.regels.map((r) => r.nieuw?.code).filter(Boolean) as string[]]);
+    const codes = new Set([...alleCodes(), ...bezet, ...s.mandje.regels.map((r) => r.nieuw?.code).filter(Boolean) as string[]]);
     const naamOrigineel = kaart?.catalogus === "asia" ? (v.taal.startsWith("CN") ? kaart.naamZhTw || kaart.naamZhCn || kaart.naamJa : kaart.naamJa || kaart.naamZhTw) || null : null;
     const nieuw = {
       id: uuid(), code: nieuweCode(codes), soort: (v.graded ? "slab" : "kaart") as Exemplaar["soort"], naam: v.naam.trim(), naam_origineel: naamOrigineel,
@@ -697,7 +713,7 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart 
     const bron = !(markt != null && markt > 0) ? null
       : v.graded ? "laatste verkopen (zelf opgezocht)"
         : !aangeraakt && voorstel != null ? `Cardmarket trend${v.conditie !== "NM" ? `, ${v.conditie}` : ""}` : "eigen schatting";
-    inMandje({ ...regelIn(nieuw, 0, markt != null && markt > 0 ? markt : null), referentie_bron: bron });
+    (onRegel ?? inMandje)({ ...regelIn(nieuw, 0, markt != null && markt > 0 ? markt : null), referentie_bron: bron });
     onKlaar();
   };
 
@@ -758,7 +774,7 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart 
             {kaart?.cardmarket
               ? <a className="knop zacht klein" href={cardmarketLink(kaart.cardmarket, v.taal)} target="_blank" rel="noreferrer"><Icoon naam="link" maat={14} /> Zelf kijken op Cardmarket</a>
               : <a className="knop zacht klein" href={`https://www.cardmarket.com/en/Pokemon/Products/Search?${new URLSearchParams({ searchString: [v.naam, v.nummer].filter(Boolean).join(" ") })}`} target="_blank" rel="noreferrer"><Icoon naam="link" maat={14} /> Zoek op Cardmarket</a>}
-            {!cardmarketKentTaal(v.taal) && <span className="zacht klein">Cardmarket kent geen {TALEN.find((t) => t.code === v.taal)?.label.toLowerCase() ?? v.taal}e kaarten als aparte taal: de link toont alle talen.</span>}
+            {!cardmarketKentTaal(v.taal) && <span className="zacht klein">{NIET_OP_CARDMARKET}</span>}
           </>
         )}
       </div>
@@ -787,12 +803,15 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
   const [uitbetalen, setUitbetalen] = useState<"cash" | "bank">(teVeelCash ? "bank" : "cash");
   const [gegeven, setGegeven] = useState("");
   const [cashDeel, setCashDeel] = useState("");
-  // Bij een inkoop of ruil: wie de kaarten verkoopt (voor het borderel). Mag ook later.
+  // Bij een inkoop of ruil: het aankoopbewijs (foto, naam, en buiten een beurs: waar en wanneer). Alles mag ook later.
   const koopt = regels.some((r) => r.richting === "in");
-  const nieuw = kanNieuweBoekhouding(); // overschrijving en borderel pas met het nieuwe schema
-  const [tp, setTp] = useState<Tegenpartij>({ type: "particulier" });
-  const [borderelOpen, setBorderelOpen] = useState(false);
+  const nieuw = kanNieuweBoekhouding(); // overschrijving en aankoopbewijs pas met het nieuwe schema
+  const opBeurs = !!actieveBeurs();
+  const [tp, setTp] = useState<Tegenpartij>({ type: "particulier", kanaal: opBeurs ? null : "online" });
+  const [fotos, setFotos] = useState<string[]>([]);
+  const [datum, setDatum] = useState(vandaag());
   const [tekenen, setTekenen] = useState(false);
+  const groot = totaalIn(regels) >= BEWIJS_GROOT;
 
   const waarschuwingen = regels.flatMap((r) => {
     const w: string[] = [];
@@ -821,11 +840,13 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
     return [...new Set(opties)].filter((x) => x >= cashTeOntvangen).slice(0, 5);
   }, [cashTeOntvangen]);
 
-  const ingevuld = !!(tp.naam?.trim() || tp.handtekening);
+  const ingevuld = !!(tp.naam?.trim() || tp.handtekening || tp.adres?.trim() || tp.kanaal || tp.factuur?.trim());
   const bevestig = () => {
     if (!betaling) return meld("Vul het cash-deel in", "fout");
     try {
-      const t = afrekenen(betaling, null, koopt && nieuw && ingevuld ? { ...tp, naam: tp.naam?.trim() || null } : null);
+      // Thuis ingegeven voor een andere dag: om 12 uur die dag (zo staat het op de juiste dag in de boekhouding).
+      const tijd = !opBeurs && datum && datum !== vandaag() ? new Date(`${datum}T12:00:00`).toISOString() : undefined;
+      const t = afrekenen(betaling, null, koopt && nieuw && ingevuld ? { ...tp, naam: tp.naam?.trim() || null } : null, tijd, koopt && nieuw ? fotos : []);
       onKlaar(t, wisselgeld);
     } catch (e) {
       meld(e instanceof Error ? e.message : String(e), "fout");
@@ -882,21 +903,28 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
       {n === 0 && <p className="zacht">Er gaat geen geld over en weer.</p>}
       {cashTeHoog && <p className="nakijken">Cash kan hoogstens {euro(CASH_GRENS, true)} zijn (wettelijke grens). {n > 0 ? "Laat de rest met SumUp of een overschrijving betalen." : "Betaal met een overschrijving."}</p>}
 
-      {koopt && !nieuw && <p className="zacht klein">Het borderel kan pas na de update van de database. Noteer naam en adres van de verkoper tot dan op papier.</p>}
+      {koopt && !nieuw && <p className="zacht klein">Foto's en het aankoopbewijs kunnen pas na de update van de database. Neem tot dan een foto met je gsm.</p>}
       {koopt && nieuw && (
-        <section className={`blok afreken-borderel${borderelOpen ? " open" : ""}`}>
-          <button className="afreken-borderel-kop" onClick={() => setBorderelOpen(!borderelOpen)} aria-expanded={borderelOpen}>
-            <span><strong>Borderel</strong> <span className="zacht klein">{ingevuld ? `${tp.naam || "getekend"}${tp.handtekening ? " · getekend" : ""}` : "naam en handtekening van de verkoper (mag ook later)"}</span></span>
-            <Icoon naam="chevron" maat={16} />
-          </button>
-          {borderelOpen && (
-            <>
-              <TegenpartijVelden waarde={tp} onChange={setTp} />
-              <div className="handtekening-mini">
-                {tp.handtekening ? <HandtekeningBeeld pad={tp.handtekening} klein /> : null}
-                <button className="knop zacht klein" onClick={() => setTekenen(true)}>{tp.handtekening ? "Opnieuw laten tekenen" : "Laten tekenen"}</button>
-              </div>
-            </>
+        <section className="blok afreken-borderel">
+          <div className="afreken-borderel-kop">
+            <span><strong>Aankoopbewijs</strong> <span className="zacht klein">een foto van de kaarten en een naam volstaan; mag ook later</span></span>
+          </div>
+          <div className="afreken-fotos">
+            <FotoRij fotos={fotos} onWeg={(i) => setFotos(fotos.filter((_, j) => j !== i))} />
+            <FotoKnop klein tekst={fotos.length ? "Nog een foto" : opBeurs ? "Foto van de kaarten" : "Foto of screenshot"} onFoto={(f) => setFotos((x) => [...x, f])} />
+          </div>
+          <TegenpartijVelden waarde={tp} onChange={setTp} groot={groot} kanaal={!opBeurs} />
+          {!opBeurs && (
+            <Veld label="Wanneer gekocht?">
+              <input type="date" value={datum} max={vandaag()} onChange={(e) => setDatum(e.target.value || vandaag())} />
+            </Veld>
+          )}
+          {groot && <p className="zacht klein">Boven {euro(BEWIJS_GROOT, true)}: liefst de volledige naam, de gemeente en een handtekening (of betaal per overschrijving).</p>}
+          {(groot || tp.handtekening) && (
+            <div className="handtekening-mini">
+              {tp.handtekening ? <HandtekeningBeeld pad={tp.handtekening} klein /> : null}
+              <button className="knop zacht klein" onClick={() => setTekenen(true)}>{tp.handtekening ? "Opnieuw laten tekenen" : "Laten tekenen"}</button>
+            </div>
           )}
         </section>
       )}
@@ -937,13 +965,8 @@ function Gelukt({ t, wisselgeld, onVolgende }: { t: Transactie; wisselgeld: numb
       </p>
       {wisselgeld != null && wisselgeld > 0 && <p className="wisselgeld-bedrag">Wisselgeld <strong>{euro(wisselgeld)}</strong></p>}
       {huidigT.status === "conflict" && <button className="knop zacht rood" onClick={() => openTransactie(t.id)}>Conflict nakijken</button>}
-      {heeftBorderel(huidigT) && (
-        <button className={`borderel-knop${borderelOntbreekt(huidigT).length ? " mist" : ""}`} onClick={() => setBorderel(true)}>
-          <Icoon naam={borderelOntbreekt(huidigT).length ? "waarschuwing" : "check"} maat={18} />
-          <span><strong>Borderel {borderelNummer(huidigT)}</strong><span className="zacht klein">{borderelOntbreekt(huidigT).length ? `nog nodig: ${borderelOntbreekt(huidigT).join(", ")}` : "volledig"}</span></span>
-        </button>
-      )}
-      {borderel && <BorderelSheet id={t.id} onSluit={() => setBorderel(false)} />}
+      {heeftBewijs(huidigT) && kanNieuweBoekhouding() && <BewijsKnop t={huidigT} onOpen={() => setBorderel(true)} />}
+      {borderel && <BewijsSheet id={t.id} onSluit={() => setBorderel(false)} />}
       <div className="knoppenrij">
         {tePrinten.length > 0 && huidigT.status !== "ongedaan" && (
           <button className="knop" onClick={() => void print(tePrinten.map((e) => e.id))}><Icoon naam="printer" maat={18} /> Print {tePrinten.length === 1 ? "label" : `${tePrinten.length} labels`}</button>

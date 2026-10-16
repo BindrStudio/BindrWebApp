@@ -259,7 +259,7 @@ export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | n
         <div className="twee">
           <Veld label="Verkoopprijs per stuk (€)"><input inputMode="decimal" value={v.prijs} onChange={(e) => setV({ ...v, prijs: e.target.value })} /></Veld>
           <Veld label={type === "binder" || type === "3d-print" ? "Kostprijs per stuk (€)" : "Inkoopprijs per stuk (€)"}
-            hint={marge != null && instellingen.toonMarge ? `Marge ${marge >= 0 ? "+" : "−"}${euro(Math.abs(marge))} per stuk` : undefined}>
+            hint={marge != null && instellingen.toonMarge ? `Marge ${marge >= 0 ? "+" : "−"}${euro(Math.abs(marge))} per stuk` : "Optioneel: enkel voor de voorraad op 31/12. De kosten zelf geef je apart in Dexxter in."}>
             <input inputMode="decimal" value={v.aankoopprijs} onChange={(e) => setV({ ...v, aankoopprijs: e.target.value })} />
           </Veld>
         </div>

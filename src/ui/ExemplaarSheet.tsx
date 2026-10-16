@@ -17,6 +17,8 @@ import { kantelVrij } from "../lib/kantel";
 import { VerkopenBlok } from "./Graded";
 import { gradedZoektekst } from "../lib/markt";
 import { FotoKiezer } from "./FotoKiezer";
+import { BewijsSheet, waarGekocht } from "./Boekhouding";
+import { bewijsNummer, heeftBewijs } from "../lib/boekhouding";
 
 export function ExemplaarSheet({ id }: { id: string }) {
   const { exemplaren, gids, instellingen, teWijzigen, printer } = useApp();
@@ -90,17 +92,7 @@ export function ExemplaarSheet({ id }: { id: string }) {
 
       <LabelBlok ex={ex} printer={printer} />
 
-      {bewerk ? <Bewerk ex={ex} /> : (
-        <section className="blok">
-          <h3>Aankoop</h3>
-          <dl className="gegevens">
-            <dt>Prijs</dt><dd>{euro(ex.aankoopprijs)}</dd>
-            <dt>Datum</dt><dd>{datumKort(ex.aankoopdatum)}</dd>
-            <dt>Bron</dt><dd>{ex.aankoopbron || "–"}</dd>
-            {ex.opmerking && <><dt>Opmerking</dt><dd>{ex.opmerking}</dd></>}
-          </dl>
-        </section>
-      )}
+      {bewerk ? <Bewerk ex={ex} /> : <Herkomst ex={ex} />}
 
       {duplicaten.length > 0 && (
         <section className="blok">
@@ -140,6 +132,42 @@ function EigenFoto({ ex, geen }: { ex: Exemplaar; geen: boolean }) {
       {!ex.foto && <p className="zacht klein">{kan ? "Neem een foto van de kaart, recht van voren. Ze komt ook op de klantenpagina." : OUD_SCHEMA}</p>}
       {kan && <FotoKiezer foto={ex.foto} max={560} wat="de kaart"
         onFoto={(foto) => void wijzig(ex.id, { foto }, foto ? "Foto bewaard" : "Foto weg", true)} />}
+    </section>
+  );
+}
+
+/**
+ * Waar komt dit exemplaar vandaan? Via de code vind je de aankoop, ruil of inbreng terug: wanneer,
+ * waar, van wie, aan welke marktwaarde en welk percentage, en de foto's.
+ */
+function Herkomst({ ex }: { ex: Exemplaar }) {
+  const { transacties, beurzen } = useApp();
+  const [bewijs, setBewijs] = useState(false);
+  const t = transacties.find((x) => x.status !== "ongedaan" && x.regels.some((r) => r.richting === "in" && r.nieuw?.id === ex.id));
+  const r = t?.regels.find((x) => x.nieuw?.id === ex.id);
+  const soort = t ? (t.soort === "ruil" ? "Geruild" : t.soort === "prive" ? "Uit privé ingebracht" : "Ingekocht") : null;
+  return (
+    <section className="blok herkomst">
+      <h3>Herkomst</h3>
+      {t && r ? (
+        <>
+          <p className="herkomst-zin"><strong>{soort}</strong> op {datumKort(t.tijd)} · {waarGekocht(t, beurzen)}{t.tegenpartij?.naam ? ` · van ${t.tegenpartij.naam}` : ""}</p>
+          <dl className="gegevens">
+            <dt>Betaald</dt><dd>{euro(r.prijs)}{r.referentie ? ` (${Math.round((r.prijs / r.referentie) * 100)}% van ${euro(r.referentie)})` : ""}</dd>
+            {r.referentie_bron && <><dt>Marktwaarde</dt><dd>{r.referentie_bron}, {datumKort(t.tijd)}</dd></>}
+            {ex.opmerking && <><dt>Opmerking</dt><dd>{ex.opmerking}</dd></>}
+          </dl>
+          {heeftBewijs(t) && <button className="knop zacht klein" onClick={() => setBewijs(true)}><Icoon naam="foto" maat={16} /> Bewijs en foto's · {bewijsNummer(t)}</button>}
+          {bewijs && <BewijsSheet id={t.id} onSluit={() => setBewijs(false)} />}
+        </>
+      ) : (
+        <dl className="gegevens">
+          <dt>Aankoop</dt><dd>{euro(ex.aankoopprijs)}</dd>
+          <dt>Datum</dt><dd>{datumKort(ex.aankoopdatum ?? ex.aangemaakt_op)}</dd>
+          <dt>Bron</dt><dd>{ex.aankoopbron || "zelf toegevoegd"}</dd>
+          {ex.opmerking && <><dt>Opmerking</dt><dd>{ex.opmerking}</dd></>}
+        </dl>
+      )}
     </section>
   );
 }

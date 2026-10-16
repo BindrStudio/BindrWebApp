@@ -18,26 +18,31 @@ export { dagVan };
 // ── Eén transactie in de boekhouding ─────────────────────────────────────────
 
 export interface Boeking {
-  ontvangst: number; // dagontvangst: wat we verkochten (ook geruild, aan de afgesproken prijs); retour = negatief
-  aankoop: number;   // kost: wat we kochten (ook geruild, aan de waarde die we gaven); teruggegeven = negatief
-  natura: number;    // het deel dat in kaarten betaald werd (ruil)
+  ontvangst: number;   // dagontvangst: wat we verkochten (ook geruild, aan de afgesproken prijs); retour = negatief
+  aankoop: number;     // kost: wat we kochten (ook geruild, aan de waarde die we gaven); teruggegeven = negatief
+  natura: number;      // het deel dat in kaarten betaald werd (ruil)
+  inbreng: number;     // privé → zaak: een kost, betaald met privémiddelen
+  onttrekking: number; // zaak → privé, aan aankoopwaarde: neutraliseert de kost (geen omzet)
   cash: number;
   sumup: number;
   bank: number;
 }
 
-const NUL: Boeking = { ontvangst: 0, aankoop: 0, natura: 0, cash: 0, sumup: 0, bank: 0 };
+const NUL: Boeking = { ontvangst: 0, aankoop: 0, natura: 0, inbreng: 0, onttrekking: 0, cash: 0, sumup: 0, bank: 0 };
 
 /**
  * Een ruil boeken we als twee handelingen aan de afgesproken waarde: onze kaart als verkoop
  * (ontvangst) en hun kaart als aankoop (kost). Het verschil is wat er bijbetaald werd.
  * Een kasbeweging (wisselgeld, geld bijleggen) is geen omzet en geen kost.
  */
+const inConflict = (t: Transactie, r: Regel) => t.soort === "prive" && !!r.exemplaar_id && t.conflicten.some((c) => c.exemplaar_id === r.exemplaar_id);
+
 export function boeking(t: Transactie): Boeking {
   if (t.status === "ongedaan" || t.soort === "kas") return NUL;
-  const uit = som(t.regels.filter((r) => r.richting === "uit").map((r) => r.prijs));
+  const uit = som(t.regels.filter((r) => r.richting === "uit" && !inConflict(t, r)).map((r) => r.prijs));
   const binnen = som(t.regels.filter((r) => r.richting === "in").map((r) => r.prijs));
-  const geld = { cash: t.cash, sumup: t.sumup, bank: t.bank ?? 0 };
+  const geld = { cash: t.cash, sumup: t.sumup, bank: t.bank ?? 0, inbreng: 0, onttrekking: 0 };
+  if (t.soort === "prive") return { ...NUL, inbreng: binnen, onttrekking: uit };
   if (t.soort === "retour") {
     // Onze stukken komen terug (in): minder ontvangsten. Hun stukken gaan terug (uit): minder aankopen.
     // De ontvangst volgt uit wat er echt betaald werd (een afgesproken bedrag kan afwijken):
@@ -61,6 +66,12 @@ export interface Dag {
   eigenLijnen: EigenLijn[]; // stukken boven € 500: elk een eigen lijn
   rest: number;          // ontvangsten zonder de eigen lijnen
   aankopen: number;      // inkoop en ruil (hun kant), min wat we teruggaven
+  aankopenGeld: number;  // waarvan inkoop voor geld (inkoop, en teruggedraaide inkopen)
+  aankopenRuil: number;  // waarvan via ruil (de waarde van hun kaarten)
+  inbreng: number;       // uit privé ingebracht (kost, betaald met privémiddelen)
+  onttrekking: number;   // naar privé, aan aankoopwaarde
+  kaarten: number;       // ontvangsten uit kaarten en slabs
+  artikels: number;      // ontvangsten uit artikels (binders, sealed, 3D-prints): omzet, geen winst
   cash: number;          // netto cash van de deals (zonder kasbewegingen)
   sumup: number;
   bank: number;
@@ -71,8 +82,8 @@ export interface Dag {
 }
 
 const legeDag = (datum: string): Dag => ({
-  datum, verkopen: 0, ruil: 0, retour: 0, ontvangsten: 0, eigenLijnen: [], rest: 0, aankopen: 0,
-  cash: 0, sumup: 0, bank: 0, kas: 0, kasSumup: 0, transacties: [], beurzen: [],
+  datum, verkopen: 0, ruil: 0, retour: 0, ontvangsten: 0, eigenLijnen: [], rest: 0, aankopen: 0, aankopenGeld: 0, aankopenRuil: 0,
+  inbreng: 0, onttrekking: 0, kaarten: 0, artikels: 0, cash: 0, sumup: 0, bank: 0, kas: 0, kasSumup: 0, transacties: [], beurzen: [],
 });
 
 /** Alle dagen met transacties, de nieuwste eerst. */
@@ -87,10 +98,18 @@ export function dagontvangsten(transacties: Transactie[]): Dag[] {
     if (t.beurs_id && !d.beurzen.includes(t.beurs_id)) d.beurzen.push(t.beurs_id);
     if (t.soort === "kas") { d.kas += t.cash; d.kasSumup += t.sumup; continue; }
     const b = boeking(t);
+    if (t.soort === "prive") { d.inbreng += b.inbreng; d.onttrekking += b.onttrekking; continue; }
     if (t.soort === "retour") d.retour += b.ontvangst;
     else if (t.soort === "ruil") d.ruil += b.ontvangst;
     else d.verkopen += b.ontvangst;
     d.aankopen += b.aankoop;
+    if (t.soort === "ruil") d.aankopenRuil += b.aankoop; else d.aankopenGeld += b.aankoop;
+    // Kaarten of artikels? (Een retour: wat terugkwam, telt negatief bij zijn soort.)
+    const teken = t.soort === "retour" ? -1 : 1;
+    const kant = t.soort === "retour" ? "in" : "uit";
+    const art = som(t.regels.filter((r) => r.richting === kant && r.artikel_id).map((r) => r.prijs)) * teken;
+    d.artikels += art;
+    d.kaarten += b.ontvangst - art;
     d.cash += b.cash; d.sumup += b.sumup; d.bank += b.bank;
     if (t.soort === "verkoop" || t.soort === "ruil") {
       for (const r of t.regels) {
@@ -106,7 +125,9 @@ export function dagontvangsten(transacties: Transactie[]): Dag[] {
       ...d,
       verkopen: rond2(d.verkopen), ruil: rond2(d.ruil), retour: rond2(d.retour), ontvangsten,
       rest: rond2(ontvangsten - som(d.eigenLijnen.map((l) => l.bedrag))),
-      aankopen: rond2(d.aankopen), cash: rond2(d.cash), sumup: rond2(d.sumup), bank: rond2(d.bank),
+      aankopen: rond2(d.aankopen), aankopenGeld: rond2(d.aankopenGeld), aankopenRuil: rond2(d.aankopenRuil),
+      inbreng: rond2(d.inbreng), onttrekking: rond2(d.onttrekking), kaarten: rond2(d.kaarten), artikels: rond2(d.artikels),
+      cash: rond2(d.cash), sumup: rond2(d.sumup), bank: rond2(d.bank),
       kas: rond2(d.kas), kasSumup: rond2(d.kasSumup),
       transacties: d.transacties.sort((a, b) => a.tijd.localeCompare(b.tijd)),
     };
@@ -151,28 +172,40 @@ export function jaaromzet(dagen: Dag[], jaar: number, start?: string | null): Ja
 
 // ── Borderel ─────────────────────────────────────────────────────────────────
 
-/** Heeft deze transactie een borderel nodig? Elke aankoop (inkoop of ruil) van iemand anders. */
-export const heeftBorderel = (t: Transactie) => t.status !== "ongedaan" && (t.soort === "inkoop" || t.soort === "ruil");
+/** Heeft deze transactie een aankoopbewijs? Elke inkoop en ruil, en wat uit privé ingebracht werd. */
+export const heeftBewijs = (t: Transactie) => t.status !== "ongedaan"
+  && (t.soort === "inkoop" || t.soort === "ruil" || (t.soort === "prive" && t.regels.some((r) => r.richting === "in")));
 
-/** AB-2026-7F3K2Q (aankoop) of RB-… (ruil): uniek per transactie, ook offline op drie gsm's tegelijk. */
-export function borderelNummer(t: Pick<Transactie, "id" | "soort" | "tijd">): string {
+/** AB-2026-7F3K2Q (aankoop), RB-… (ruil) of PB-… (privé): uniek per transactie, ook offline op drie gsm's tegelijk. */
+export function bewijsNummer(t: Pick<Transactie, "id" | "soort" | "tijd">): string {
   const kort = t.id.replace(/-/g, "").slice(0, 6).toUpperCase();
-  return `${t.soort === "ruil" ? "RB" : "AB"}-${dagVan(t.tijd).slice(0, 4)}-${kort}`;
+  return `${t.soort === "ruil" ? "RB" : t.soort === "prive" ? "PB" : "AB"}-${dagVan(t.tijd).slice(0, 4)}-${kort}`;
 }
 
-/** Wat er nog ontbreekt op het borderel (leeg = volledig). */
-export function borderelOntbreekt(t: Transactie): string[] {
+/** Vanaf dit bedrag (wat we betalen) raden we de volledige naam, de gemeente en een handtekening aan. */
+export const BEWIJS_GROOT = 250;
+
+/**
+ * Wat het aankoopbewijs sterker maakt (leeg = in orde). Niets is verplicht aan de stand: de lijst met
+ * codes, marktwaarde, percentage, prijs en een foto is het bewijs. Een naam (minstens een voornaam) en
+ * een foto raden we altijd aan; vanaf € 250 ook de gemeente en een handtekening (of een overschrijving).
+ */
+export function bewijsAdvies(t: Transactie, fotos: number): string[] {
+  if (t.soort === "prive") return fotos || !t.regels.some((r) => r.richting === "in") ? [] : ["screenshot van de marktwaarde"];
   const p: Tegenpartij = t.tegenpartij ?? {};
-  const mist: string[] = [];
-  if (!p.naam?.trim()) mist.push("naam");
+  const advies: string[] = [];
+  if (!fotos) advies.push("foto van de kaarten");
+  if (!p.naam?.trim()) advies.push("naam van de verkoper");
   if (p.type === "handelaar") {
-    if (!p.factuur?.trim() && !veiligPad(p.handtekening)) mist.push("factuurnummer of handtekening");
-    return mist;
+    if (!p.factuur?.trim()) advies.push("factuurnummer");
+    return advies;
   }
-  if (!p.adres?.trim()) mist.push("adres");
-  if (!p.id_gecontroleerd) mist.push("identiteit nagekeken");
-  if (!veiligPad(p.handtekening)) mist.push("handtekening verkoper");
-  return mist;
+  const bedrag = t.regels.filter((r) => r.richting === "in").reduce((x, r) => x + r.prijs, 0);
+  if (bedrag >= BEWIJS_GROOT) {
+    if (!p.adres?.trim()) advies.push("gemeente");
+    if (!veiligPad(p.handtekening) && !t.bank) advies.push("handtekening (of betaal per overschrijving)");
+  }
+  return advies;
 }
 
 /** Een handtekening is een SVG-pad met enkel M/L en getallen (nooit iets anders tonen). */
@@ -268,8 +301,8 @@ export function voorraadOp(datum: string, exemplaren: Exemplaar[], artikelen: Ar
     lijnen.push({
       id: e.id, code: e.code, soort: e.soort,
       omschrijving: [e.naam, [e.set_code, e.nummer].filter(Boolean).join(" "), e.taal, e.soort === "slab" ? [e.grader, e.grade].filter(Boolean).join(" ") : e.conditie].filter(Boolean).join(" · "),
-      aantal: 1, aankoopdatum: e.aankoopdatum, herkomst: t ? (t.soort === "ruil" ? "ruil" : "aankoop") : e.aankoopbron || "eigen invoer",
-      borderel: t ? borderelNummer(t) : null, waarde: rond2(e.aankoopprijs ?? 0), zonderWaarde: e.aankoopprijs == null,
+      aantal: 1, aankoopdatum: e.aankoopdatum, herkomst: t ? (t.soort === "ruil" ? "ruil" : t.soort === "prive" ? "uit privé" : "aankoop") : e.aankoopbron || "eigen invoer",
+      borderel: t ? bewijsNummer(t) : null, waarde: rond2(e.aankoopprijs ?? 0), zonderWaarde: e.aankoopprijs == null,
     });
   }
   // Artikels: het aantal van nu, min wat er na de datum binnenkwam, plus wat er na de datum uitging.

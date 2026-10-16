@@ -4,7 +4,7 @@ import type { Catalogus } from "../types";
 import { TALEN } from "../types";
 import { datumKort, euro } from "../lib/format";
 import { laadCatalogus } from "../lib/catalog";
-import { cardmarketKentTaal, cardmarketLink, grapje, marktinfo, procent, RICHTING_TEKST, setGrapje, setTrend, type Richting, type SetTrend } from "../lib/markt";
+import { cardmarketKentTaal, cardmarketLink, grapje, NIET_OP_CARDMARKET, marktinfo, procent, RICHTING_TEKST, setGrapje, setTrend, type Richting, type SetTrend } from "../lib/markt";
 import { Icoon } from "./common";
 
 const TALEN_MET_GIDS = new Set(["EN", "JP"]);
@@ -88,7 +88,7 @@ export function MarktBlok({ cardmarketId, variant, taal, setId, catalogus, soort
           <a className="knop zacht cm-knop" href={cardmarketLink(cardmarketId, taal)} target="_blank" rel="noreferrer">
             Goedkoopste in België en Nederland <Icoon naam="link" maat={16} />
           </a>
-          {!cardmarketKentTaal(taal) && <span className="zacht klein">Cardmarket kent geen {taalNaam.toLowerCase()}e kaarten als aparte taal: de link toont alle talen. Kijk naar de Engelse prijs als richtpunt.</span>}
+          {!cardmarketKentTaal(taal) && <span className="zacht klein">{NIET_OP_CARDMARKET}</span>}
           <span className="zacht klein">
             Near Mint · {cardmarketKentTaal(taal) ? taalNaam : "alle talen"} · enkel{" "}
             <a href={cardmarketLink(cardmarketId, taal, ["BE"])} target="_blank" rel="noreferrer">België</a>{" "}of{" "}

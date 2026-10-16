@@ -12,7 +12,7 @@ import {
 } from "../src/lib/kassa";
 import { bodVanExact, exactBod, pasBodToe, samenPct } from "../src/lib/bod";
 import {
-  boeking, borderelLijnen, borderelNummer, borderelOntbreekt, dagontvangsten, dexxterLijnen, jaaromzet, maakPad, MAX_PAD, veiligPad, voorraadOp,
+  bewijsAdvies, bewijsNummer, boeking, borderelLijnen, dagontvangsten, dexxterLijnen, jaaromzet, maakPad, MAX_PAD, veiligPad, voorraadOp,
   vrijstellingsGrens,
 } from "../src/lib/boekhouding";
 import { uuid } from "../src/lib/uuid";
@@ -155,6 +155,8 @@ test("simulatie: een volledige beursdag, van de kassa tot de boekhouding", () =>
   assert.deepEqual(dag.eigenLijnen.map((l) => [l.omschrijving, l.bedrag]), [["Charizard", 1200], ["Lugia", 3600]]);
   assert.equal(dag.aankopen, 377);
   assert.deepEqual([dag.cash, dag.sumup, dag.bank, dag.kas, dag.kasSumup], [113, 1127, 3600, -150, 100]);
+  assert.deepEqual([dag.kaarten, dag.artikels], [5100, 117], "artikels: binder 45 + boosters 12 + binder (ruil) 45 + ETB (ruil) 60 − binder terug 45");
+  assert.deepEqual([dag.aankopenGeld, dag.aankopenRuil], [165, 212], "inkoop voor geld (28 + 125 + 80, min 40 en 28 teruggegeven) en via ruil (32 + 80 + 40 + 60)");
   const lijnen = dexxterLijnen(dag, "Antwerpen");
   assert.deepEqual(lijnen.map((l) => l.bedrag), [1200, 3600, 482, -65]);
   assert.equal(Math.round(lijnen.reduce((x, l) => x + l.bedrag, 0) * 100) / 100, dag.ontvangsten);
@@ -167,11 +169,16 @@ test("simulatie: een volledige beursdag, van de kassa tot de boekhouding", () =>
   assert.deepEqual([jo.omzet, jo.grens, jo.pct, jo.tolerantie], [5217, 12603, 41, 13863]);
 
   // ── Borderellen ──
-  assert.match(borderelNummer(t4), /^AB-2026-[0-9A-F]{6}$/);
-  assert.match(borderelNummer(t6), /^RB-2026-/);
-  assert.deepEqual(borderelOntbreekt(t4), []);
-  assert.deepEqual(borderelOntbreekt(t5), ["naam", "adres", "identiteit nagekeken", "handtekening verkoper"]);
-  assert.deepEqual(borderelOntbreekt(t13), [], "een handelaar met factuur");
+  assert.match(bewijsNummer(t4), /^AB-2026-[0-9A-F]{6}$/);
+  assert.match(bewijsNummer(t6), /^RB-2026-/);
+  // Aankoopbewijs: aan de stand is niets verplicht; een foto en een naam raden we aan, boven € 250 ook gemeente en handtekening.
+  assert.deepEqual(bewijsAdvies(t4, 1), [], "naam, foto: in orde");
+  assert.deepEqual(bewijsAdvies(t4, 0), ["foto van de kaarten"]);
+  assert.deepEqual(bewijsAdvies(t5, 0), ["foto van de kaarten", "naam van de verkoper"]);
+  assert.deepEqual(bewijsAdvies(t13, 2), [], "een handelaar met factuur");
+  const groot = nieuweTransactie([regelIn({ id: uuid(), code: "GROOT1", naam: "Charizard" }, 300, 400)], { cash: -300, sumup: 0 }, null, null, undefined, { naam: "Jan" });
+  assert.deepEqual(bewijsAdvies(groot, 1), ["gemeente", "handtekening (of betaal per overschrijving)"]);
+  assert.deepEqual(bewijsAdvies({ ...groot, cash: 0, bank: -300, tegenpartij: { naam: "Jan Peeters", adres: "Gent" } }, 1), [], "per overschrijving: geen handtekening nodig");
   const bl = borderelLijnen(t5.regels, "in");
   assert.deepEqual(bl.map((l) => [l.markt, l.pct, l.prijs, l.bron]), [[100, 63, 62.98, "Cardmarket trend"], [40, 78, 31.01, "Cardmarket trend"], [40, 78, 31.01, "Cardmarket trend"]]);
   assert.equal(veiligPad("M10 10 L50 40"), "M10 10 L50 40");
@@ -187,7 +194,7 @@ test("simulatie: een volledige beursdag, van de kassa tot de boekhouding", () =>
   assert.equal(vandaagInv.zonderWaarde, 0);
   const viaRuil = vandaagInv.lijnen.find((l) => l.omschrijving.startsWith("Ruil 1"))!;
   assert.equal(viaRuil.herkomst, "ruil");
-  assert.equal(viaRuil.borderel, borderelNummer(t6));
+  assert.equal(viaRuil.borderel, bewijsNummer(t6));
 
   // ── Inzichten: wat terugkwam telt niet, de rest wel (verkocht en weggeruild) ──
   const soortVan = (r: Regel) => (r.artikel_id ? (r.artikel_id === binder.id ? "binders" : "sealed") : ex(r.exemplaar_id!)?.soort === "slab" ? "slabs" : "kaarten") as Productsoort;
@@ -286,4 +293,34 @@ test("boekhouding: eigen lijn per stuk, en een handtekening blijft kort genoeg",
   const lang = [Array.from({ length: 3000 }, (_, i) => [i % 600, (i * 7) % 200] as [number, number])];
   const pad = maakPad(lang);
   assert.ok(pad.length <= MAX_PAD && veiligPad(pad) === pad, `pad van ${pad.length} tekens`);
+});
+
+
+test("privé ⇄ Bind'r: inbreng is een kost, naar privé aan aankoopwaarde, geen van beide is omzet", async () => {
+  const { nieuwePrive } = await import("../src/lib/kassa");
+  const eigen = kaart("Blastoise", { code: "BLASTO", aankoopprijs: 20, opslag: "stockdoos" });
+  let v: Voorraad = { exemplaren: [eigen], artikelen: [] };
+  const inbreng = { ...regelIn({ id: uuid(), code: "PRIVE1", naam: "Venusaur" }, 70, 100), pct: 70 };
+  const t1 = pasToe(v, nieuwePrive([inbreng], [], null, "2026-10-20T10:00:00Z"));
+  v = t1.voorraad;
+  const nieuw = v.exemplaren.find((e) => e.code === "PRIVE1")!;
+  assert.deepEqual([nieuw.status, nieuw.aankoopprijs, nieuw.aankoopbron, nieuw.label_status], ["in voorraad", 70, "privé", "te printen"]);
+  const t2 = pasToe(v, nieuwePrive([], [regelUit(eigen, 20)], null, "2026-10-20T11:00:00Z"));
+  v = t2.voorraad;
+  assert.equal(v.exemplaren.find((e) => e.code === "BLASTO")!.status, "weg");
+  const lijst = [t1.transactie, t2.transactie];
+  assert.deepEqual([boeking(t1.transactie).inbreng, boeking(t2.transactie).onttrekking], [70, 20]);
+  const [d] = dagontvangsten(lijst);
+  assert.deepEqual([d.ontvangsten, d.inbreng, d.onttrekking, d.aankopen], [0, 70, 20, 0]);
+  assert.equal(jaaromzet(dagontvangsten(lijst), 2026).omzet, 0, "geen omzet");
+  assert.equal(voorraadOp("2026-10-20", v.exemplaren, [], lijst).totaal, 70, "de ingebrachte kaart aan 70, de meegenomen kaart niet meer");
+  assert.equal(voorraadOp("2026-10-19", v.exemplaren, [], lijst).totaal, 20, "de dag ervoor: enkel Blastoise");
+  assert.equal(beursCijfers({ startkas: 0 }, lijst).transacties, 0);
+  // Naar privé ongedaan maken: terug in voorraad
+  assert.equal(maakOngedaan(v, t2.transactie).voorraad.exemplaren.find((e) => e.code === "BLASTO")!.status, "in voorraad");
+  // Een kaart die al weg is, kan niet naar privé
+  const t3 = pasToe(v, nieuwePrive([], [regelUit(eigen, 20)], null));
+  assert.equal(t3.transactie.status, "conflict");
+  assert.equal(boeking(t3.transactie).onttrekking, 0, "wat niet kon, telt niet");
+  assert.equal(bewijsNummer(t1.transactie).slice(0, 3), "PB-");
 });

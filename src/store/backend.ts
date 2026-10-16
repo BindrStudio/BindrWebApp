@@ -1,4 +1,4 @@
-import type { Aanwezig, Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
+import type { Aankoopfoto, Aanwezig, Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
 
 export interface Beheerder {
   user_id: string;
@@ -46,6 +46,10 @@ export interface Backend {
   aanvaardConflict(id: string, item: string): Promise<Transactie>;
   /** Het borderel van een transactie aanvullen (tegenpartij, handtekeningen). */
   zetTegenpartij(id: string, tegenpartij: Tegenpartij | null): Promise<void>;
+  /** Foto's bij aankopen: enkel geladen wanneer je ze bekijkt. */
+  laadAankoopfotos(transactieIds: string[]): Promise<Aankoopfoto[]>;
+  bewaarAankoopfoto(f: Aankoopfoto): Promise<void>;
+  verwijderAankoopfoto(id: string): Promise<void>;
 
   /** Het wachtwoord (de pincode) van de ingelogde beheerder wijzigen. */
   wijzigPincode(pin: string): Promise<void>;

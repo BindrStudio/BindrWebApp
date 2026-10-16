@@ -1348,3 +1348,23 @@ a.knop { text-decoration: none; }
 .lijst { grid-template-columns: minmax(0, 1fr); }
 .boek-lijst .lijst-naam, .voorraad-lijn .lijst-naam, .inzicht-blok .lijst-naam { flex: 1; }
 .boek-lijst .lijst-naam > *, .voorraad-lijn .lijst-naam > *, .inzicht-blok .lijst-naam > * { overflow: hidden; text-overflow: ellipsis; }
+
+/* ── 0.7: aankoopbewijs met foto's, privé, herkomst ──────────────────────── */
+.afreken-fotos, .transactie-fotos { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.foto-rij { display: flex; flex-wrap: wrap; gap: 8px; }
+.foto-duim { position: relative; }
+.foto-duim > button:first-child { display: block; width: 64px; height: 64px; border-radius: 10px; overflow: hidden; background: var(--wit); box-shadow: var(--schaduw); }
+.foto-duim img { width: 100%; height: 100%; object-fit: cover; }
+.foto-weg { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--inkt); color: var(--room); box-shadow: 0 0 0 2px var(--room); }
+.foto-groot { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 16px; background: rgba(30, 20, 8, .85); animation: vervaag .2s; }
+.foto-groot img { max-width: 100%; max-height: 100%; border-radius: 12px; }
+.prive-blok { display: grid; gap: 10px; }
+.prive-blok .lijst { display: grid; gap: 6px; }
+.prive-pct { display: grid; gap: 6px; }
+.herkomst-zin { margin: 0; }
+.profiel-tegel.prive svg, .profiel-tegel.thuis svg { color: var(--zee-donker); }
+.inzicht-kern .kern:first-child { grid-column: 1 / -1; }
+.doc-bewijs { display: grid; gap: 5pt; padding-top: 6pt; border-top: 1px solid #999; break-inside: avoid; }
+.doc-bewijs h2 { font-size: 11pt; }
+.doc-fotos { display: flex; flex-wrap: wrap; gap: 6pt; }
+.doc-fotos img { width: 58mm; max-height: 58mm; object-fit: contain; border: 1px solid #ccc; }

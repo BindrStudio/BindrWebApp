@@ -9,6 +9,7 @@ import { Boekhouding } from "./ui/Boekhouding";
 import { Inzichten } from "./ui/Inzichten";
 import { BeurzenEnTransacties } from "./ui/Historiek";
 import { AfdrukLaag } from "./ui/Afdruk";
+import { Prive } from "./ui/Prive";
 import { Login, PinKiezen, Slot } from "./ui/Login";
 import { Bovenbalk } from "./ui/Bovenbalk";
 import { ExemplaarSheet } from "./ui/ExemplaarSheet";
@@ -107,6 +108,7 @@ export function App() {
       {open?.soort === "boekhouding" && <Boekhouding onSluit={sluit} />}
       {open?.soort === "inzichten" && <Inzichten onSluit={sluit} />}
       {open?.soort === "historiek" && <BeurzenEnTransacties onSluit={sluit} />}
+      {open?.soort === "prive" && <Prive onSluit={sluit} />}
       <AfdrukLaag />
       {bezig && (
         <div className="bezig" role="status">

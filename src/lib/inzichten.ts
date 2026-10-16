@@ -126,18 +126,23 @@ export const mediaan = (xs: number[]): number | null => {
 
 export interface Kerncijfers {
   stuks: number; omzet: number; gemiddeld: number | null; mediaanPrijs: number | null;
+  kaartOmzet: number; artikelOmzet: number; // artikels (binders, sealed, 3D) zijn omzet, geen winst
   marge: number | null; margePct: number | null; korting: number; mediaanDagen: number | null; dagen: number;
 }
+
+const isKaart = (s: VerkochtStuk) => s.soort === "kaarten" || s.soort === "slabs";
 
 export function kerncijfers(stukken: VerkochtStuk[]): Kerncijfers {
   const stuks = stukken.reduce((n, s) => n + s.aantal, 0);
   const omzet = rond2(stukken.reduce((x, s) => x + s.prijs * s.aantal, 0));
-  const metAankoop = stukken.filter((s) => s.aankoop != null);
+  // Winst enkel op kaarten: de kosten van artikels zitten apart in de boekhouding.
+  const metAankoop = stukken.filter((s) => isKaart(s) && s.aankoop != null);
+  const kaartOmzet = rond2(stukken.filter(isKaart).reduce((x, s) => x + s.prijs * s.aantal, 0));
   const verkoopMet = metAankoop.reduce((x, s) => x + s.prijs * s.aantal, 0);
   const aankoopMet = metAankoop.reduce((x, s) => x + s.aankoop! * s.aantal, 0);
   const korting = rond2(stukken.reduce((x, s) => x + Math.max(0, (s.hartje ?? s.prijs) - s.prijs) * s.aantal, 0));
   return {
-    stuks, omzet, gemiddeld: stuks ? rond2(omzet / stuks) : null,
+    stuks, omzet, gemiddeld: stuks ? rond2(omzet / stuks) : null, kaartOmzet, artikelOmzet: rond2(omzet - kaartOmzet),
     mediaanPrijs: mediaan(stukken.flatMap((s) => Array(s.aantal).fill(s.prijs))),
     marge: metAankoop.length ? rond2(verkoopMet - aankoopMet) : null,
     margePct: aankoopMet > 0 ? Math.round(((verkoopMet - aankoopMet) / aankoopMet) * 100) : null,

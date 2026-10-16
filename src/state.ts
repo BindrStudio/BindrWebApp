@@ -6,8 +6,8 @@
 import { useSyncExternalStore } from "react";
 import { isNetwerkFout, type Alles, type Backend, type PrijsMarkering } from "./store/backend";
 import { DemoBackend } from "./store/demo";
-import { SupabaseBackend } from "./store/supabase";
-import type { Aanwezig, Artikel, ArtikelType, Bedrijf, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Tegenpartij, Transactie } from "./types";
+import { NIEUWSTE, SupabaseBackend } from "./store/supabase";
+import type { Aankoopfoto, Aanwezig, Artikel, ArtikelType, Bedrijf, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Tegenpartij, Transactie } from "./types";
 import { bewaarPin, controleerPin, isVergrendeld, leesPin, markeerActief, wisPin, VERGRENDEL_NA_MS } from "./lib/pin";
 import { laadPrijsgids, type Prijsgids } from "./lib/prices";
 import { prijscheck, STANDAARD_INSTELLINGEN, type Instellingen, type TeWijzigen } from "./lib/pricing";
@@ -20,7 +20,7 @@ import { laadOcr } from "./lib/ocr";
 import { uuid } from "./lib/uuid";
 import { inVoorraad, metVitrineSinds, schoonArtikel, schoonExemplaar, standaardArtikel, standaardExemplaar } from "./lib/exemplaar";
 import {
-  aanvaardConflict, losConflictOp, maakOngedaan, nieuweKasbeweging, nieuweRetour, nieuweTransactie, pasToe, pasTotaalAan, stand,
+  aanvaardConflict, losConflictOp, maakOngedaan, nieuweKasbeweging, nieuwePrive, nieuweRetour, nieuweTransactie, pasToe, pasTotaalAan, stand,
   type Betaling,
 } from "./lib/kassa";
 import { toonCode } from "./lib/code";
@@ -49,6 +49,8 @@ export type Open =
   | { soort: "boekhouding" }
   | { soort: "inzichten" }
   | { soort: "historiek" }
+  | { soort: "prive" }
+  | { soort: "inkoopThuis" }      // naar de kassa, meteen "Kaart van klant" (inkoop buiten een beurs)
   | null;
 
 export interface Mandje {
@@ -83,6 +85,7 @@ export interface State {
   omgevingen: Omgeving[];
   omgeving: string | null;  // de omgeving waarin je nu werkt (Bind'r of Brent)
   aanwezig: Aanwezig[];     // wie er de laatste minuten bezig was
+  fotoVersie: number;       // telt op als er aankoopfoto's geladen of toegevoegd werden
 }
 
 const MODUS = "bindr-modus";
@@ -135,6 +138,7 @@ let state: State = {
   omgevingen: [],
   omgeving: null,
   aanwezig: [],
+  fotoVersie: 0,
 };
 
 /** Welke hartjes moeten wisselen: wat de laatste prijscheck markeerde (gedeeld via de database). */
@@ -268,6 +272,9 @@ export function openInstellingen() { zet({ open: { soort: "instellingen" } }); }
 export function openBoekhouding() { zet({ open: { soort: "boekhouding" } }); }
 export function openInzichten() { zet({ open: { soort: "inzichten" } }); }
 export function openHistoriek() { zet({ open: { soort: "historiek" } }); }
+export function openPrive() { zet({ open: { soort: "prive" } }); }
+/** Kaarten gekocht buiten een beurs (Facebook, rommelmarkt): via de kassa, Van de klant. */
+export function inkoopThuis() { zet({ tab: "kassa", open: { soort: "inkoopThuis" } }); }
 export function sluit() { zet({ open: null }); }
 
 // ── Kopie op het toestel (Supabase): om offline te kunnen starten ────────────
@@ -311,6 +318,8 @@ type Op =
   | { soort: "conflictOplossen"; id: string; oud: string; nieuw: string }
   | { soort: "conflictAanvaarden"; id: string; item: string }
   | { soort: "tegenpartij"; id: string; tegenpartij: Tegenpartij | null }
+  | { soort: "aankoopfoto"; f: Aankoopfoto }
+  | { soort: "aankoopfotoWeg"; id: string }
   | { soort: "instelling"; sleutel: string; waarde: unknown }
   | { soort: "prijzen"; omgeving: string | null; lijst: PrijsMarkering[] }
   | { soort: "omgeving"; omgeving: Omgeving };
@@ -372,6 +381,8 @@ async function voerUit(op: Op) {
     case "conflictOplossen": vervangTransactie(await b.losConflictOp(op.id, op.oud, op.nieuw)); break;
     case "conflictAanvaarden": vervangTransactie(await b.aanvaardConflict(op.id, op.item)); break;
     case "tegenpartij": await b.zetTegenpartij(op.id, op.tegenpartij); break;
+    case "aankoopfoto": await b.bewaarAankoopfoto(op.f); break;
+    case "aankoopfotoWeg": await b.verwijderAankoopfoto(op.id); break;
   }
 }
 
@@ -1246,9 +1257,12 @@ function boek(t: Transactie): Transactie {
 }
 
 /** Rekent het mandje af. Geeft de transactie terug; 5 seconden lang kan ze ongedaan. */
-export function afrekenen(b: Betaling, opmerking: string | null = null, tegenpartij: Tegenpartij | null = null): Transactie {
+export function afrekenen(b: Betaling, opmerking: string | null = null, tegenpartij: Tegenpartij | null = null, tijd?: string, fotos: string[] = []): Transactie {
   const beurs = actieveBeurs();
-  const t = boek(nieuweTransactie(state.mandje.regels, b, beurs?.id ?? null, opmerking, undefined, tegenpartij));
+  // Een aankoop van een andere dag (thuis ingegeven) hoort niet bij de beurs van vandaag.
+  const opBeurs = beurs && (!tijd || tijd.slice(0, 10) === new Date().toISOString().slice(0, 10)) ? beurs : null;
+  const t = boek(nieuweTransactie(state.mandje.regels, b, opBeurs?.id ?? null, opmerking, tijd, tegenpartij));
+  for (const f of fotos) voegAankoopfotoToe(t.id, f);
   leegMandje();
   // Het scherm "Verkocht" toont zelf het bedrag en de knop Ongedaan maken; enkel een conflict krijgt een melding.
   if (t.status === "conflict") meld("Let op: niet alles kon afgeboekt worden. Bekijk de transactie.", "fout", { label: "Bekijk", doe: () => openTransactie(t.id) }, 8000);
@@ -1280,7 +1294,7 @@ export function kanNieuweBoekhouding(s: State = state): boolean {
   const b = s.backend;
   if (!b || b.soort !== "supabase") return true;
   const v = (b as SupabaseBackend).versie;
-  return v == null || v >= 5;
+  return v == null || v >= NIEUWSTE;
 }
 export const OUD_SCHEMA = "Dit kan pas na de update van de database: voer supabase/schema.sql opnieuw uit in Supabase (zie de README).";
 
@@ -1290,6 +1304,59 @@ export function kasbeweging(b: { cash: number; sumup?: number }, omschrijving: s
   const t = boek(nieuweKasbeweging(b, beurs?.id ?? null, omschrijving, tegenpartij));
   meld(t.sumup > 0 ? `SumUp ${euro(t.sumup)} ontvangen, ${euro(-t.cash)} cash gegeven` : t.cash > 0 ? `${euro(t.cash)} in de kas` : `${euro(-t.cash)} uit de kas`);
   return t;
+}
+
+/** Kaarten tussen privé en de zaak (Profiel › Privé). */
+export function prive(binnen: Regel[], weg: Regel[], fotos: string[] = []): Transactie {
+  const beurs = actieveBeurs();
+  const t = boek(nieuwePrive(binnen, weg, beurs?.id ?? null));
+  for (const f of fotos) voegAankoopfotoToe(t.id, f);
+  if (t.status === "conflict") meld("Niet alles kon naar privé: bekijk de transactie.", "fout", { label: "Bekijk", doe: () => openTransactie(t.id) }, 8000);
+  return t;
+}
+
+// ── Foto's bij aankopen: apart geladen, enkel wanneer je ze bekijkt ─────────
+const fotoCache = new Map<string, Aankoopfoto[]>(); // per transactie
+const fotoLaden = new Set<string>();
+
+/** De foto's van een transactie, met wat nog in de wachtrij staat (ook offline zichtbaar). */
+export function fotosVan(transactieId: string): Aankoopfoto[] {
+  const weg = new Set(rij.map((w) => w.op).filter((op) => op.soort === "aankoopfotoWeg").map((op) => (op as { id: string }).id));
+  const wachtend = rij.map((w) => w.op).filter((op) => op.soort === "aankoopfoto" && op.f.transactie_id === transactieId).map((op) => (op as { f: Aankoopfoto }).f);
+  const bekend = fotoCache.get(transactieId) ?? [];
+  return [...bekend, ...wachtend.filter((f) => !bekend.some((x) => x.id === f.id))].filter((f) => !weg.has(f.id));
+}
+
+/** Laadt de foto's van deze transacties (één keer per sessie, tenzij `opnieuw`). */
+export async function laadFotos(ids: string[], opnieuw = false): Promise<void> {
+  const b = state.backend;
+  const nodig = ids.filter((id) => (opnieuw || !fotoCache.has(id)) && !fotoLaden.has(id));
+  if (!b || !nodig.length) return;
+  nodig.forEach((id) => fotoLaden.add(id));
+  try {
+    const fotos = await b.laadAankoopfotos(nodig);
+    for (const id of nodig) fotoCache.set(id, fotos.filter((f) => f.transactie_id === id));
+    zet({ fotoVersie: state.fotoVersie + 1 });
+  } catch {
+    // Geen internet: later opnieuw (wat op deze gsm genomen werd, staat al in de wachtrij).
+  } finally {
+    nodig.forEach((id) => fotoLaden.delete(id));
+  }
+}
+
+export function voegAankoopfotoToe(transactieId: string, foto: string) {
+  const f: Aankoopfoto = { id: uuid(), transactie_id: transactieId, foto, omgeving_id: state.omgeving, aangemaakt_op: new Date().toISOString() };
+  inRij({ soort: "aankoopfoto", f });
+  fotoCache.set(transactieId, [...(fotoCache.get(transactieId) ?? []), f]);
+  zet({ fotoVersie: state.fotoVersie + 1 });
+}
+
+export function verwijderAankoopfoto(f: Aankoopfoto) {
+  // Nog niet doorgestuurd? Dan gewoon uit de wachtrij.
+  const i = rij.findIndex((w) => w.op.soort === "aankoopfoto" && w.op.f.id === f.id && w !== rij[0]);
+  if (i >= 0) { rij.splice(i, 1); bewaarRij(); } else inRij({ soort: "aankoopfotoWeg", id: f.id });
+  fotoCache.set(f.transactie_id, (fotoCache.get(f.transactie_id) ?? []).filter((x) => x.id !== f.id));
+  zet({ fotoVersie: state.fotoVersie + 1 });
 }
 
 /** Het borderel aanvullen: naam, adres, handtekeningen (na het afrekenen of later). */

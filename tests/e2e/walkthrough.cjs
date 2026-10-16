@@ -481,8 +481,8 @@ function fouten(page) {
   await foto("21-zoek-voorraad");
   await page.keyboard.press("Escape"); await wacht(200);
 
-  stap("inkoop met een eigen % per kaart, borderel met handtekening");
-  await klantKaart([{ naam: "Vintage Base", waarde: 100 }, { naam: "Modern A", waarde: 40 }, { naam: "Modern B", waarde: 40 }]);
+  stap("inkoop met een eigen % per kaart, aankoopbewijs met foto en handtekening (boven € 250)");
+  await klantKaart([{ naam: "Vintage Base", waarde: 400 }, { naam: "Modern A", waarde: 160 }, { naam: "Modern B", waarde: 160 }]);
   const pk = page.locator(".bod-paneel");
   await pk.getByRole("button", { name: "Per kaart" }).click();
   await pk.locator(".bod-slider input").fill("80");
@@ -491,15 +491,16 @@ function fouten(page) {
   for (let i = 0; i < 3; i++) { await vintage.getByRole("button", { name: /5% minder/ }).dispatchEvent("click"); await wacht(120); }
   await pk.locator(".bod-samen").waitFor({ state: "attached" });
   assert.match(await pk.locator(".bod-slider-kop").innerText(), /samen\s*72%/, "de algemene schuifknop toont het nieuwe totaal");
-  assert.match(await pk.locator(".bod-som").innerText(), /Samen 72% van €\s?180(,00)? = €\s?129(,00)?/);
+  assert.match(await pk.locator(".bod-som").innerText(), /Samen 72% van €\s?720(,00)? = €\s?516(,00)?/);
   assert.match(await vintage.innerText(), /65%/);
   await foto("22-per-kaart");
   await geenHorizontaleScroll("per kaart");
   await page.getByRole("button", { name: "Afrekenen" }).click();
-  await sheet().locator(".afreken-borderel-kop").click();
+  await sheet().locator('.afreken-fotos input[type="file"]').setInputFiles(path.resolve(__dirname, "../../public/img/eend.png"));
+  await sheet().locator(".afreken-fotos .foto-duim").waitFor();
   await sheet().getByLabel("Naam", { exact: true }).fill("Jan Peeters");
-  await sheet().getByLabel("Adres").fill("Meir 1, 2000 Antwerpen");
-  await sheet().getByLabel(/Identiteitskaart bekeken/).check();
+  await sheet().getByLabel(/Gemeente/).fill("Antwerpen");
+  assert.equal(await sheet().getByText(/Identiteitskaart/).count(), 0, "geen vinkje voor de identiteitskaart");
   await sheet().getByRole("button", { name: "Laten tekenen" }).click();
   const vlak = sheet().locator(".handtekening-vlak");
   await vlak.waitFor(); await wacht(600); // de sheet schuift eerst omhoog
@@ -514,7 +515,7 @@ function fouten(page) {
   await foto("24-afrekenen-borderel");
   await sheet().getByRole("button", { name: "Uitbetaald" }).click();
   await page.locator(".gelukt").waitFor();
-  assert.match(await page.locator(".gelukt .borderel-knop").innerText(), /AB-\d{4}-[0-9A-F]{6}[\s\S]*volledig/);
+  assert.match(await page.locator(".gelukt .borderel-knop").innerText(), /AB-\d{4}-[0-9A-F]{6}[\s\S]*in orde/);
   await volgende();
 
   stap("kas: een andere stand betaalt 50 met SumUp en krijgt cash");
@@ -547,13 +548,23 @@ function fouten(page) {
   await page.keyboard.press("Escape"); await wacht(200);
   assert.equal(await sheet().locator(".boek-dag .boek-vink.aan").count(), 1, "dag aangevinkt");
   await sheet().getByRole("button", { name: "Aankoop", exact: true }).click();
+  await sheet().locator(".boek-dag").first().click();
+  await sheet().locator(".dexxter-lijnen li", { hasText: "Aankoop kaarten" }).waitFor();
+  await wacht(500);
+  await foto("27b-aankoopdag");
+  await geenHorizontaleScroll("aankopen van een dag");
   await sheet().locator(".lijst-knop", { hasText: "Jan Peeters" }).click();
   await sheet().locator(".borderel-stand.ok").waitFor();
-  assert.match(await sheet().locator(".borderel-lijnen").first().innerText(), /markt €\s?100(,00)? · 65%/);
+  assert.match(await sheet().locator(".borderel-lijnen").first().innerText(), /markt €\s?400(,00)? · 65%/);
+  assert.equal(await sheet().locator(".transactie-fotos .foto-duim").count(), 1, "de foto van de aankoop");
   await sheet().getByRole("button", { name: "Afdrukken of pdf" }).click();
-  await page.locator("#afdruk .doc h1", { hasText: "Aankoopborderel" }).waitFor({ state: "attached" });
-  assert.match(await page.locator("#afdruk").innerText(), /Bind'r Studio[\s\S]*0123\.456\.789[\s\S]*Jan Peeters[\s\S]*Meir 1/);
-  await foto("28-borderel");
+  await page.locator("#afdruk .doc h1", { hasText: "Aankoopbewijs" }).waitFor({ state: "attached" });
+  assert.match(await page.locator("#afdruk").innerText(), /Bind'r Studio[\s\S]*0123\.456\.789[\s\S]*Jan Peeters, Antwerpen/);
+  assert.equal(await page.locator("#afdruk .doc-fotos img").count(), 1, "foto op het bewijs");
+  await foto("28-bewijs");
+  await page.keyboard.press("Escape"); await wacht(200);
+  await sheet().getByRole("button", { name: "Dagstaat aankopen (pdf)" }).click();
+  await page.locator("#afdruk .doc h1", { hasText: "Dagstaat aankopen" }).waitFor({ state: "attached" });
   await page.keyboard.press("Escape"); await wacht(200);
   await sheet().getByRole("button", { name: "Voorraad" }).click();
   await sheet().locator(".voorraad-totaal").waitFor();
@@ -579,7 +590,7 @@ function fouten(page) {
   await sheet().locator(".transactie-rij", { hasText: "Vintage Base" }).first().click();
   await sheet().getByRole("button", { name: "Retour of terugdraaien" }).click();
   for (const n of ["Vintage Base", "Modern A", "Modern B"]) await sheet().locator(".regel", { hasText: n }).locator("input[type=checkbox]").check();
-  await sheet().getByRole("button", { name: /^Klant betaalt €\s?129(,00)?/ }).click();
+  await sheet().getByRole("button", { name: /^Klant betaalt €\s?516(,00)?/ }).click();
   await page.getByText(/Teruggedraaid: klant betaalt/).waitFor();
   await page.keyboard.press("Escape"); await wacht(150);
   await page.keyboard.press("Escape"); await wacht(150);
@@ -593,6 +604,71 @@ function fouten(page) {
     assert.ok(await sheet().locator(".set-tegel:not(.alle)").count() >= 1, "Japanse sets");
   }
   await foto("32-sets");
+  await page.keyboard.press("Escape"); await wacht(200);
+
+  stap("ingekocht buiten een beurs: via Facebook, gisteren, met een screenshot");
+  await tab("Profiel");
+  await page.locator(".profiel-tegel", { hasText: "Ingekocht buiten een beurs" }).click();
+  await sheet().getByRole("button", { name: "Handmatig", exact: true }).click();
+  await sheet().getByRole("button", { name: "Handmatig invullen" }).click();
+  await sheet().getByLabel("Naam (Engels)").fill("Facebook Gengar");
+  await sheet().getByLabel("Marktwaarde").fill("30");
+  await sheet().getByRole("button", { name: /^Toevoegen/ }).click();
+  await wacht(150);
+  await sheet().getByRole("button", { name: /^Klaar/ }).last().click();
+  await page.getByRole("button", { name: "Afrekenen" }).click();
+  assert.ok(await sheet().getByRole("button", { name: /Online/ }).count(), "waar gekocht");
+  await sheet().getByLabel("Wanneer gekocht?").fill(binnenDagen(-1));
+  await sheet().locator('.afreken-fotos input[type="file"]').setInputFiles(path.resolve(__dirname, "../../public/img/eend.png"));
+  await sheet().locator(".afreken-fotos .foto-duim").waitFor();
+  await sheet().getByLabel(/Naam/).first().fill("Sofie (Facebook)");
+  await wacht(500);
+  await foto("33-inkoop-thuis");
+  await sheet().getByRole("button", { name: "Uitbetaald" }).click();
+  await page.locator(".gelukt").waitFor();
+  await volgende();
+
+  stap("herkomst: vanuit de kaart naar de aankoop en de foto");
+  await tab("Vault");
+  await page.locator(".tegel", { hasText: "Facebook Gengar" }).first().click();
+  await sheet().locator(".herkomst", { hasText: "Ingekocht" }).waitFor();
+  assert.match(await sheet().locator(".herkomst").innerText(), /Online[\s\S]*Sofie[\s\S]*70% van €\s?30/);
+  await sheet().locator(".herkomst").getByRole("button", { name: /Bewijs en foto's/ }).click();
+  await sheet().locator(".transactie-fotos .foto-duim").waitFor();
+  await wacht(500);
+  await foto("34-herkomst");
+  await page.keyboard.press("Escape"); await wacht(150);
+  await page.keyboard.press("Escape"); await wacht(150);
+
+  stap("privé ⇄ Bind'r: een kaart uit de eigen verzameling inbrengen en een kaart meenemen");
+  await tab("Profiel");
+  await page.locator(".profiel-tegel", { hasText: "Privé" }).click();
+  await sheet().getByRole("button", { name: "Kaart toevoegen" }).click();
+  await sheet().getByRole("button", { name: "Handmatig", exact: true }).click();
+  await sheet().getByRole("button", { name: "Handmatig invullen" }).click();
+  await sheet().getByLabel("Naam (Engels)").fill("Eigen Mew");
+  await sheet().getByLabel("Marktwaarde").fill("100");
+  await sheet().getByRole("button", { name: /^Toevoegen/ }).click();
+  await wacht(150);
+  await sheet().getByRole("button", { name: /^Klaar/ }).last().click();
+  await sheet().locator(".afreken-netto", { hasText: /€\s?70/ }).waitFor();
+  await sheet().locator(".prive-pct .chip", { hasText: "100%" }).click();
+  assert.match(await sheet().locator(".prive-pct").innerText(), /boekhouder/);
+  await sheet().locator(".prive-pct .chip", { hasText: "aangeraden" }).click();
+  await foto("35-prive");
+  await geenHorizontaleScroll("privé");
+  await sheet().getByRole("button", { name: "Inbrengen in Bind'r" }).click();
+  await sheet().getByRole("heading", { name: "Ingebracht uit privé" }).waitFor();
+  await sheet().getByRole("button", { name: "Nog iets" }).click();
+  await sheet().getByRole("button", { name: "Naar privé" }).click();
+  await sheet().locator(".resultaten li button").first().click();
+  await sheet().getByRole("button", { name: /^1 naar privé/ }).click();
+  await sheet().getByRole("heading", { name: "Naar privé" }).waitFor();
+  await page.keyboard.press("Escape"); await wacht(200);
+  await page.locator(".profiel-tegel", { hasText: "Boekhouding" }).click();
+  await sheet().getByRole("button", { name: "Aankoop", exact: true }).click();
+  assert.ok(await sheet().locator(".boek-dag").count() >= 2, "aankopen van vandaag en gisteren");
+  assert.match(await sheet().locator(".boek-dag").first().innerText(), /uit privé €\s?70/);
   await page.keyboard.press("Escape"); await wacht(200);
 
   // ── Klantenpagina ──────────────────────────────────────────────────────────

@@ -19,6 +19,7 @@ export const SOORT: Record<TransactieSoort, { naam: string; icoon: string; uitle
   ruil: { naam: "Ruil", icoon: "ruil", uitleg: "kaarten over en weer" },
   retour: { naam: "Retour", icoon: "terug", uitleg: "terugbetaald" },
   kas: { naam: "Kas", icoon: "geld", uitleg: "geld in of uit de koffer" },
+  prive: { naam: "Privé", icoon: "profiel", uitleg: "van of naar je privécollectie" },
 };
 
 const PRODUCT_ICOON: Record<Productsoort, string> = {

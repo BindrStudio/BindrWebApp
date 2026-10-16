@@ -66,7 +66,8 @@ export function Inzichten({ onSluit }: { onSluit: () => void }) {
           <section className="inzicht-kern">
             <Kern label="Verkocht" waarde={euro(k.omzet, true)} sub={`${k.stuks} ${k.stuks === 1 ? "stuk" : "stuks"}${k.dagen > 1 ? ` op ${k.dagen} dagen` : ""}`} />
             <Kern label="Gemiddeld" waarde={k.gemiddeld != null ? euro(k.gemiddeld) : "–"} sub={k.mediaanPrijs != null ? `de helft onder ${euro(k.mediaanPrijs)}` : ""} />
-            <Kern label="Marge" waarde={k.margePct != null ? `${k.margePct > 0 ? "+" : ""}${k.margePct}%` : "–"} sub={k.marge != null ? `${euro(k.marge, true)} winst` : "aankoopprijs onbekend"} />
+            <Kern label="Winst op kaarten" waarde={k.marge != null ? euro(k.marge, true) : "–"} sub={k.margePct != null ? `${k.margePct > 0 ? "+" : ""}${k.margePct}% op ${euro(k.kaartOmzet, true)} omzet` : "aankoopprijs onbekend"} />
+            <Kern label="Artikels (omzet)" waarde={euro(k.artikelOmzet, true)} sub="binders, sealed, 3D: kosten apart" />
             <Kern label="Ligt gemiddeld" waarde={k.mediaanDagen != null ? `${k.mediaanDagen} d` : "–"} sub="tot het verkocht is" />
           </section>
 

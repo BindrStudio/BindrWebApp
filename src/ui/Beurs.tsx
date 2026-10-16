@@ -5,17 +5,17 @@ import {
 } from "../state";
 import type { Beurs, Regel, Stand, Transactie } from "../types";
 import { beursCijfers, beursOverzicht, CASH_GRENS, PRODUCTSOORTEN, retourBedrag, stand } from "../lib/kassa";
-import { borderelNummer, borderelOntbreekt, csv, heeftBorderel } from "../lib/boekhouding";
+import { bewijsNummer, csv, heeftBewijs } from "../lib/boekhouding";
 import { datumKort, euro, getal, vandaag } from "../lib/format";
 import { normaliseerCode, toonCode } from "../lib/code";
 import { inVoorraad } from "../lib/exemplaar";
 import { Icoon, Sheet, Veld } from "./common";
 import { BeurzenEnTransacties, kasOmschrijving, TransactieRij, useSoortVan } from "./Historiek";
-import { BorderelSheet } from "./Boekhouding";
+import { BewijsKnop, BewijsSheet } from "./Boekhouding";
 import { bewaarCsv } from "./Afdruk";
 
 const tijdKort = (iso: string) => new Date(iso).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" });
-const SOORT_NAAM: Record<Transactie["soort"], string> = { verkoop: "Verkoop", ruil: "Ruil", inkoop: "Inkoop", retour: "Retour", kas: "Kas" };
+const SOORT_NAAM: Record<Transactie["soort"], string> = { verkoop: "Verkoop", ruil: "Ruil", inkoop: "Inkoop", retour: "Retour", kas: "Kas", prive: "Privé" };
 
 // ── Beurs starten en afsluiten ───────────────────────────────────────────────
 
@@ -257,13 +257,8 @@ export function TransactieSheet({ id }: { id: string }) {
       )}
       {t.soort === "kas" && t.beheerder && <div className="afsluit-rij"><span>Door</span><strong>{beheerders[t.beheerder] ?? "beheerder"}</strong></div>}
 
-      {heeftBorderel(t) && (
-        <button className={`borderel-knop${borderelOntbreekt(t).length ? " mist" : ""}`} onClick={() => setBorderel(true)}>
-          <Icoon naam={borderelOntbreekt(t).length ? "waarschuwing" : "check"} maat={18} />
-          <span><strong>Borderel {borderelNummer(t)}</strong><span className="zacht klein">{borderelOntbreekt(t).length ? `nog nodig: ${borderelOntbreekt(t).join(", ")}` : t.tegenpartij?.naam ?? "volledig"}</span></span>
-        </button>
-      )}
-      {borderel && <BorderelSheet id={t.id} onSluit={() => setBorderel(false)} />}
+      {(heeftBewijs(t) || t.soort === "prive") && nieuw && <BewijsKnop t={t} onOpen={() => setBorderel(true)} />}
+      {borderel && <BewijsSheet id={t.id} onSluit={() => setBorderel(false)} />}
 
       {retourKeuze && (
         <section className="blok retour-blok">
@@ -466,11 +461,11 @@ export function Overzicht() {
 
 function downloadCsv(naam: string, transacties: Transactie[], beheerders: Record<string, string>, beurzen: Beurs[] = huidig().beurzen) {
   const beursNaam = Object.fromEntries(beurzen.map((b) => [b.id, b.naam]));
-  const kop = ["datum", "tijd", "beurs", "soort", "status", "beheerder", "richting", "code", "naam", "aantal", "hartjesprijs", "prijs", "marktwaarde", "aankoopprijs", "transactie_totaal", "cash", "sumup", "overschrijving", "borderel", "transactie_id"];
+  const kop = ["datum", "tijd", "beurs", "soort", "status", "beheerder", "richting", "code", "naam", "aantal", "hartjesprijs", "prijs", "marktwaarde", "aankoopprijs", "transactie_totaal", "cash", "sumup", "overschrijving", "bewijs", "transactie_id"];
   const rijen: (string | number | null | undefined)[][] = [kop];
   for (const t of transacties.slice().sort((a, b) => a.tijd.localeCompare(b.tijd))) {
     const basis = [t.tijd.slice(0, 10), tijdKort(t.tijd), t.beurs_id ? beursNaam[t.beurs_id] ?? "" : "", t.soort, t.status, t.beheerder ? beheerders[t.beheerder] ?? "" : ""];
-    const geld = [t.totaal, t.cash, t.sumup, t.bank ?? 0, heeftBorderel(t) ? borderelNummer(t) : "", t.id];
+    const geld = [t.totaal, t.cash, t.sumup, t.bank ?? 0, heeftBewijs(t) ? bewijsNummer(t) : "", t.id];
     if (!t.regels.length) rijen.push([...basis, "", "", t.opmerking ?? kasOmschrijving(t), 1, null, 0, null, null, ...geld]);
     for (const r of t.regels) {
       rijen.push([...basis, r.richting, r.code ? toonCode(r.code) : "", r.naam, r.aantal ?? 1, r.hartjesprijs, r.prijs, r.referentie, r.aankoopprijs, ...geld]);

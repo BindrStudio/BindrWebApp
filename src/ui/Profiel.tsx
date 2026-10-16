@@ -3,12 +3,12 @@
 // achter het tandwiel rechtsboven.
 import { useMemo, useState } from "react";
 import {
-  actieveBeurs, actieveOmgeving, logUit, openArtikelen, openBoekhouding, openHistoriek, openInzichten, openOverzicht,
+  actieveBeurs, actieveOmgeving, inkoopThuis, logUit, openArtikelen, openBoekhouding, openHistoriek, openInzichten, openOverzicht, openPrive,
   synchroniseer, useApp, wisselOmgeving,
 } from "../state";
 import { PinKiezen } from "./Login";
 import { euro } from "../lib/format";
-import { borderelOntbreekt, dagontvangsten, heeftBorderel } from "../lib/boekhouding";
+import { dagontvangsten } from "../lib/boekhouding";
 import { Icoon, Sheet } from "./common";
 
 function initialen(naam: string): string {
@@ -28,7 +28,6 @@ export function Profiel() {
   const telArtikels = s.artikelen.reduce((n, a) => n + Math.max(0, a.aantal), 0);
   const jaar = new Date().getFullYear();
   const omzet = useMemo(() => dagontvangsten(s.transacties).filter((d) => d.datum.startsWith(`${jaar}-`)).reduce((x, d) => x + d.ontvangsten, 0), [s.transacties, jaar]);
-  const borderelsOpen = s.transacties.filter((t) => heeftBorderel(t) && borderelOntbreekt(t).length > 0).length;
   const verkocht = s.transacties.filter((t) => t.status !== "ongedaan" && (t.soort === "verkoop" || t.soort === "ruil")).length;
 
   return (
@@ -61,8 +60,17 @@ export function Profiel() {
         <button className="profiel-tegel boekhouding" onClick={openBoekhouding}>
           <Icoon naam="boek" maat={26} />
           <strong>Boekhouding</strong>
-          <span>{euro(omzet, true)} in {jaar}{borderelsOpen ? ` · ${borderelsOpen} borderel${borderelsOpen === 1 ? "" : "len"} aan te vullen` : ""}</span>
-          {borderelsOpen > 0 && <span className="badge rood-badge tegel-badge">{borderelsOpen}</span>}
+          <span>{euro(omzet, true)} omzet in {jaar} · dagontvangsten, aankopen en voorraad voor Dexxter</span>
+        </button>
+        <button className="profiel-tegel thuis" onClick={inkoopThuis}>
+          <Icoon naam="inkoop" maat={26} />
+          <strong>Ingekocht buiten een beurs</strong>
+          <span>Facebook, Vinted, een rommelmarkt: kaarten, prijs, foto of screenshot</span>
+        </button>
+        <button className="profiel-tegel prive" onClick={openPrive}>
+          <Icoon naam="ruil" maat={26} />
+          <strong>Privé ⇄ Bind'r</strong>
+          <span>Kaarten uit je eigen verzameling inbrengen, of meenemen naar privé</span>
         </button>
         <button className="profiel-tegel overzicht" onClick={openOverzicht}>
           <Icoon naam="grafiek" maat={26} />

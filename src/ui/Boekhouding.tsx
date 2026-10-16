@@ -1,11 +1,12 @@
-// Boekhouding: wat je in Dexxter ingeeft (dagontvangsten), de borderellen bij elke aankoop of
-// ruil, de omzet tegenover de grens van de btw-vrijstelling en de voorraad op een datum.
+// Boekhouding: wat je in Dexxter ingeeft (dagontvangsten en kosten), het aankoopbewijs bij elke
+// inkoop of ruil (lijst met codes, marktwaarde, percentage en foto), de dagstaat van de aankopen,
+// de omzet tegenover de grens van de btw-vrijstelling en de voorraad op een datum.
 // De rekenregels staan in lib/boekhouding.ts; de punten om met een boekhouder na te kijken in de README.
 import { useMemo, useState, type ReactNode } from "react";
-import { bedrijfVan, huidig, kanNieuweBoekhouding, meld, OUD_SCHEMA, useApp, zetBedrijf, zetIngegeven, zetTegenpartij } from "../state";
+import { bedrijfVan, fotosVan, huidig, kanNieuweBoekhouding, laadFotos, meld, OUD_SCHEMA, useApp, zetBedrijf, zetIngegeven, zetTegenpartij } from "../state";
 import type { Bedrijf, Beurs, Tegenpartij, Transactie } from "../types";
 import {
-  borderelLijnen, borderelNummer, borderelOntbreekt, csv, dagontvangsten, dagVan, dexxterLijnen, EIGEN_LIJN, heeftBorderel,
+  BEWIJS_GROOT, bewijsAdvies, bewijsNummer, borderelLijnen, csv, dagontvangsten, dagVan, dexxterLijnen, EIGEN_LIJN, heeftBewijs,
   jaaromzet, voorraadOp, type Dag, type Inventaris,
 } from "../lib/boekhouding";
 import { beursCijfers, CASH_GRENS, rond2 } from "../lib/kassa";
@@ -15,10 +16,23 @@ import { Icoon, Segment, Sheet, Veld } from "./common";
 import { kasOmschrijving, SOORT, TransactieRij } from "./Historiek";
 import { HandtekeningBeeld, HandtekeningPad } from "./Handtekening";
 import { bewaarCsv, drukAf } from "./Afdruk";
+import { FotoRij, TransactieFotos, useFotos } from "./Fotos";
 
 const dagLang = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString("nl-BE", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 const tijdKort = (iso: string) => new Date(iso).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" });
 const bedrijfOk = (b: Bedrijf) => !!(b.naam?.trim() && b.adres?.trim());
+
+export const KANAAL: Record<NonNullable<Tegenpartij["kanaal"]>, string> = {
+  beurs: "Beurs", online: "Online (Facebook, Vinted …)", rommelmarkt: "Rommelmarkt", andere: "Andere",
+};
+/** Waar een aankoop gebeurde: de beurs, of het kanaal dat bij het afrekenen gekozen werd. */
+export function waarGekocht(t: Transactie, beurzen: Beurs[]): string {
+  const b = beurzen.find((x) => x.id === t.beurs_id);
+  if (b) return b.naam;
+  if (t.soort === "prive") return "uit privé";
+  const k = t.tegenpartij?.kanaal;
+  return k ? KANAAL[k].replace(/ \(.*\)/, "") : "buiten een beurs";
+}
 
 type Tab = "dagen" | "aankopen" | "voorraad" | "uitleg";
 
@@ -29,15 +43,18 @@ export function Boekhouding({ onSluit }: { onSluit: () => void }) {
   const [jaar, setJaar] = useState(nu);
   const [tab, setTab] = useState<Tab>("dagen");
   const [dag, setDag] = useState<string | null>(null);
-  const [borderel, setBorderel] = useState<string | null>(null);
+  const [aankoopDag, setAankoopDag] = useState<string | null>(null);
+  const [bewijs, setBewijs] = useState<string | null>(null);
   const [gegevens, setGegevens] = useState(false);
   const dagen = useMemo(() => dagontvangsten(s.transacties), [s.transacties]);
   const jaren = [...new Set([nu, ...dagen.map((d) => Number(d.datum.slice(0, 4)))])].sort((a, b) => b - a);
   const omzet = jaaromzet(dagen, jaar, bedrijf.start);
   const vanJaar = dagen.filter((d) => d.datum.startsWith(`${jaar}-`));
+  const verkoopDagen = vanJaar.filter((d) => d.transacties.some((t) => t.soort === "verkoop" || t.soort === "ruil" || t.soort === "retour"));
+  const aankoopDagen = vanJaar.filter((d) => d.aankopen !== 0 || d.inbreng !== 0 || d.onttrekking !== 0);
   const ingegeven = s.boekhouding.ingegeven[s.omgeving ?? "standaard"] ?? {};
-  const aankopen = s.transacties.filter((t) => heeftBorderel(t) && dagVan(t.tijd).startsWith(`${jaar}-`)).sort((a, b) => b.tijd.localeCompare(a.tijd));
   const open = dag ? dagen.find((d) => d.datum === dag) : null;
+  const openAankoop = aankoopDag ? dagen.find((d) => d.datum === aankoopDag) : null;
   const beursNaam = (id: string) => s.beurzen.find((b) => b.id === id)?.naam ?? "beurs";
 
   return (
@@ -45,7 +62,7 @@ export function Boekhouding({ onSluit }: { onSluit: () => void }) {
       {!bedrijfOk(bedrijf) && (
         <button className="melding-kaart neer boek-gegevens" onClick={() => setGegevens(true)}>
           <Icoon naam="waarschuwing" />
-          <div><strong>Vul eerst je gegevens in</strong><span>Naam, adres en ondernemingsnummer komen op elk borderel en rapport.</span></div>
+          <div><strong>Vul eerst je gegevens in</strong><span>Naam, adres en ondernemingsnummer komen op elk aankoopbewijs en rapport.</span></div>
         </button>
       )}
 
@@ -59,9 +76,9 @@ export function Boekhouding({ onSluit }: { onSluit: () => void }) {
       {tab === "dagen" && (
         <section className="boek-lijst">
           <p className="zacht klein">Elke dag met verkopen is één inschrijving in Dexxter (dagontvangsten). Tik op een dag voor de bedragen.</p>
-          {!vanJaar.length && <p className="zacht center">Nog geen verkopen in {jaar}.</p>}
+          {!verkoopDagen.length && <p className="zacht center">Nog geen verkopen in {jaar}.</p>}
           <ul className="lijst">
-            {vanJaar.map((d) => (
+            {verkoopDagen.map((d) => (
               <li key={d.datum}>
                 <button className="lijst-knop boek-dag" onClick={() => setDag(d.datum)}>
                   <span className={`boek-vink${ingegeven[d.datum] ? " aan" : ""}`} aria-label={ingegeven[d.datum] ? "In Dexxter" : "Nog niet in Dexxter"}>
@@ -80,9 +97,9 @@ export function Boekhouding({ onSluit }: { onSluit: () => void }) {
               </li>
             ))}
           </ul>
-          {vanJaar.length > 0 && (
+          {verkoopDagen.length > 0 && (
             <div className="knoppenrij">
-              <button className="knop zacht" onClick={() => bewaarCsv(`bindr-dagontvangsten-${jaar}.csv`, dagenCsv(vanJaar, s.beurzen))}><Icoon naam="link" maat={16} /> CSV {jaar}</button>
+              <button className="knop zacht" onClick={() => bewaarCsv(`bindr-dagontvangsten-${jaar}.csv`, dagenCsv(verkoopDagen, s.beurzen))}><Icoon naam="link" maat={16} /> CSV {jaar}</button>
             </div>
           )}
         </section>
@@ -90,28 +107,28 @@ export function Boekhouding({ onSluit }: { onSluit: () => void }) {
 
       {tab === "aankopen" && (
         <section className="boek-lijst">
-          <p className="zacht klein">Elke inkoop en ruil krijgt een borderel: het bewijs van je aankoop (een kost in Dexxter). Laat het tekenen aan de stand, of vul het later aan.</p>
-          {!aankopen.length && <p className="zacht center">Nog geen aankopen in {jaar}.</p>}
+          <p className="zacht klein">Per dag één kost in Dexxter, met de dagstaat als bijlage: alle aankopen met codes, marktwaarde, percentage, prijs en foto's. Zo kan je elke kaart terugvinden.</p>
+          {!aankoopDagen.length && <p className="zacht center">Nog geen aankopen in {jaar}.</p>}
           <ul className="lijst">
-            {aankopen.map((t) => {
-              const mist = borderelOntbreekt(t);
-              return (
-                <li key={t.id}>
-                  <button className="lijst-knop" onClick={() => setBorderel(t.id)}>
-                    <span className={`boek-vink${mist.length ? " mist" : " aan"}`}><Icoon naam={mist.length ? "waarschuwing" : "check"} maat={16} /></span>
-                    <span className="lijst-naam">
-                      <strong>{t.tegenpartij?.naam?.trim() || "Verkoper nog in te vullen"}</strong>
-                      <span className="zacht klein">{borderelNummer(t)} · {datumKort(t.tijd)} · {SOORT[t.soort].naam.toLowerCase()}{mist.length ? ` · mist: ${mist.join(", ")}` : ""}</span>
+            {aankoopDagen.map((d) => (
+              <li key={d.datum}>
+                <button className="lijst-knop boek-dag" onClick={() => setAankoopDag(d.datum)}>
+                  <span className="boek-vink"><Icoon naam="inkoop" maat={16} /></span>
+                  <span className="lijst-naam">
+                    <strong>{dagLang(d.datum)}</strong>
+                    <span className="zacht klein">
+                      {[d.aankopenGeld ? `inkoop ${euro(d.aankopenGeld)}` : null, d.aankopenRuil ? `via ruil ${euro(d.aankopenRuil)}` : null,
+                        d.inbreng ? `uit privé ${euro(d.inbreng)}` : null, d.onttrekking ? `naar privé ${euro(d.onttrekking)}` : null].filter(Boolean).join(" · ")}
                     </span>
-                    <span className="rechts boek-bedrag">{euro(aankoopVan(t))}</span>
-                  </button>
-                </li>
-              );
-            })}
+                  </span>
+                  <span className="rechts boek-bedrag">{euro(rond2(d.aankopen + d.inbreng))}</span>
+                </button>
+              </li>
+            ))}
           </ul>
-          {aankopen.length > 0 && (
+          {aankoopDagen.length > 0 && (
             <div className="knoppenrij">
-              <button className="knop zacht" onClick={() => bewaarCsv(`bindr-aankopen-${jaar}.csv`, aankopenCsv(aankopen, s.beurzen))}><Icoon naam="link" maat={16} /> CSV {jaar}</button>
+              <button className="knop zacht" onClick={() => bewaarCsv(`bindr-aankopen-${jaar}.csv`, aankopenCsv(aankoopDagen.flatMap((d) => d.transacties.filter((t) => heeftBewijs(t) || t.soort === "prive")), s.beurzen))}><Icoon naam="link" maat={16} /> CSV {jaar}</button>
             </div>
           )}
         </section>
@@ -122,11 +139,12 @@ export function Boekhouding({ onSluit }: { onSluit: () => void }) {
       {tab === "uitleg" && <Uitleg />}
 
       <button className="tekstknop boek-gegevens-knop" onClick={() => setGegevens(true)}>
-        <Icoon naam="tag" maat={16} /> Gegevens voor borderel en rapporten{bedrijf.naam ? `: ${bedrijf.naam}` : ""}
+        <Icoon naam="tag" maat={16} /> Gegevens voor aankoopbewijs en rapporten{bedrijf.naam ? `: ${bedrijf.naam}` : ""}
       </button>
 
-      {open && <DagSheet dag={open} onSluit={() => setDag(null)} onBorderel={setBorderel} />}
-      {borderel && <BorderelSheet id={borderel} onSluit={() => setBorderel(null)} />}
+      {open && <DagSheet dag={open} onSluit={() => setDag(null)} onAankopen={() => { setDag(null); setAankoopDag(open.datum); }} />}
+      {openAankoop && <AankoopDagSheet dag={openAankoop} onSluit={() => setAankoopDag(null)} onBewijs={setBewijs} />}
+      {bewijs && <BewijsSheet id={bewijs} onSluit={() => setBewijs(null)} />}
       {gegevens && <BedrijfSheet onSluit={() => setGegevens(false)} />}
     </Sheet>
   );
@@ -138,11 +156,11 @@ const aankoopVan = (t: Transactie) => rond2(t.regels.filter((r) => r.richting ==
 
 function JaarTeller({ omzet, jaren, onJaar, start }: { omzet: ReturnType<typeof jaaromzet>; jaren: number[]; onJaar: (j: number) => void; start?: string | null }) {
   const vol = Math.min(100, omzet.pct);
-  const toestand = omzet.omzet > omzet.tolerantie ? "over" : omzet.omzet > omzet.grens ? "rand" : omzet.pct >= 80 ? "dicht" : "ok";
+  const toestand = omzet.omzet > omzet.tolerantie ? "over" : omzet.omzet > omzet.grens ? "rand" : omzet.pct >= 90 ? "dicht" : "ok";
   return (
     <section className={`jaar-teller ${toestand}`}>
       <div className="jaar-kop">
-        <span className="zacht klein">Omzet</span>
+        <span className="zacht klein">Omzet (verkoop en ruil)</span>
         <select value={omzet.jaar} onChange={(e) => onJaar(Number(e.target.value))} aria-label="Jaar">
           {jaren.map((j) => <option key={j} value={j}>{j}</option>)}
         </select>
@@ -153,7 +171,7 @@ function JaarTeller({ omzet, jaren, onJaar, start }: { omzet: ReturnType<typeof 
       </div>
       <span className="zacht klein">
         {omzet.grens > 0
-          ? <>{omzet.pct}% van {euro(omzet.grens, true)}, de grens van de btw-vrijstelling{start?.startsWith(String(omzet.jaar)) ? " (startjaar: pro rata)" : ""}.</>
+          ? <>{omzet.pct}% van {euro(omzet.grens, true)}, de grens van de btw-vrijstelling{start?.startsWith(String(omzet.jaar)) ? " (startjaar: pro rata)" : ""}. Nog {euro(Math.max(0, rond2(omzet.grens - omzet.omzet)), true)} ruimte.</>
           : "Je activiteit begint pas later."}
         {toestand === "dicht" && " Je nadert de grens: bespreek het met je boekhouder."}
         {toestand === "rand" && " Over de grens, maar binnen de 10% marge: tot eind december blijf je vrijgesteld. Contacteer je boekhouder."}
@@ -163,32 +181,20 @@ function JaarTeller({ omzet, jaren, onJaar, start }: { omzet: ReturnType<typeof 
   );
 }
 
-// ── Eén dag ──────────────────────────────────────────────────────────────────
+// ── Eén dag: verkoop ─────────────────────────────────────────────────────────
 
-function DagSheet({ dag, onSluit, onBorderel }: { dag: Dag; onSluit: () => void; onBorderel: (id: string) => void }) {
+function DagSheet({ dag, onSluit, onAankopen }: { dag: Dag; onSluit: () => void; onAankopen: () => void }) {
   const s = useApp();
   const ingegeven = !!s.boekhouding.ingegeven[s.omgeving ?? "standaard"]?.[dag.datum];
   const beurzen = dag.beurzen.map((id) => s.beurzen.find((b) => b.id === id)).filter(Boolean) as Beurs[];
   const lijnen = dexxterLijnen(dag, beurzen.map((b) => b.naam).join(", ") || undefined);
   const bedrijf = bedrijfVan(s);
-  const kopieer = (x: number) => {
-    const tekst = x.toFixed(2).replace(".", ",");
-    void navigator.clipboard?.writeText(tekst).then(() => meld(`${tekst} gekopieerd`), () => meld(tekst, "info"));
-  };
   return (
     <Sheet titel={dagLang(dag.datum)} onSluit={onSluit} vol>
       <section className="blok dexxter-blok">
         <h3>In Dexxter</h3>
         <p className="zacht klein">Dagontvangsten › nieuwe inschrijving, datum {datumKort(dag.datum)}. Eén lijn per bedrag hieronder.</p>
-        <ul className="dexxter-lijnen">
-          {lijnen.map((l, i) => (
-            <li key={i}>
-              <span>{l.omschrijving}</span>
-              <strong>{euro(l.bedrag)}</strong>
-              <button className="tekstknop klein" onClick={() => kopieer(l.bedrag)}>Kopieer</button>
-            </li>
-          ))}
-        </ul>
+        <DexxterLijnen lijnen={lijnen} />
         {dag.eigenLijnen.length > 0 && <p className="zacht klein">Stukken boven {euro(EIGEN_LIJN, true)} staan apart, met een omschrijving (verplicht sinds 2026).</p>}
         <label className="schakel">
           <input type="checkbox" checked={ingegeven} onChange={(e) => zetIngegeven(dag.datum, e.target.checked)} />
@@ -202,13 +208,22 @@ function DagSheet({ dag, onSluit, onBorderel }: { dag: Dag; onSluit: () => void;
         {dag.ruil !== 0 && <div className="afsluit-rij"><span>Ruil (onze kaarten, aan de afgesproken prijs)</span><strong>{euro(dag.ruil)}</strong></div>}
         {dag.retour !== 0 && <div className="afsluit-rij"><span>Retour</span><strong>{euro(dag.retour)}</strong></div>}
         <div className="afsluit-rij totaal"><span>Ontvangsten</span><strong>{euro(dag.ontvangsten)}</strong></div>
+        <div className="afsluit-rij"><span>waarvan kaarten en slabs</span><strong>{euro(dag.kaarten)}</strong></div>
+        <div className="afsluit-rij"><span>waarvan artikels (binders, sealed, 3D)</span><strong>{euro(dag.artikels)}</strong></div>
         <div className="afsluit-rij"><span>Geld: cash</span><strong>{euro(dag.cash)}</strong></div>
         <div className="afsluit-rij"><span>Geld: SumUp</span><strong>{euro(dag.sumup)}</strong></div>
         {dag.bank !== 0 && <div className="afsluit-rij"><span>Geld: overschrijving</span><strong>{euro(dag.bank)}</strong></div>}
         {(dag.kas !== 0 || dag.kasSumup !== 0) && <div className="afsluit-rij"><span>Kasbewegingen (geen omzet)</span><strong>{euro(dag.kas)}{dag.kasSumup ? ` · SumUp ${euro(dag.kasSumup)}` : ""}</strong></div>}
-        {dag.aankopen !== 0 && <div className="afsluit-rij"><span>Aankopen (kosten, met borderel)</span><strong>{euro(dag.aankopen)}</strong></div>}
         {dag.kasSumup > 0 && <p className="zacht klein">SumUp van een kasbeweging is geen verkoop: trek het af als je de SumUp-uitbetaling met je ontvangsten vergelijkt.</p>}
+        <p className="zacht klein">Een ruil telt als verkoop van onze kaarten: die waarde telt mee voor de grens van de btw-vrijstelling. Hun kaarten staan als kost bij de aankopen van deze dag.</p>
       </section>
+
+      {(dag.aankopen !== 0 || dag.inbreng !== 0 || dag.onttrekking !== 0) && (
+        <button className="borderel-knop mist" onClick={onAankopen}>
+          <Icoon naam="inkoop" maat={18} />
+          <span><strong>Aankopen van deze dag: {euro(rond2(dag.aankopen + dag.inbreng))}</strong><span className="zacht klein">dagstaat en kosten voor Dexxter</span></span>
+        </button>
+      )}
 
       {beurzen.map((b) => <KasRapport key={b.id} beurs={b} />)}
 
@@ -217,18 +232,33 @@ function DagSheet({ dag, onSluit, onBorderel }: { dag: Dag; onSluit: () => void;
         <ul className="transacties">
           {dag.transacties.map((t) => <TransactieRij key={t.id} t={t} beheerder={t.beheerder ? s.beheerders[t.beheerder] : undefined} />)}
         </ul>
-        {dag.transacties.filter(heeftBorderel).map((t) => (
-          <button key={t.id} className="tekstknop klein" onClick={() => onBorderel(t.id)}>Borderel {borderelNummer(t)}</button>
-        ))}
       </section>
 
       <div className="knoppenrij onderaan">
-        <button className="knop" onClick={() => drukAf(<DagDocument dag={dag} beurzen={beurzen} bedrijf={bedrijf} beheerders={s.beheerders} />, `Dagrapport ${dag.datum}`)}>
+        <button className="knop" onClick={() => drukAf(<DagDocument dag={dag} beurzen={beurzen} bedrijf={bedrijf} beheerders={s.beheerders} />, `Dagontvangsten ${dag.datum}`)}>
           <Icoon naam="printer" maat={18} /> Dagrapport (pdf)
         </button>
         <button className="knop zacht" onClick={() => bewaarCsv(`bindr-dag-${dag.datum}.csv`, transactiesCsv(dag.transacties, s.beurzen))}>CSV</button>
       </div>
     </Sheet>
+  );
+}
+
+function DexxterLijnen({ lijnen }: { lijnen: { omschrijving: string; bedrag: number }[] }) {
+  const kopieer = (x: number) => {
+    const tekst = x.toFixed(2).replace(".", ",");
+    void navigator.clipboard?.writeText(tekst).then(() => meld(`${tekst} gekopieerd`), () => meld(tekst, "info"));
+  };
+  return (
+    <ul className="dexxter-lijnen">
+      {lijnen.map((l, i) => (
+        <li key={i}>
+          <span>{l.omschrijving}</span>
+          <strong>{euro(l.bedrag)}</strong>
+          <button className="tekstknop klein" onClick={() => kopieer(l.bedrag)}>Kopieer</button>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -252,108 +282,197 @@ function KasRapport({ beurs }: { beurs: Beurs }) {
   );
 }
 
-// ── Borderel ─────────────────────────────────────────────────────────────────
+// ── Eén dag: aankopen ────────────────────────────────────────────────────────
 
-/** De gegevens van de verkoper (of koper bij een ruil): particulier of handelaar. */
-export function TegenpartijVelden({ waarde, onChange }: { waarde: Tegenpartij; onChange: (t: Tegenpartij) => void }) {
+/** De kosten van een dag voor Dexxter: elk een uitgave, met de dagstaat als bijlage. */
+export function kostenLijnen(d: Dag, waar?: string): { omschrijving: string; bedrag: number }[] {
+  const w = waar ? ` (${waar})` : "";
+  return [
+    d.aankopenGeld ? { omschrijving: `Aankoop kaarten van particulieren${w}`, bedrag: d.aankopenGeld } : null,
+    d.aankopenRuil ? { omschrijving: `Inkoop via ruil${w}`, bedrag: d.aankopenRuil } : null,
+    d.inbreng ? { omschrijving: "Inbreng kaarten uit privé (betaald met privémiddelen)", bedrag: d.inbreng } : null,
+  ].filter(Boolean) as { omschrijving: string; bedrag: number }[];
+}
+
+function AankoopDagSheet({ dag, onSluit, onBewijs }: { dag: Dag; onSluit: () => void; onBewijs: (id: string) => void }) {
+  const s = useApp();
+  const lijst = dag.transacties.filter((t) => heeftBewijs(t) || t.soort === "prive" || (t.soort === "retour" && t.regels.some((r) => r.richting === "uit")));
+  const van = useFotos(lijst.map((t) => t.id));
+  const beurzen = dag.beurzen.map((id) => s.beurzen.find((b) => b.id === id)).filter(Boolean) as Beurs[];
+  const bedrijf = bedrijfVan(s);
+  const [bezig, setBezig] = useState(false);
+  const print = async () => {
+    setBezig(true);
+    await laadFotos(lijst.map((t) => t.id));
+    setBezig(false);
+    drukAf(<DagstaatAankopen dag={dag} lijst={lijst} beurzen={s.beurzen} bedrijf={bedrijf} />, `Aankopen ${dag.datum}`);
+  };
+  return (
+    <Sheet titel={`Aankopen · ${dagLang(dag.datum)}`} onSluit={onSluit} vol>
+      <section className="blok dexxter-blok">
+        <h3>In Dexxter</h3>
+        <p className="zacht klein">Uitgaven › nieuwe uitgave, datum {datumKort(dag.datum)}: aankoop van handelsgoederen, leverancier "particulieren", 0% btw. Voeg de dagstaat (pdf) toe als bijlage.</p>
+        <DexxterLijnen lijnen={kostenLijnen(dag, beurzen.map((b) => b.naam).join(", ") || undefined)} />
+        {dag.onttrekking !== 0 && <p className="zacht klein">Naar privé: {euro(dag.onttrekking)} aan aankoopwaarde. In Dexxter als "verkoop aan jezelf" aan die waarde; geen dagontvangst van klanten en geen omzet voor de grens (laat bevestigen door je boekhouder).</p>}
+        <button className="knop" disabled={bezig} onClick={() => void print()}><Icoon naam="printer" maat={18} /> {bezig ? "Foto's laden…" : "Dagstaat aankopen (pdf)"}</button>
+      </section>
+
+      <ul className="lijst boek-lijst">
+        {lijst.map((t) => {
+          const advies = heeftBewijs(t) ? bewijsAdvies(t, van(t.id).length) : [];
+          return (
+            <li key={t.id}>
+              <button className="lijst-knop" onClick={() => onBewijs(t.id)}>
+                <span className={`boek-vink${advies.length ? " mist" : " aan"}`}><Icoon naam={advies.length ? "foto" : "check"} maat={16} /></span>
+                <span className="lijst-naam">
+                  <strong>{t.soort === "prive" ? (t.regels.some((r) => r.richting === "in") ? "Uit privé ingebracht" : "Naar privé") : t.tegenpartij?.naam?.trim() || "Verkoper zonder naam"}</strong>
+                  <span className="zacht klein">{tijdKort(t.tijd)} · {SOORT[t.soort].naam.toLowerCase()} · {waarGekocht(t, s.beurzen)}{advies.length ? ` · aangeraden: ${advies.join(", ")}` : ""}</span>
+                </span>
+                <span className="rechts boek-bedrag">{euro(t.soort === "prive" && !t.regels.some((r) => r.richting === "in") ? rond2(t.regels.reduce((x, r) => x + r.prijs, 0)) : aankoopVan(t))}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </Sheet>
+  );
+}
+
+// ── Aankoopbewijs ────────────────────────────────────────────────────────────
+
+/**
+ * Wie verkocht (geen verplichting aan de stand): minstens een voornaam; vanaf € 250 liefst de
+ * volledige naam en de gemeente. Een handelaar geeft een factuur. Geen identiteitskaart.
+ */
+export function TegenpartijVelden({ waarde, onChange, groot = false, kanaal = false }: {
+  waarde: Tegenpartij; onChange: (t: Tegenpartij) => void; groot?: boolean; kanaal?: boolean;
+}) {
   const zet = (w: Partial<Tegenpartij>) => onChange({ ...waarde, ...w });
   const handelaar = waarde.type === "handelaar";
   return (
     <div className="tegenpartij">
       <Segment<"particulier" | "handelaar"> waarde={handelaar ? "handelaar" : "particulier"} onKies={(type) => zet({ type })}
         opties={[{ waarde: "particulier", label: "Particulier" }, { waarde: "handelaar", label: "Handelaar" }]} />
-      <Veld label="Naam"><input value={waarde.naam ?? ""} onChange={(e) => zet({ naam: e.target.value })} autoComplete="off" placeholder={handelaar ? "naam van de zaak" : "voor- en achternaam"} /></Veld>
+      {kanaal && (
+        <Veld label="Waar gekocht?">
+          <div className="kiezer">
+            {(["online", "rommelmarkt", "andere"] as const).map((k) => (
+              <button key={k} type="button" className={`chip${waarde.kanaal === k ? " aan" : ""}`} onClick={() => zet({ kanaal: k })}>{KANAAL[k]}</button>
+            ))}
+          </div>
+        </Veld>
+      )}
+      <Veld label={handelaar ? "Naam van de zaak" : groot ? "Naam" : "Naam (minstens een voornaam)"}>
+        <input value={waarde.naam ?? ""} onChange={(e) => zet({ naam: e.target.value })} autoComplete="off" placeholder={handelaar ? "naam van de zaak" : "bv. Jan"} />
+      </Veld>
       {handelaar ? (
         <>
           <Veld label="Ondernemingsnummer (optioneel)"><input value={waarde.btw ?? ""} onChange={(e) => zet({ btw: e.target.value })} autoComplete="off" placeholder="BE0123.456.789" /></Veld>
-          <Veld label="Factuurnummer" hint="Een handelaar geeft je een factuur: die is het bewijs. Geen factuur? Laat dan tekenen."><input value={waarde.factuur ?? ""} onChange={(e) => zet({ factuur: e.target.value })} autoComplete="off" /></Veld>
+          <Veld label="Factuurnummer" hint="Een handelaar geeft je een factuur: die is het bewijs."><input value={waarde.factuur ?? ""} onChange={(e) => zet({ factuur: e.target.value })} autoComplete="off" /></Veld>
         </>
       ) : (
-        <>
-          <Veld label="Adres"><input value={waarde.adres ?? ""} onChange={(e) => zet({ adres: e.target.value })} autoComplete="off" placeholder="straat, nummer, postcode, gemeente" /></Veld>
-          <label className="schakel">
-            <input type="checkbox" checked={!!waarde.id_gecontroleerd} onChange={(e) => zet({ id_gecontroleerd: e.target.checked })} />
-            <span>Identiteitskaart bekeken (we bewaren geen nummer of kopie)</span>
-          </label>
-        </>
+        <Veld label={groot ? `Gemeente (aangeraden boven ${euro(BEWIJS_GROOT, true)})` : "Gemeente (optioneel)"}>
+          <input value={waarde.adres ?? ""} onChange={(e) => zet({ adres: e.target.value })} autoComplete="off" placeholder="bv. Gent" />
+        </Veld>
       )}
     </div>
   );
 }
 
-export function BorderelSheet({ id, onSluit }: { id: string; onSluit: () => void }) {
+export function BewijsSheet({ id, onSluit }: { id: string; onSluit: () => void }) {
   const s = useApp();
   const t = s.transacties.find((x) => x.id === id);
   const [tp, setTp] = useState<Tegenpartij>(() => ({ type: "particulier", ...(t?.tegenpartij ?? {}) }));
   const [tekenen, setTekenen] = useState<"verkoper" | "ons" | null>(null);
+  const van = useFotos(t ? [t.id] : []);
   if (!t) return null;
   const nieuw = kanNieuweBoekhouding(s);
   const bewaard = t.tegenpartij ?? {};
   const gewijzigd = JSON.stringify({ type: "particulier", ...bewaard }) !== JSON.stringify(tp);
-  const getekend = !!bewaard.handtekening;
-  const mist = borderelOntbreekt({ ...t, tegenpartij: tp });
+  const fotos = van(t.id);
+  const advies = heeftBewijs(t) ? bewijsAdvies({ ...t, tegenpartij: tp }, fotos.length) : [];
   const beurs = s.beurzen.find((b) => b.id === t.beurs_id) ?? null;
+  const priveIn = t.soort === "prive" && t.regels.some((r) => r.richting === "in");
+  const groot = aankoopVan(t) >= BEWIJS_GROOT;
   const bewaar = (extra: Partial<Tegenpartij> = {}) => {
-    const nieuw: Tegenpartij = { ...tp, ...extra };
-    setTp(nieuw);
-    zetTegenpartij(t.id, nieuw);
+    const n: Tegenpartij = { ...tp, ...extra };
+    setTp(n);
+    zetTegenpartij(t.id, n);
   };
   const lijnenIn = borderelLijnen(t.regels, "in");
   const lijnenUit = borderelLijnen(t.regels, "uit");
+  const titel = t.soort === "prive" ? (priveIn ? "Inbreng uit privé" : "Naar privé") : t.soort === "ruil" ? "Ruil" : "Aankoop";
   return (
-    <Sheet titel={`${t.soort === "ruil" ? "Ruilborderel" : "Aankoopborderel"} ${borderelNummer(t)}`} onSluit={onSluit} vol>
+    <Sheet titel={`${titel} ${bewijsNummer(t)}`} onSluit={onSluit} vol>
       {t.status === "ongedaan" && <div className="melding-kaart neer"><Icoon naam="terug" /><div><strong>Ongedaan gemaakt</strong><span>Deze aankoop telt niet mee.</span></div></div>}
       {!nieuw && <p className="nakijken">{OUD_SCHEMA}</p>}
-      <div className={`borderel-stand${mist.length ? " mist" : " ok"}`}>
-        <Icoon naam={mist.length ? "waarschuwing" : "check"} maat={18} />
-        <span>{mist.length ? `Nog nodig: ${mist.join(", ")}` : "Volledig. Druk het af of bewaar het als pdf voor Dexxter."}</span>
-      </div>
-
-      <section className="blok">
-        <h3>{t.soort === "ruil" ? "Met wie we ruilden" : "Verkoper"}</h3>
-        {getekend ? (
-          <dl className="gegevens">
-            <dt>Naam</dt><dd>{bewaard.naam || "–"}</dd>
-            {bewaard.type === "handelaar"
-              ? <><dt>Onderneming</dt><dd>{bewaard.btw || "–"}</dd><dt>Factuur</dt><dd>{bewaard.factuur || "–"}</dd></>
-              : <><dt>Adres</dt><dd>{bewaard.adres || "–"}</dd><dt>Identiteit</dt><dd>{bewaard.id_gecontroleerd ? "bekeken" : "niet bekeken"}</dd></>}
-          </dl>
-        ) : (
-          <>
-            <TegenpartijVelden waarde={tp} onChange={setTp} />
-            {gewijzigd && <button className="knop" disabled={!nieuw} onClick={() => { bewaar(); meld("Borderel bewaard"); }}>Bewaar</button>}
-          </>
-        )}
-      </section>
-
-      <section className="blok">
-        <h3>{t.soort === "ruil" ? "Wat we kregen" : "Wat we kochten"}</h3>
-        <BorderelTabel lijnen={lijnenIn} datum={t.tijd} />
-        {t.soort === "ruil" && <><h3>Wat we gaven</h3><BorderelTabel lijnen={lijnenUit} datum={t.tijd} /></>}
-        <div className="afsluit-rij totaal"><span>{t.soort === "ruil" ? (t.totaal > 0 ? "Klant betaalde bij" : t.totaal < 0 ? "Wij betaalden bij" : "Zonder bijbetaling") : "Betaald"}</span><strong>{euro(Math.abs(t.totaal))}</strong></div>
-        <div className="zacht klein">{betaalTekst(t)}</div>
-      </section>
-
-      <section className="blok handtekeningen">
-        <h3>Handtekeningen</h3>
-        <div className="handtekening-rij">
-          <div>
-            <span className="zacht klein">{t.soort === "ruil" ? "Klant" : "Verkoper"}</span>
-            {bewaard.handtekening ? <HandtekeningBeeld pad={bewaard.handtekening} /> : <span className="handtekening-leeg">nog niet getekend</span>}
-            {!bewaard.handtekening && t.status !== "ongedaan" && nieuw && <button className="knop zacht klein" onClick={() => setTekenen("verkoper")}>Laten tekenen</button>}
-            {bewaard.handtekening && <button className="tekstknop klein" onClick={() => { if (confirm("Handtekening wissen? Dan kan je de gegevens weer aanpassen en opnieuw laten tekenen.")) bewaar({ handtekening: null, getekend_op: null }); }}>Opnieuw laten tekenen</button>}
-          </div>
-          <div>
-            <span className="zacht klein">Bind'r</span>
-            {bewaard.handtekening_ons ? <HandtekeningBeeld pad={bewaard.handtekening_ons} /> : <span className="handtekening-leeg">nog niet getekend</span>}
-            {!bewaard.handtekening_ons && t.status !== "ongedaan" && nieuw && <button className="knop zacht klein" onClick={() => setTekenen("ons")}>Zelf tekenen</button>}
-          </div>
+      <p className="zacht klein">{dagLang(dagVan(t.tijd))} om {tijdKort(t.tijd)} · {waarGekocht(t, s.beurzen)}</p>
+      {heeftBewijs(t) && (
+        <div className={`borderel-stand${advies.length ? " mist" : " ok"}`}>
+          <Icoon naam={advies.length ? "foto" : "check"} maat={18} />
+          <span>{advies.length ? `Sterker met: ${advies.join(", ")}` : "In orde: de lijst, de marktwaarde en de foto's zijn het bewijs."}</span>
         </div>
-        {bewaard.getekend_op && <p className="zacht klein">Getekend op {datumKort(bewaard.getekend_op)} om {tijdKort(bewaard.getekend_op)}.</p>}
+      )}
+
+      <section className="blok">
+        <h3>Foto's</h3>
+        <p className="zacht klein">{priveIn ? "Bv. een screenshot van de Cardmarket-prijzen." : "De gekochte kaarten op tafel, of een screenshot van het gesprek bij een online aankoop."}</p>
+        <TransactieFotos id={t.id} kan={nieuw && t.status !== "ongedaan"} />
       </section>
+
+      {t.soort !== "prive" && (
+        <section className="blok">
+          <h3>{t.soort === "ruil" ? "Met wie we ruilden" : "Verkoper"} <span className="zacht klein">(optioneel)</span></h3>
+          {bewaard.handtekening ? (
+            <dl className="gegevens">
+              <dt>Naam</dt><dd>{bewaard.naam || "–"}</dd>
+              {bewaard.type === "handelaar"
+                ? <><dt>Onderneming</dt><dd>{bewaard.btw || "–"}</dd><dt>Factuur</dt><dd>{bewaard.factuur || "–"}</dd></>
+                : <><dt>Gemeente</dt><dd>{bewaard.adres || "–"}</dd></>}
+            </dl>
+          ) : (
+            <>
+              <TegenpartijVelden waarde={tp} onChange={setTp} groot={groot} kanaal={!t.beurs_id} />
+              {gewijzigd && <button className="knop" disabled={!nieuw} onClick={() => { bewaar(); meld("Aankoopbewijs bewaard"); }}>Bewaar</button>}
+            </>
+          )}
+        </section>
+      )}
+
+      <section className="blok">
+        <h3>{t.soort === "ruil" ? "Wat we kregen" : t.soort === "prive" && !priveIn ? "Naar privé" : "Wat we kregen"}</h3>
+        {lijnenIn.length > 0 && <BorderelTabel lijnen={lijnenIn} datum={t.tijd} />}
+        {(t.soort === "ruil" || (t.soort === "prive" && lijnenUit.length > 0)) && (
+          <>{t.soort === "ruil" && <h3>Wat we gaven</h3>}<BorderelTabel lijnen={lijnenUit} datum={t.tijd} /></>
+        )}
+        {t.soort === "prive"
+          ? <p className="zacht klein">{priveIn ? "Geen geld: een kost die je met privémiddelen betaalde." : "Geen geld: de aankoopwaarde gaat uit de kosten (onttrekking)."}</p>
+          : <><div className="afsluit-rij totaal"><span>{t.soort === "ruil" ? (t.totaal > 0 ? "Klant betaalde bij" : t.totaal < 0 ? "Wij betaalden bij" : "Zonder bijbetaling") : "Betaald"}</span><strong>{euro(Math.abs(t.totaal))}</strong></div>
+            <div className="zacht klein">{betaalTekst(t)}</div></>}
+      </section>
+
+      {t.soort !== "prive" && (groot || bewaard.handtekening || bewaard.handtekening_ons) && (
+        <section className="blok handtekeningen">
+          <h3>Handtekening <span className="zacht klein">(aangeraden boven {euro(BEWIJS_GROOT, true)})</span></h3>
+          <div className="handtekening-rij">
+            <div>
+              <span className="zacht klein">{t.soort === "ruil" ? "Klant" : "Verkoper"}</span>
+              {bewaard.handtekening ? <HandtekeningBeeld pad={bewaard.handtekening} /> : <span className="handtekening-leeg">niet getekend</span>}
+              {!bewaard.handtekening && t.status !== "ongedaan" && nieuw && <button className="knop zacht klein" onClick={() => setTekenen("verkoper")}>Laten tekenen</button>}
+              {bewaard.handtekening && <button className="tekstknop klein" onClick={() => { if (confirm("Handtekening wissen? Dan kan je de gegevens weer aanpassen en opnieuw laten tekenen.")) bewaar({ handtekening: null, getekend_op: null }); }}>Opnieuw laten tekenen</button>}
+            </div>
+            <div>
+              <span className="zacht klein">Bind'r</span>
+              {bewaard.handtekening_ons ? <HandtekeningBeeld pad={bewaard.handtekening_ons} /> : <span className="handtekening-leeg">niet getekend</span>}
+              {!bewaard.handtekening_ons && t.status !== "ongedaan" && nieuw && <button className="knop zacht klein" onClick={() => setTekenen("ons")}>Zelf tekenen</button>}
+            </div>
+          </div>
+          {bewaard.getekend_op && <p className="zacht klein">Getekend op {datumKort(bewaard.getekend_op)} om {tijdKort(bewaard.getekend_op)}.</p>}
+        </section>
+      )}
 
       <div className="knoppenrij onderaan">
-        <button className="knop" onClick={() => drukAf(<BorderelDocument t={{ ...t, tegenpartij: { ...bewaard } }} beurs={beurs} bedrijf={bedrijfVan(s)} />, `${borderelNummer(t)}`)}>
+        <button className="knop" onClick={async () => { await laadFotos([t.id]); drukAf(<BewijsDocument t={{ ...t, tegenpartij: { ...bewaard } }} beurs={beurs} beurzen={s.beurzen} bedrijf={bedrijfVan(s)} />, bewijsNummer(t)); }}>
           <Icoon naam="printer" maat={18} /> Afdrukken of pdf
         </button>
       </div>
@@ -370,6 +489,18 @@ export function BorderelSheet({ id, onSluit }: { id: string; onSluit: () => void
           }} />
       )}
     </Sheet>
+  );
+}
+
+/** Knop naar het aankoopbewijs, met wat het sterker zou maken (na het afrekenen en in de transactie). */
+export function BewijsKnop({ t, onOpen }: { t: Transactie; onOpen: () => void }) {
+  const van = useFotos([t.id]);
+  const advies = bewijsAdvies(t, van(t.id).length);
+  return (
+    <button className={`borderel-knop${advies.length ? " mist" : ""}`} onClick={onOpen}>
+      <Icoon naam={advies.length ? "foto" : "check"} maat={18} />
+      <span><strong>Aankoopbewijs {bewijsNummer(t)}</strong><span className="zacht klein">{advies.length ? `aangeraden: ${advies.join(", ")}` : "in orde"}</span></span>
+    </button>
   );
 }
 
@@ -394,11 +525,11 @@ const betaalTekst = (t: Transactie) => [
   t.cash ? `cash ${euro(Math.abs(t.cash))}` : null, t.sumup ? `SumUp ${euro(Math.abs(t.sumup))}` : null, t.bank ? `overschrijving ${euro(Math.abs(t.bank))}` : null,
 ].filter(Boolean).join(" + ") || "zonder geld";
 
-/** Wat de verkoper ondertekent. */
+/** Wat de verkoper ondertekent (enkel als hij tekent). */
 function verklaring(t: Transactie, b: Bedrijf): string {
   const wie = b.naam?.trim() || "Bind'r";
-  if (t.soort === "ruil") return `Ik ruil de kaarten op dit borderel met ${wie}, als particulier en uit mijn eigen verzameling. Ze zijn mijn eigendom. Er is geen btw op verschuldigd.`;
-  return `Ik verkoop de kaarten op dit borderel aan ${wie} voor ${euro(Math.abs(t.totaal))}, als particulier en uit mijn eigen verzameling. Ze zijn mijn eigendom en ik ontving het bedrag. Er is geen btw op verschuldigd.`;
+  if (t.soort === "ruil") return `Ik ruil de kaarten op dit bewijs met ${wie}, als particulier en uit mijn eigen verzameling. Ze zijn mijn eigendom.`;
+  return `Ik verkoop de kaarten op dit bewijs aan ${wie} voor ${euro(Math.abs(t.totaal))}, als particulier en uit mijn eigen verzameling. Ze zijn mijn eigendom en ik ontving het bedrag.`;
 }
 
 // ── Bedrijfsgegevens ─────────────────────────────────────────────────────────
@@ -437,6 +568,9 @@ function VoorraadOpDatum({ jaar, bedrijf }: { jaar: number; bedrijf: Bedrijf }) 
     const h = huidig();
     return voorraadOp(datum, h.exemplaren, h.artikelen, h.transacties);
   }, [datum, s.exemplaren, s.artikelen, s.transacties]);
+  const kaarten = inv.lijnen.filter((l) => l.code);
+  const artikels = inv.lijnen.filter((l) => !l.code);
+  const som = (ls: typeof inv.lijnen) => rond2(ls.reduce((x, l) => x + l.waarde, 0));
   return (
     <section className="boek-lijst">
       <p className="zacht klein">Op 31 december geef je in Dexxter de waarde van je voorraad in (Personenbelasting › Voorraad), aan aankoopprijs. Die waarde neem je mee naar het nieuwe jaar.</p>
@@ -444,9 +578,9 @@ function VoorraadOpDatum({ jaar, bedrijf }: { jaar: number; bedrijf: Bedrijf }) 
       <div className="voorraad-totaal">
         <span className="zacht klein">{inv.lijnen.reduce((n, l) => n + l.aantal, 0)} stuks</span>
         <strong>{euro(inv.totaal)}</strong>
-        <span className="zacht klein">aankoopwaarde: dit getal gaat naar Dexxter</span>
+        <span className="zacht klein">kaarten {euro(som(kaarten))} · artikels {euro(som(artikels))}</span>
       </div>
-      {inv.zonderWaarde > 0 && <p className="nakijken klein">{inv.zonderWaarde} {inv.zonderWaarde === 1 ? "stuk heeft" : "stukken hebben"} geen aankoopprijs (tellen als € 0). Vul ze aan, of vraag je boekhouder hoe je eigen kaarten inbrengt.</p>}
+      {inv.zonderWaarde > 0 && <p className="nakijken klein">{inv.zonderWaarde} {inv.zonderWaarde === 1 ? "lijn heeft" : "lijnen hebben"} geen aankoop- of kostprijs (tellen als € 0). Lege binders en ander materiaal om te verkopen horen ook in de voorraad: vul vóór 31/12 de kostprijs in bij de artikels.</p>}
       <ul className="lijst voorraad-lijst">
         {(alles ? inv.lijnen : inv.lijnen.slice(0, 40)).map((l) => (
           <li key={l.id} className="voorraad-lijn">
@@ -472,30 +606,49 @@ function Uitleg() {
     <section className="boek-uitleg">
       <h3>Na elke beurs (5 minuten)</h3>
       <ol>
-        <li><strong>Kas tellen</strong> bij het afsluiten van de beurs. Een verschil noteer je, je verbergt het niet.</li>
-        <li><strong>Dagontvangsten</strong>: open de dag hierboven en geef in Dexxter elk bedrag in bij <em>Dagontvangsten</em>, op de datum van de beurs. Vink de dag aan.</li>
-        <li><strong>Aankopen</strong>: bij elke inkoop of ruil een borderel. Bewaar het als pdf en voeg het in Dexxter toe als <em>uitgave</em>: aankoop van handelsgoederen, leverancier "particulier", 0% btw, het bedrag op het borderel.</li>
+        <li><strong>Kas tellen</strong> bij het afsluiten van de beurs. Een verschil noteer je, je verbergt het niet. Leg je privégeld bij in de koffer, boek het dan via <em>Kas › Geld erbij</em>.</li>
+        <li><strong>Verkoop</strong>: open de dag en geef in Dexxter elk bedrag in bij <em>Dagontvangsten</em>, op de datum van de beurs. Vink de dag aan.</li>
+        <li><strong>Aankoop</strong>: open de dag bij Aankoop en geef in Dexxter per lijn één uitgave in (aankoop van handelsgoederen, 0% btw), met de dagstaat (pdf) als bijlage. Een aankoop trek je nooit af van de dagontvangsten.</li>
         <li><strong>SumUp</strong>: de commissie staat op de maandfactuur van SumUp: dat is een kost. De storting op je rekening is geen nieuwe omzet.</li>
       </ol>
+      <h3>Het bewijs van een aankoop</h3>
+      <ul>
+        <li>Aan de stand hoeft niemand iets te tekenen. Het bewijs is de lijst die de app maakt: elke kaart met haar code, de marktwaarde met bron en datum, het percentage en wat we betaalden, plus een foto van de gekochte kaarten.</li>
+        <li>Vraag minstens een voornaam. Vanaf {euro(BEWIJS_GROOT, true)}: liefst de volledige naam, de gemeente en een handtekening op de gsm, of betaal per overschrijving.</li>
+        <li>Online gekocht (Facebook, Vinted) of op een rommelmarkt: boek het via de kassa (Van de klant) en neem een screenshot van het gesprek of de advertentie als foto.</li>
+        <li>Elke kaart heeft een code: vanuit een kaart vind je altijd terug wanneer, waar en aan welke prijs we ze kochten, met de foto's.</li>
+        <li>Cash kan hoogstens {euro(CASH_GRENS, true)} per aankoop of verkoop; daarboven per overschrijving.</li>
+      </ul>
+      <h3>Ruil</h3>
+      <ul>
+        <li>Een ruil telt als verkoop van onze kaarten (dagontvangst, aan de afgesproken prijs, met wat de klant bijbetaalt) én aankoop van hun kaarten (kost). De winst is dezelfde als wanneer je enkel het verschil boekt.</li>
+        <li>Waarom niet enkel het verschil? Voor de btw is een ruil een levering aan de normale waarde: die telt mee voor de grens van € 25.000. Enkel het verschil boeken toont te weinig omzet. De teller bovenaan telt de ruilwaarde mee.</li>
+      </ul>
+      <h3>Privé en Bind'r</h3>
+      <ul>
+        <li>In <em>Profiel › Privé</em> breng je kaarten uit je eigen verzameling in, of neem je kaarten mee naar privé. Er gaat geen geld over en weer.</li>
+        <li>Inbreng: een kost die je met privémiddelen betaalde. Bronnen raden aan te waarderen zoals bij een vreemde verkoper (marktwaarde × je gewone inkooppercentage), niet aan 100%: zo wordt een privé-meerwaarde geen aftrekbare kost.</li>
+        <li>Naar privé: aan de aankoopwaarde. Dat neutraliseert de kost; het is geen omzet.</li>
+      </ul>
       <h3>Op 31 december</h3>
       <ol>
-        <li>Open <em>Voorraad</em>, kies 31/12 en geef het totaal in Dexxter in (Personenbelasting › Voorraad). Bewaar de pdf.</li>
+        <li>Open <em>Voorraad</em>, kies 31/12 en geef het totaal in Dexxter in (Personenbelasting › Voorraad). Bewaar de pdf. Ook lege binders en materiaal om te verkopen tellen mee, aan kostprijs.</li>
         <li>Kijk de teller van de omzet na: boven de grens van de btw-vrijstelling moet je boekhouder iets doen.</li>
       </ol>
       <h3>Regels die de app volgt</h3>
       <ul>
         <li>Een stuk boven {euro(EIGEN_LIJN, true)} krijgt een eigen lijn in de dagontvangsten.</li>
-        <li>Cash kan hoogstens {euro(CASH_GRENS, true)} per verkoop of aankoop zijn; daarboven betaal je met SumUp of een overschrijving.</li>
-        <li>Een ruil telt als verkoop van onze kaart én aankoop van hun kaart, aan de afgesproken prijs.</li>
         <li>Verbeteren gebeurt met een nieuwe boeking (retour of ongedaan), nooit door iets te wissen. Elke wijziging staat in het logboek.</li>
         <li>Geld in of uit de koffer (wisselgeld, een andere stand) is geen omzet.</li>
+        <li>Artikels (binders, sealed, 3D-prints) tellen als omzet; hun kosten geef je apart in Dexxter in (bv. de factuur van de binders).</li>
+        <li>Alles 10 jaar bewaren, ook de foto's.</li>
       </ul>
-      <h3>Vraag dit aan je boekhouder</h3>
+      <h3>Laat bevestigen door je boekhouder</h3>
       <ul>
-        <li>Ruilen boeken als verkoop en aankoop (zoals de app doet), of enkel het verschil in geld?</li>
-        <li>Hoe breng je kaarten in die je al had vóór je zelfstandige werd (privéverzameling)?</li>
+        <li>Is een aankoopbewijs zonder handtekening (lijst, marktwaarde en foto) voldoende voor jouw situatie?</li>
+        <li>Aan welke waarde breng je kaarten uit je privéverzameling in, en hoe boek je "naar privé" in Dexxter?</li>
         <li>Met drie: één onderneming of elk apart? Dat bepaalt wie aangifte doet en voor wie de grens van € 25.000 geldt.</li>
-        <li>Voorraad lager waarderen als de marktprijs fors zakte?</li>
+        <li>Moet je ook dagen zonder verkoop (€ 0) ingeven in Dexxter?</li>
       </ul>
       <p className="zacht klein">Dit is geen boekhoudkundig of fiscaal advies. De app maakt de cijfers en documenten; je boekhouder beslist hoe ze geboekt worden.</p>
     </section>
@@ -521,49 +674,80 @@ function DocKop({ titel, sub, bedrijf }: { titel: string; sub?: ReactNode; bedri
   );
 }
 
-function BorderelDocument({ t, beurs, bedrijf }: { t: Transactie; beurs: Beurs | null; bedrijf: Bedrijf }) {
-  const p = t.tegenpartij ?? {};
-  const lijn = (l: ReturnType<typeof borderelLijnen>[number], i: number) => (
-    <tr key={i}>
-      <td>{l.naam}{l.code ? ` (${toonCode(l.code)})` : ""}<div className="doc-klein">{l.omschrijving}</div></td>
-      <td className="r">{l.markt != null ? euro(l.markt) : "–"}<div className="doc-klein">{l.bron ?? ""}</div></td>
-      <td className="r">{l.pct != null ? `${l.pct}%` : "–"}</td>
-      <td className="r">{euro(l.prijs)}</td>
-    </tr>
+function LijnTabel({ lijnen, kop }: { lijnen: ReturnType<typeof borderelLijnen>; kop: string }) {
+  return (
+    <table className="doc-tabel">
+      <thead><tr><th>{kop}</th><th className="r">Marktwaarde</th><th className="r">%</th><th className="r">Prijs</th></tr></thead>
+      <tbody>
+        {lijnen.map((l, i) => (
+          <tr key={i}>
+            <td>{l.naam}{l.code ? ` (${toonCode(l.code)})` : ""}<div className="doc-klein">{l.omschrijving}</div></td>
+            <td className="r">{l.markt != null ? euro(l.markt) : "–"}<div className="doc-klein">{l.bron ?? ""}</div></td>
+            <td className="r">{l.pct != null ? `${l.pct}%` : "–"}</td>
+            <td className="r">{euro(l.prijs)}</td>
+          </tr>
+        ))}
+      </tbody>
+      <tfoot><tr><td colSpan={3}>Totaal</td><td className="r">{euro(rond2(lijnen.reduce((x, l) => x + l.prijs, 0)))}</td></tr></tfoot>
+    </table>
   );
+}
+
+/** Eén aankoop, ruil of privé-overdracht met alles wat we weten, en de foto's. */
+function BewijsBlok({ t, beurzen }: { t: Transactie; beurzen: Beurs[] }) {
+  const p = t.tegenpartij ?? {};
   const binnen = borderelLijnen(t.regels, "in");
   const weg = borderelLijnen(t.regels, "uit");
+  const fotos = fotosVan(t.id);
+  return (
+    <section className="doc-bewijs">
+      <h2>{bewijsNummer(t)} · {tijdKort(t.tijd)} · {SOORT[t.soort].naam} · {waarGekocht(t, beurzen)}</h2>
+      {t.soort !== "prive" && (
+        <div className="doc-klein">
+          {p.type === "handelaar" ? `Handelaar: ${p.naam || "–"}${p.btw ? `, ${p.btw}` : ""}${p.factuur ? `, factuur ${p.factuur}` : ""}` : `Verkoper (particulier): ${p.naam || "niet genoteerd"}${p.adres ? `, ${p.adres}` : ""}`}
+          {" · "}{betaalTekst(t)}{t.status === "ongedaan" ? " · ONGEDAAN GEMAAKT" : ""}
+        </div>
+      )}
+      {binnen.length > 0 && <LijnTabel lijnen={binnen} kop={t.soort === "prive" ? "Ingebracht uit privé" : "Wat Bind'r kreeg"} />}
+      {weg.length > 0 && <LijnTabel lijnen={weg} kop={t.soort === "prive" ? "Naar privé (aankoopwaarde)" : t.soort === "retour" ? "Teruggegeven" : "Wat Bind'r gaf"} />}
+      {(p.handtekening || p.handtekening_ons) && (
+        <div className="doc-handtekeningen">
+          <div><span>Verkoper</span>{p.handtekening ? <HandtekeningBeeld pad={p.handtekening} /> : <div className="doc-lijn" />}</div>
+          <div><span>Bind'r</span>{p.handtekening_ons ? <HandtekeningBeeld pad={p.handtekening_ons} /> : <div className="doc-lijn" />}</div>
+        </div>
+      )}
+      {fotos.length > 0 && <div className="doc-fotos">{fotos.map((f) => <img key={f.id} src={f.foto} alt="" />)}</div>}
+    </section>
+  );
+}
+
+function BewijsDocument({ t, beurs, beurzen, bedrijf }: { t: Transactie; beurs: Beurs | null; beurzen: Beurs[]; bedrijf: Bedrijf }) {
   return (
     <article className="doc">
-      <DocKop bedrijf={bedrijf} titel={t.soort === "ruil" ? "Ruilborderel" : "Aankoopborderel"}
-        sub={<><div>Nr. {borderelNummer(t)}</div><div>{dagLang(dagVan(t.tijd))}, {tijdKort(t.tijd)}</div>{beurs && <div>{beurs.naam}{beurs.locatie ? `, ${beurs.locatie}` : ""}</div>}</>} />
-      <section className="doc-blok">
-        <h2>{t.soort === "ruil" ? "Tegenpartij" : "Verkoper"}</h2>
-        <div>{p.naam || "…………………………………………"}</div>
-        {p.type === "handelaar"
-          ? <><div>Handelaar{p.btw ? `, ondernemingsnummer ${p.btw}` : ""}</div>{p.factuur && <div>Factuur nr. {p.factuur}</div>}</>
-          : <><div>{p.adres || "…………………………………………"}</div><div>Particulier · identiteitskaart {p.id_gecontroleerd ? "bekeken" : "niet bekeken"}</div></>}
-      </section>
-      <table className="doc-tabel">
-        <thead><tr><th>{t.soort === "ruil" ? "Wat Bind'r kreeg" : "Omschrijving"}</th><th className="r">Marktwaarde</th><th className="r">%</th><th className="r">Prijs</th></tr></thead>
-        <tbody>{binnen.map(lijn)}</tbody>
-        <tfoot><tr><td colSpan={3}>Totaal</td><td className="r">{euro(rond2(binnen.reduce((x, l) => x + l.prijs, 0)))}</td></tr></tfoot>
-      </table>
-      {t.soort === "ruil" && (
-        <table className="doc-tabel">
-          <thead><tr><th>Wat Bind'r gaf</th><th className="r">Onze prijs</th><th className="r">%</th><th className="r">Prijs</th></tr></thead>
-          <tbody>{weg.map(lijn)}</tbody>
-          <tfoot><tr><td colSpan={3}>Totaal</td><td className="r">{euro(rond2(weg.reduce((x, l) => x + l.prijs, 0)))}</td></tr></tfoot>
-        </table>
-      )}
-      <p><strong>{t.soort === "ruil" ? (t.totaal > 0 ? "De klant betaalde bij" : t.totaal < 0 ? "Bind'r betaalde bij" : "Zonder bijbetaling") : "Betaald"}: {euro(Math.abs(t.totaal))}</strong> ({betaalTekst(t)}).</p>
-      <p className="doc-klein">Marktwaarde: de waarde op de dag van de aankoop, volgens de vermelde bron (Cardmarket-prijsgids, laatste verkopen of eigen schatting). Het percentage is de prijs tegenover die marktwaarde.</p>
-      {p.type !== "handelaar" && <p>{verklaring(t, bedrijf)}</p>}
-      <div className="doc-handtekeningen">
-        <div><span>{t.soort === "ruil" ? "Klant" : "Verkoper"}</span>{p.handtekening ? <HandtekeningBeeld pad={p.handtekening} /> : <div className="doc-lijn" />}</div>
-        <div><span>Voor {bedrijf.naam || "Bind'r"}</span>{p.handtekening_ons ? <HandtekeningBeeld pad={p.handtekening_ons} /> : <div className="doc-lijn" />}</div>
-      </div>
+      <DocKop bedrijf={bedrijf} titel={t.soort === "prive" ? "Privé ⇄ Bind'r" : t.soort === "ruil" ? "Ruil" : "Aankoopbewijs"}
+        sub={<><div>Nr. {bewijsNummer(t)}</div><div>{dagLang(dagVan(t.tijd))}, {tijdKort(t.tijd)}</div>{beurs && <div>{beurs.naam}{beurs.locatie ? `, ${beurs.locatie}` : ""}</div>}</>} />
+      <BewijsBlok t={t} beurzen={beurzen} />
+      <p className="doc-klein">Marktwaarde: de waarde op de dag van de aankoop, volgens de vermelde bron (Cardmarket-prijsgids, laatste verkopen of eigen schatting). Het percentage is de prijs tegenover die marktwaarde. Elke kaart kreeg een eigen code (label).</p>
+      {t.tegenpartij?.handtekening && <p className="doc-klein">{verklaring(t, bedrijf)}</p>}
       <footer className="doc-voet">Gemaakt met Bind'r Voorraad · transactie {t.id}</footer>
+    </article>
+  );
+}
+
+function DagstaatAankopen({ dag, lijst, beurzen, bedrijf }: { dag: Dag; lijst: Transactie[]; beurzen: Beurs[]; bedrijf: Bedrijf }) {
+  const kosten = kostenLijnen(dag);
+  return (
+    <article className="doc">
+      <DocKop bedrijf={bedrijf} titel="Dagstaat aankopen" sub={<div>{dagLang(dag.datum)}</div>} />
+      <table className="doc-tabel">
+        <thead><tr><th>Kost voor de boekhouding</th><th className="r">Bedrag</th></tr></thead>
+        <tbody>{kosten.map((k, i) => <tr key={i}><td>{k.omschrijving}</td><td className="r">{euro(k.bedrag)}</td></tr>)}</tbody>
+        <tfoot><tr><td>Totaal</td><td className="r">{euro(rond2(kosten.reduce((x, k) => x + k.bedrag, 0)))}</td></tr></tfoot>
+      </table>
+      {dag.onttrekking !== 0 && <p className="doc-klein">Naar privé (aankoopwaarde, geen omzet): {euro(dag.onttrekking)}.</p>}
+      {lijst.map((t) => <BewijsBlok key={t.id} t={t} beurzen={beurzen} />)}
+      <p className="doc-klein">Marktwaarde volgens de vermelde bron op de dag van de aankoop. Elke kaart kreeg een eigen code (label), zodat ze tot deze aankoop terug te volgen is.</p>
+      <footer className="doc-voet">Gemaakt met Bind'r Voorraad op {datumKort(new Date().toISOString())}</footer>
     </article>
   );
 }
@@ -585,7 +769,7 @@ function DagDocument({ dag, beurzen, bedrijf, beheerders }: { dag: Dag; beurzen:
             <tr key={t.id}>
               <td>{tijdKort(t.tijd)}</td>
               <td>{SOORT[t.soort].naam}{t.beheerder && beheerders[t.beheerder] ? ` · ${beheerders[t.beheerder]}` : ""}</td>
-              <td>{t.soort === "kas" ? t.opmerking || kasOmschrijving(t) : t.regels.map((r) => `${r.richting === "uit" ? (t.soort === "retour" ? "terug aan klant" : "verkocht") : (t.soort === "retour" ? "terug" : "gekocht")}: ${r.naam}${r.code ? ` (${toonCode(r.code)})` : ""} ${euro(r.prijs)}`).join("; ")}{heeftBorderel(t) ? ` · borderel ${borderelNummer(t)}` : ""}</td>
+              <td>{t.soort === "kas" ? t.opmerking || kasOmschrijving(t) : t.regels.map((r) => `${r.richting === "uit" ? (t.soort === "retour" ? "terug aan klant" : t.soort === "prive" ? "naar privé" : "verkocht") : (t.soort === "retour" ? "terug" : t.soort === "prive" ? "uit privé" : "gekocht")}: ${r.naam}${r.code ? ` (${toonCode(r.code)})` : ""} ${euro(r.prijs)}`).join("; ")}{heeftBewijs(t) ? ` · ${bewijsNummer(t)}` : ""}</td>
               <td className="r">{t.cash ? euro(t.cash) : ""}</td>
               <td className="r">{t.sumup ? euro(t.sumup) : ""}</td>
               <td className="r">{t.bank ? euro(t.bank) : ""}</td>
@@ -594,7 +778,7 @@ function DagDocument({ dag, beurzen, bedrijf, beheerders }: { dag: Dag; beurzen:
         </tbody>
         <tfoot><tr><td colSpan={3}>Totaal geld</td><td className="r">{euro(rond2(dag.cash + dag.kas))}</td><td className="r">{euro(rond2(dag.sumup + dag.kasSumup))}</td><td className="r">{euro(dag.bank)}</td></tr></tfoot>
       </table>
-      <p className="doc-klein">Verkopen {euro(dag.verkopen)} · ruil {euro(dag.ruil)} · retour {euro(dag.retour)} · aankopen {euro(dag.aankopen)}{dag.kas || dag.kasSumup ? ` · kasbewegingen ${euro(dag.kas)} cash, ${euro(dag.kasSumup)} SumUp (geen omzet)` : ""}.</p>
+      <p className="doc-klein">Verkopen {euro(dag.verkopen)} · ruil {euro(dag.ruil)} · retour {euro(dag.retour)} · waarvan kaarten {euro(dag.kaarten)} en artikels {euro(dag.artikels)} · aankopen {euro(dag.aankopen)}{dag.kas || dag.kasSumup ? ` · kasbewegingen ${euro(dag.kas)} cash, ${euro(dag.kasSumup)} SumUp (geen omzet)` : ""}.</p>
       <footer className="doc-voet">Gemaakt met Bind'r Voorraad op {datumKort(new Date().toISOString())}</footer>
     </article>
   );
@@ -613,7 +797,7 @@ function InventarisDocument({ inv, bedrijf }: { inv: Inventaris; bedrijf: Bedrij
         </tbody>
         <tfoot><tr><td colSpan={4}>Totaal ({inv.lijnen.reduce((n, l) => n + l.aantal, 0)} stuks)</td><td className="r">{euro(inv.totaal)}</td></tr></tfoot>
       </table>
-      {inv.zonderWaarde > 0 && <p className="doc-klein">{inv.zonderWaarde} stuk(ken) zonder gekende aankoopprijs, geteld aan € 0.</p>}
+      {inv.zonderWaarde > 0 && <p className="doc-klein">{inv.zonderWaarde} lijn(en) zonder gekende aankoop- of kostprijs, geteld aan € 0.</p>}
       <footer className="doc-voet">Gemaakt met Bind'r Voorraad op {datumKort(new Date().toISOString())}</footer>
     </article>
   );
@@ -624,24 +808,28 @@ function InventarisDocument({ inv, bedrijf }: { inv: Inventaris; bedrijf: Bedrij
 function dagenCsv(dagen: Dag[], beurzen: Beurs[]): string {
   const naam = (id: string) => beurzen.find((b) => b.id === id)?.naam ?? "";
   return csv([
-    ["datum", "beurs", "verkopen", "ruil", "retour", "dagontvangsten", "eigen_lijnen_boven_500", "cash", "sumup", "overschrijving", "kasbewegingen_cash", "kasbewegingen_sumup", "aankopen"],
-    ...dagen.slice().reverse().map((d) => [d.datum, d.beurzen.map(naam).join(", "), d.verkopen, d.ruil, d.retour, d.ontvangsten,
-      d.eigenLijnen.map((l) => `${l.omschrijving}${l.code ? ` ${toonCode(l.code)}` : ""}: ${l.bedrag.toFixed(2)}`).join(" | "), d.cash, d.sumup, d.bank, d.kas, d.kasSumup, d.aankopen]),
+    ["datum", "beurs", "verkopen", "ruil", "retour", "dagontvangsten", "waarvan_kaarten", "waarvan_artikels", "eigen_lijnen_boven_500", "cash", "sumup", "overschrijving", "kasbewegingen_cash", "kasbewegingen_sumup", "aankopen", "inbreng_prive", "naar_prive"],
+    ...dagen.slice().reverse().map((d) => [d.datum, d.beurzen.map(naam).join(", "), d.verkopen, d.ruil, d.retour, d.ontvangsten, d.kaarten, d.artikels,
+      d.eigenLijnen.map((l) => `${l.omschrijving}${l.code ? ` ${toonCode(l.code)}` : ""}: ${l.bedrag.toFixed(2)}`).join(" | "), d.cash, d.sumup, d.bank, d.kas, d.kasSumup, d.aankopen, d.inbreng, d.onttrekking]),
   ]);
 }
 
 function aankopenCsv(lijst: Transactie[], beurzen: Beurs[]): string {
-  const naam = (id: string | null) => beurzen.find((b) => b.id === id)?.naam ?? "";
-  return csv([
-    ["borderel", "datum", "beurs", "soort", "tegenpartij", "type", "adres", "identiteit_bekeken", "getekend", "aankoopwaarde", "cash", "overschrijving", "status", "transactie_id"],
-    ...lijst.slice().reverse().map((t) => [borderelNummer(t), dagVan(t.tijd), naam(t.beurs_id), t.soort, t.tegenpartij?.naam ?? "", t.tegenpartij?.type ?? "",
-      t.tegenpartij?.adres ?? "", t.tegenpartij?.id_gecontroleerd ? "ja" : "nee", t.tegenpartij?.handtekening ? "ja" : "nee", aankoopVan(t), t.cash, t.bank ?? 0, t.status, t.id]),
-  ]);
+  const rijen: (string | number | null)[][] = [["bewijs", "datum", "tijd", "waar", "soort", "verkoper", "type", "gemeente", "getekend", "code", "kaart", "richting", "marktwaarde", "bron", "pct", "prijs", "cash", "overschrijving", "status", "transactie_id"]];
+  for (const t of lijst.slice().sort((a, b) => a.tijd.localeCompare(b.tijd))) {
+    for (const r of t.regels) {
+      const markt = r.richting === "in" ? r.referentie ?? null : r.hartjesprijs ?? null;
+      rijen.push([bewijsNummer(t), dagVan(t.tijd), tijdKort(t.tijd), waarGekocht(t, beurzen), t.soort, t.tegenpartij?.naam ?? "", t.tegenpartij?.type ?? "",
+        t.tegenpartij?.adres ?? "", t.tegenpartij?.handtekening ? "ja" : "nee", r.code ? toonCode(r.code) : "", r.naam, r.richting, markt,
+        r.richting === "in" ? r.referentie_bron ?? "" : "", markt ? Math.round((r.prijs / markt) * 100) : null, r.prijs, t.cash, t.bank ?? 0, t.status, t.id]);
+    }
+  }
+  return csv(rijen);
 }
 
 function inventarisCsv(inv: Inventaris): string {
   return csv([
-    ["code", "omschrijving", "soort", "aantal", "aankoopdatum", "herkomst", "borderel", "aankoopwaarde"],
+    ["code", "omschrijving", "soort", "aantal", "aankoopdatum", "herkomst", "bewijs", "aankoopwaarde"],
     ...inv.lijnen.map((l) => [l.code ? toonCode(l.code) : "", l.omschrijving, l.soort, l.aantal, l.aankoopdatum, l.herkomst, l.borderel, l.zonderWaarde ? "" : l.waarde]),
     ["", "Totaal", "", inv.lijnen.reduce((n, l) => n + l.aantal, 0), "", "", "", inv.totaal],
   ]);

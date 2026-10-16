@@ -100,6 +100,9 @@ export const CM_LAND = { BE: 2, NL: 23 } as const;
 /** Kent Cardmarket deze kaarttaal? (Nederlandse Pokémonkaarten bestaan er niet als aparte taal.) */
 export const cardmarketKentTaal = (taal: string) => taal in CM_TAAL;
 
+/** Uitleg bij een taal die Cardmarket niet als filter heeft (bv. Nederlands, "Dutch"). */
+export const NIET_OP_CARDMARKET = "Cardmarket heeft geen taalfilter \"Dutch\" voor Pokémonkaarten (enkel Engels, Frans, Duits, Spaans, Italiaans, Portugees, Japans, Koreaans en Chinees): de link toont alle talen. Kijk naar de Engelse prijs als richtpunt.";
+
 export function cardmarketLink(cardmarketId: number, taal: string, landen: (keyof typeof CM_LAND)[] = ["BE", "NL"], minConditie = 2): string {
   const q = new URLSearchParams({ idProduct: String(cardmarketId) });
   const t = CM_TAAL[taal];
