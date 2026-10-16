@@ -2,7 +2,7 @@
 // (artikels, historiek, inzichten, boekhouding, je account) staat in Profiel.
 import { useState, type ReactNode } from "react";
 import {
-  importeerTestset, offlineKlaarzetten, sluit, useApp, vernieuwPrijsgids, wisDemo, zetInstagram, zetInstellingen, zetZichtbaarVoorKlanten,
+  importeerTestset, offlineKlaarzetten, openLabels, sluit, useApp, vernieuwPrijsgids, wisDemo, zetInstagram, zetInstellingen, zetZichtbaarVoorKlanten,
 } from "../state";
 import { APP_VERSIE, klantUrl } from "../config";
 import { datumKort, euro, getal } from "../lib/format";
@@ -25,6 +25,7 @@ export function Instellingen() {
         <Klantencatalogus />
 
         <Groep titel="Labels">
+          <button className="knop zacht klein" onClick={openLabels}><Icoon naam="printer" maat={16} /> Printer verbinden, proeflabel en afstellen</button>
           <label className="schakel rij">
             <input type="checkbox" checked={instellingen.automatischPrinten} onChange={(e) => zetInstellingen({ automatischPrinten: e.target.checked })} />
             <span>Label meteen printen bij toevoegen</span>

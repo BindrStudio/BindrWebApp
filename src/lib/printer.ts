@@ -1,7 +1,7 @@
 // Labels printen op een Niimbot-printer via Web Bluetooth, met de open-source
 // driver in public/vendor/niimbot.js (MIT, github.com/iscarelli/niimbot-web-bluetooth).
 import type { Exemplaar } from "../types";
-import { laadLabelLogo, labelDataUrl, maatVoor } from "./label";
+import { laadLabelLogo, labelDataUrl, maatVoor, randtestDataUrl } from "./label";
 
 interface Model {
   label: string;
@@ -19,14 +19,29 @@ declare global {
     Niimbot?: {
       isSupported(): boolean;
       identify(model: Partial<Model>): Promise<{ modelId: number; label: string; task: string; dpi: number } | null>;
-      printImage(url: string, opts: { model: Model; size: Size; onProgress?: (s: string) => void; copies?: number }): Promise<void>;
-      printBatch(urls: string[], opts: { model: Model; size: Size; onProgress?: (s: string) => void }): Promise<void>;
+      printImage(url: string, opts: PrintOpties & { copies?: number }): Promise<void>;
+      printBatch(urls: string[], opts: PrintOpties): Promise<void>;
       disconnect(): Promise<void> | void;
+      WRITE_MODE: null | "fast" | "paced" | "acked";
+      PACE_MS: number;
     };
   }
 }
 
-interface Size { w_px: number; h_px: number; dpi: number; margin?: number }
+interface Size { w_px: number; h_px: number; dpi: number; margin?: number; offset_y_px?: number }
+interface PrintOpties { model: Model; size: Size; density: number; offsetY: number; onProgress?: (s: string) => void }
+
+/** Afstelling per toestel (Labels › Proeflabel en afstellen). */
+export interface Afstelling {
+  donkerte?: number;     // 1–5, standaard 3
+  verschuiving?: number; // mm: + = lager op het label, − = hoger
+  trager?: boolean;      // gepaced versturen met een langere pauze
+}
+
+export const VERSCHUIVING_MAX = 3; // mm, in beide richtingen
+/** Pauze tussen twee stukjes data als "trager printen" aan staat (de driver raadt ≥ 16 ms aan op een Mac). */
+export const TRAGE_PAUZE = 20;
+const STANDAARD_PAUZE = 10;
 
 // Uit registry.json van de driver (B1 Pro en B1 zijn op echte hardware getest).
 const MODELLEN: Record<string, Model> = {
@@ -40,9 +55,18 @@ const MODELLEN: Record<string, Model> = {
 function printMaat(sleutel: string, labelId: string): { size: Size; maat: ReturnType<typeof maatVoor> } {
   const m = MODELLEN[sleutel];
   const maat = maatVoor(m.dpi, labelId);
-  const size: Size & { offset_y_px?: number } = { w_px: maat.breedte, h_px: maat.hoogte, dpi: m.dpi, margin: sleutel === "b1" ? 8 : 10 };
+  const size: Size = { w_px: maat.breedte, h_px: maat.hoogte, dpi: m.dpi, margin: sleutel === "b1" ? 8 : 10 };
   if (sleutel === "b1") size.offset_y_px = 4;
   return { size, maat };
+}
+
+/** Donkerte en verschuiving zoals de driver ze wil: een geheel getal 1–5 en pixels langs de doorvoer. */
+export function printOpties(sleutel: string, labelId: string, a: Afstelling = {}): { size: Size; density: number; offsetY: number } {
+  const { size } = printMaat(sleutel, labelId);
+  const density = Math.min(5, Math.max(1, Math.round(a.donkerte ?? 3)));
+  const mm = Math.min(VERSCHUIVING_MAX, Math.max(-VERSCHUIVING_MAX, a.verschuiving ?? 0));
+  const offsetY = (size.offset_y_px ?? 0) + Math.round((mm * size.dpi) / 25.4);
+  return { size, density, offsetY };
 }
 
 let verbonden: { sleutel: string; label: string } | null = null;
@@ -78,17 +102,32 @@ export async function ontkoppelPrinter() {
   verbonden = null;
 }
 
-/** Print één of meerdere labels in één opdracht. */
-export async function printLabels(exemplaren: Exemplaar[], labelId: string, voortgang?: (s: string) => void): Promise<void> {
-  if (!exemplaren.length) return;
+/** Stuurt beelden in één opdracht naar de printer, met de afstelling van dit toestel. */
+async function stuur(maak: (maat: ReturnType<typeof maatVoor>) => string[], labelId: string, a: Afstelling, voortgang?: (s: string) => void) {
   if (!verbonden) await verbindPrinter();
+  const n = window.Niimbot!;
   const sleutel = verbonden!.sleutel;
-  const { size, maat } = printMaat(sleutel, labelId);
+  const { maat } = printMaat(sleutel, labelId);
+  const { size, density, offsetY } = printOpties(sleutel, labelId, a);
+  // Trager: elk stukje data met een pauze (tegen lege of halve labels); anders kiest de driver zelf.
+  n.WRITE_MODE = a.trager ? "paced" : null;
+  n.PACE_MS = a.trager ? TRAGE_PAUZE : STANDAARD_PAUZE;
+  const urls = maak(maat);
+  const opts: PrintOpties = { model: MODELLEN[sleutel], size, density, offsetY, onProgress: voortgang };
+  if (urls.length === 1) await n.printImage(urls[0], opts);
+  else await n.printBatch(urls, opts);
+}
+
+/** Print één of meerdere labels in één opdracht. */
+export async function printLabels(exemplaren: Exemplaar[], labelId: string, voortgang?: (s: string) => void, a: Afstelling = {}): Promise<void> {
+  if (!exemplaren.length) return;
   await laadLabelLogo();
-  const urls = exemplaren.map((ex) => labelDataUrl(ex, maat));
-  const opts = { model: MODELLEN[sleutel], size, onProgress: voortgang };
-  if (urls.length === 1) await window.Niimbot!.printImage(urls[0], opts);
-  else await window.Niimbot!.printBatch(urls, opts);
+  await stuur((maat) => exemplaren.map((ex) => labelDataUrl(ex, maat)), labelId, a, voortgang);
+}
+
+/** Een randtest: kader met millimeterstreepjes tot op de rand, om bijsnijden en verschuiving te zien. */
+export async function printRandtest(labelId: string, voortgang?: (s: string) => void, a: Afstelling = {}): Promise<void> {
+  await stuur((maat) => [randtestDataUrl(maat, a)], labelId, a, voortgang);
 }
 
 /** De labelmaat in pixels voor de verbonden printer (of de B1 Pro als er nog geen is). */

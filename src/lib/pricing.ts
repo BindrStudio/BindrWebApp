@@ -12,6 +12,9 @@ export interface Instellingen {
   nakijkenAfwijking: number; // trend en 30-dagengemiddelde verschillen meer dan dit deel
   automatischPrinten: boolean;
   labelMaat: string; // id uit LABELMATEN
+  labelDonkerte?: number;     // 1–5 zoals in de Niimbot-app (standaard 3), enkel op dit toestel
+  labelVerschuiving?: number; // mm langs de doorvoer: + = lager op het label, − = hoger (stappen van 0,5)
+  labelTrager?: boolean;      // trager versturen als labels leeg of half uit de printer komen
   inkoopPct: number; // wat we bieden bij inkoop, in % van de marktwaarde
   ruilPct: number;   // wat een kaart van de klant waard is bij ruil, in %
   toonMarge?: boolean; // aankoopprijs en marge zichtbaar in de kassa (enkel op deze gsm)

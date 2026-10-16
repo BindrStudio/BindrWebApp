@@ -159,3 +159,59 @@ export function tekenLabel(ex: Exemplaar, maat: LabelMaat = MAAT_300, datum = la
 export function labelDataUrl(ex: Exemplaar, maat: LabelMaat = MAAT_300): string {
   return tekenLabel(ex, maat).toDataURL("image/png");
 }
+
+/** Hoe de verschuiving op het label heet: "0 mm", "0,5 mm lager", "1 mm hoger". */
+export function verschuivingTekst(mm: number): string {
+  if (!mm) return "0 mm";
+  return `${String(Math.abs(mm)).replace(".", ",")} mm ${mm > 0 ? "lager" : "hoger"}`;
+}
+
+/**
+ * Randtest: een kader tot op de rand van het beeld met streepjes per millimeter (lang per 5 mm).
+ * Zie je alle vier de randen, dan valt er niets weg; mist er boven of onder iets, dan tel je
+ * de millimeters en verschuif je zoveel. In het midden: maat, dpi en de afstelling.
+ */
+export function tekenRandtest(maat: LabelMaat, a: { donkerte?: number; verschuiving?: number; trager?: boolean } = {}): HTMLCanvasElement {
+  const pxmm = maat.dpi / 25.4;
+  const c = document.createElement("canvas");
+  c.width = maat.breedte;
+  c.height = maat.hoogte;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = "#000";
+  const lijn = Math.max(2, Math.round(0.3 * pxmm));
+  ctx.fillRect(0, 0, c.width, lijn);
+  ctx.fillRect(0, c.height - lijn, c.width, lijn);
+  ctx.fillRect(0, 0, lijn, c.height);
+  ctx.fillRect(c.width - lijn, 0, lijn, c.height);
+  const dun = Math.max(1, Math.round(0.15 * pxmm));
+  const kort = Math.round(0.9 * pxmm);
+  const lang = Math.round(1.8 * pxmm);
+  for (let i = 1; i * pxmm < c.width - 1; i++) {
+    const x = Math.round(i * pxmm);
+    const l = i % 5 === 0 ? lang : kort;
+    ctx.fillRect(x, 0, dun, l);
+    ctx.fillRect(x, c.height - l, dun, l);
+  }
+  for (let i = 1; i * pxmm < c.height - 1; i++) {
+    const y = Math.round(i * pxmm);
+    const l = i % 5 === 0 ? lang : kort;
+    ctx.fillRect(0, y, l, dun);
+    ctx.fillRect(c.width - l, y, l, dun);
+  }
+  const pt = (p: number) => Math.round((p / 72) * maat.dpi);
+  const midden = c.width / 2;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `700 ${pt(9)}px "Helvetica Neue", Arial, sans-serif`;
+  ctx.fillText(`▲ RANDTEST ${maat.mmBreed} × ${maat.mmHoog}`, midden, c.height / 2 - pt(4.2));
+  ctx.font = `400 ${pt(5.6)}px "Helvetica Neue", Arial, sans-serif`;
+  const regel = [`${maat.dpi} dpi`, `donkerte ${a.donkerte ?? 3}`, verschuivingTekst(a.verschuiving ?? 0), a.trager ? "trager" : null].filter(Boolean).join(" · ");
+  ctx.fillText(regel, midden, c.height / 2 + pt(3.4));
+  return c;
+}
+
+export function randtestDataUrl(maat: LabelMaat, a: { donkerte?: number; verschuiving?: number; trager?: boolean } = {}): string {
+  return tekenRandtest(maat, a).toDataURL("image/png");
+}

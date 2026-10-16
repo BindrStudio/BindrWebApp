@@ -14,7 +14,7 @@ import { prijscheck, STANDAARD_INSTELLINGEN, type Instellingen, type TeWijzigen 
 import { euro, vandaag } from "./lib/format";
 import { HARTJES_OK, kies } from "./lib/grapjes";
 import { laadTestset } from "./lib/testset";
-import { printLabels, printerNaam, verbindPrinter, ontkoppelPrinter } from "./lib/printer";
+import { printLabels, printRandtest, printerNaam, verbindPrinter, ontkoppelPrinter, type Afstelling } from "./lib/printer";
 import { laadCatalogus } from "./lib/catalog";
 import { laadOcr } from "./lib/ocr";
 import { uuid } from "./lib/uuid";
@@ -962,12 +962,18 @@ export async function loskoppelen() {
   zet({ printer: null });
 }
 
+/** Donkerte, verschuiving en "trager" van dit toestel (Labels › Proeflabel en afstellen). */
+export function afstelling(i = state.instellingen): Afstelling {
+  return { donkerte: i.labelDonkerte ?? 3, verschuiving: i.labelVerschuiving ?? 0, trager: !!i.labelTrager };
+}
+const voortgang = (s: string) => zet({ bezig: s === "ok" ? "Klaar" : `Printen: ${s}` });
+
 export async function print(ids: string[]) {
   const ex = ids.map((id) => state.exemplaren.find((e) => e.id === id)).filter(Boolean) as Exemplaar[];
   if (!ex.length) return;
   zet({ bezig: ex.length === 1 ? "Label printen…" : `${ex.length} labels printen…` });
   try {
-    await printLabels(ex, state.instellingen.labelMaat, (s) => zet({ bezig: s === "ok" ? "Klaar" : `Printen: ${s}` }));
+    await printLabels(ex, state.instellingen.labelMaat, voortgang, afstelling());
     zet({ printer: printerNaam() });
     wijzigVeel(ex.filter((e) => e.label_status === "te printen").map((e) => e.id), { label_status: "geprint" });
     meld(ex.length === 1 ? "Label geprint. Scan het na het plakken." : `${ex.length} labels geprint. Scan ze na het plakken.`);
@@ -986,9 +992,23 @@ export async function printTestlabel() {
   } as Exemplaar;
   zet({ bezig: "Proeflabel printen…" });
   try {
-    await printLabels([proef], state.instellingen.labelMaat, (s) => zet({ bezig: s === "ok" ? "Klaar" : `Printen: ${s}` }));
+    await printLabels([proef], state.instellingen.labelMaat, voortgang, afstelling());
     zet({ printer: printerNaam() });
     meld("Proeflabel geprint. Scan het met Scan om de QR-code te testen.");
+  } catch (e) {
+    fout(e);
+  } finally {
+    zet({ bezig: null });
+  }
+}
+
+/** Print een randtest: een kader met millimeterstreepjes om te zien of er iets wegvalt. */
+export async function printRandtestNu() {
+  zet({ bezig: "Randtest printen…" });
+  try {
+    await printRandtest(state.instellingen.labelMaat, voortgang, afstelling());
+    zet({ printer: printerNaam() });
+    meld("Randtest geprint. Zie je de vier randen met streepjes?");
   } catch (e) {
     fout(e);
   } finally {

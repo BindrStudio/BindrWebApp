@@ -428,6 +428,16 @@ a.knop { text-decoration: none; }
 .maatkeuze { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .maatkeuze .chips { margin: 0; padding: 0; flex: 1 1 100%; }
 .maatkeuze .chip { padding: 5px 10px; font-size: 13px; }
+/* Proeflabel en afstellen (per toestel). */
+.afstellen { background: var(--room); border-radius: var(--rond); padding: 12px 14px; display: grid; gap: 10px; }
+.afstellen summary { cursor: pointer; color: var(--zee); font-weight: 600; font-size: 15px; list-style-position: inside; }
+.afstellen:not([open]) { padding-bottom: 12px; }
+.afstellen .knoppenrij { justify-content: flex-start; flex-wrap: wrap; }
+.afstel-rij { display: grid; gap: 6px; font-size: 14px; }
+.afstel-rij .chips { margin: 0; padding: 0; flex-wrap: wrap; -webkit-mask-image: none; mask-image: none; }
+.afstel-rij .chip { padding: 5px 10px; font-size: 13px; }
+.afstel-schuif { display: flex; align-items: center; gap: 10px; }
+.afstel-schuif strong { min-width: 96px; text-align: center; font-family: var(--titel); font-weight: 600; }
 .lijst-acties { display: flex; justify-content: space-between; align-items: center; }
 .labellijst { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .labelrij { display: flex; align-items: center; gap: 10px; animation: tegel-in .35s var(--veer) both; }

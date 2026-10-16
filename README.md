@@ -5,7 +5,7 @@ De app van Bind'r voor de stand op beurzen: elke kaart met een eigen QR-label, o
 - **Klantenpagina:** https://bindrstudio.github.io/BindrWebApp/ (rechtsboven *Beheer* voor ons)
 - **Beheer:** https://bindrstudio.github.io/BindrWebApp/beheer.html
 
-Versie 0.7 · oktober 2026
+Versie 0.7.1 · oktober 2026
 
 ## Wat de app kan
 
@@ -67,11 +67,14 @@ In *Profiel › Inzichten*, voor altijd, dit jaar, de laatste 30 dagen of één 
 - Bij een kaart: *Vraag ernaar aan onze stand* en de volgende beurs. Nooit aankoopprijzen, de vault of de kassa.
 
 ### Labels
-QR-labels op een Niimbot B1 / B1 Pro via Bluetooth (50 × 15 mm, zonder prijs, met het Bind'r-logo en de datum).
+QR-labels op een Niimbot B1 / B1 Pro via Bluetooth (50 × 15 mm, zonder prijs, met het Bind'r-logo en de datum). Gebruik officiële Niimbot-rollen voor de B1-reeks: de printer leest de chip in de rol, en zonder chip print hij slecht of niet.
+- Open *Labels* (printerknop in Catalogus of Vault, of *Instellingen › Labels*), tik *Verbinden* en kies de printer in de lijst. Koppel hem niet in de Bluetooth-instellingen van je toestel.
+- **Proeflabel en afstellen:** een proeflabel (een kaart met QR om te scannen) en een **randtest** (kader met een streepje per mm tot op de rand). Valt er boven of onder iets weg, schuif dan per halve mm *Hoger* of *Lager*. Te licht of te donker: *Donkerte* 1–5 (standaard 3). Komt een label leeg of half uit de printer (vooral op een Mac): *Trager printen*. Dit geldt per toestel.
 
 | Toestel | Printen |
 |---|---|
-| Android | Chrome. *Labels › Verbinden* en kies de printer. |
+| Computer | Chrome of Edge (Windows, Mac). Op een Mac: *Systeeminstellingen › Privacy en beveiliging › Bluetooth* moet Chrome toelaten. |
+| Android | Chrome. Bluetooth en locatie aan, en Chrome toestemming geven voor apparaten in de buurt. |
 | iPhone | Enkel in de gratis app [Bluefy](https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055) (Safari en Chrome kunnen geen Bluetooth). Al de rest werkt ook in Safari. |
 
 ## Eenmalig klaarzetten
@@ -99,7 +102,7 @@ npm run watch      # bouwt bij elke wijziging
 npm run serve      # http://localhost:8080 (klanten) en /beheer.html
 npm test           # unit tests, o.a. de testcase beursdag en een volledige gesimuleerde beursdag tot in de boekhouding
 npm run typecheck
-npm run e2e        # de testcase beursdag in de echte app, plus pincode tegen een nagebootste Supabase
+npm run e2e        # de testcase beursdag in de echte app, pincode tegen een nagebootste Supabase, printen met een nagebootste B1 Pro
 ```
 
 `public/app.js`, `public/catalogus/app.js` en `public/sw.js` staan mee in git: **voer `npm run build` uit voor je commit**. De workflow *Controle* kijkt dat na.

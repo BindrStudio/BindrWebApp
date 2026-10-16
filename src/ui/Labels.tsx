@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
-import { koppelPrinter, loskoppelen, openExemplaar, print, printTestlabel, useApp, wijzigVeel, zetInstellingen } from "../state";
+import { afstelling, koppelPrinter, loskoppelen, openExemplaar, print, printRandtestNu, printTestlabel, useApp, wijzigVeel, zetInstellingen } from "../state";
 import type { Exemplaar } from "../types";
 import { toonCode } from "../lib/code";
-import { LABELMATEN, labelDataUrl } from "../lib/label";
-import { bluetoothMogelijk, huidigeMaat, isIphone } from "../lib/printer";
+import { LABELMATEN, labelDataUrl, verschuivingTekst } from "../lib/label";
+import { bluetoothMogelijk, huidigeMaat, isIphone, VERSCHUIVING_MAX } from "../lib/printer";
 import { Icoon, Leeg, Segment } from "./common";
 import { PLAATS } from "../lib/categorie";
 
@@ -64,8 +64,9 @@ export function Labels({ inSheet = false }: { inSheet?: boolean }) {
             <button key={m.id} className={`chip${instellingen.labelMaat === m.id ? " aan" : ""}`} onClick={() => zetInstellingen({ labelMaat: m.id })}>{m.label}</button>
           ))}
         </div>
-        {kan && <button className="tekstknop klein" onClick={() => void printTestlabel()}>Proeflabel printen</button>}
       </div>
+
+      {kan && <Afstellen />}
 
       <Segment<Lijst> waarde={lijst} onKies={(l) => { setLijst(l); setGekozen(null); }} opties={[
         { waarde: "te printen", label: `Te printen ${tePrinten.length}` },
@@ -109,6 +110,47 @@ export function Labels({ inSheet = false }: { inSheet?: boolean }) {
         </>
       )}
     </div>
+  );
+}
+
+/** Proeflabel, randtest en de afstelling van dit toestel (donkerte, hoger/lager, trager). */
+function Afstellen() {
+  const { instellingen, bezig } = useApp();
+  const a = afstelling(instellingen);
+  const schuif = (d: number) => {
+    const n = Math.min(VERSCHUIVING_MAX, Math.max(-VERSCHUIVING_MAX, Math.round(((a.verschuiving ?? 0) + d) * 2) / 2));
+    zetInstellingen({ labelVerschuiving: n });
+  };
+  return (
+    <details className="afstellen">
+      <summary>Proeflabel en afstellen</summary>
+      <div className="knoppenrij">
+        <button className="knop zacht klein" disabled={!!bezig} onClick={() => void printTestlabel()}><Icoon naam="printer" maat={16} /> Proeflabel</button>
+        <button className="knop zacht klein" disabled={!!bezig} onClick={() => void printRandtestNu()}><Icoon naam="printer" maat={16} /> Randtest</button>
+      </div>
+      <p className="zacht klein">Randtest: zie je de vier randen met streepjes (1 streepje = 1 mm)? Dan valt er niets weg. Links en rechts een smal wit randje is normaal.</p>
+      <div className="afstel-rij">
+        <span>Donkerte</span>
+        <div className="chips">
+          {[1, 2, 3, 4, 5].map((d) => (
+            <button key={d} className={`chip${a.donkerte === d ? " aan" : ""}`} aria-pressed={a.donkerte === d} onClick={() => zetInstellingen({ labelDonkerte: d })}>{d}{d === 3 ? " · standaard" : ""}</button>
+          ))}
+        </div>
+      </div>
+      <div className="afstel-rij">
+        <span>Staat de print te hoog of te laag?</span>
+        <div className="afstel-schuif">
+          <button className="knop zacht klein" onClick={() => schuif(-0.5)} disabled={(a.verschuiving ?? 0) <= -VERSCHUIVING_MAX}>Hoger</button>
+          <strong aria-live="polite">{verschuivingTekst(a.verschuiving ?? 0)}</strong>
+          <button className="knop zacht klein" onClick={() => schuif(0.5)} disabled={(a.verschuiving ?? 0) >= VERSCHUIVING_MAX}>Lager</button>
+        </div>
+      </div>
+      <label className="schakel rij">
+        <input type="checkbox" checked={!!a.trager} onChange={(e) => zetInstellingen({ labelTrager: e.target.checked })} />
+        <span>Trager printen <span className="zacht klein">(als een label leeg of half uit de printer komt)</span></span>
+      </label>
+      <p className="zacht klein">Dit geldt enkel voor dit toestel.</p>
+    </details>
   );
 }
 
