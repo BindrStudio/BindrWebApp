@@ -4,7 +4,10 @@
    zijkant openen, de volgende beurs een ticket. Waar het logo zijn letters een bruine rand geeft, krijgen
    deze drie dat ook; de rest blijft rustig. Foto's van ons werk zweven rond de kaft (de etalage). */
 
-body { overflow-x: clip; }
+/* Nooit zijwaarts scrollen: anders zoomt Chrome op Android (en Safari) de hele pagina uit en verspringt alles.
+   Eerst hidden voor oudere browsers, dan clip (dat laat position: sticky met rust). */
+body { overflow-x: hidden; }
+@supports (overflow-x: clip) { body { overflow-x: clip; } }
 .klant { max-width: 1080px; margin: 0 auto; padding: 0 16px calc(92px + var(--onder)); display: flex; flex-direction: column; gap: 14px; }
 .klant-inhoud { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .verborgen { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -22,16 +25,11 @@ body { overflow-x: clip; }
 .klant-merk img { height: 40px; width: auto; }
 .klant-merk:hover { transform: rotate(-2deg) scale(1.04); }
 .klant.balk-weg .klant-balk { transform: translateY(-100%); }
-.klant-balk-rechts { display: flex; align-items: center; gap: 8px; flex: none; }
-.klant-ig-knop { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 8px 12px; border-radius: 999px; color: var(--inkt-2); text-decoration: none; font-weight: 600; font-size: 13.5px; }
+.klant-balk-rechts { display: flex; align-items: center; gap: 2px; flex: none; }
+.klant-ig-knop { display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; color: var(--inkt-2); text-decoration: none; }
 .klant-ig-knop:hover { background: var(--room); color: var(--inkt); }
 .klant-ig-knop svg { color: var(--inkt-2); }
-.klant-beheer-knop { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 8px 12px; border-radius: 999px; color: var(--inkt-2); text-decoration: none; font-weight: 600; font-size: 13.5px; border: 1.5px solid var(--lijn); }
-.klant-beheer-knop:hover { background: var(--room); }
-@media (max-width: 420px) {
-  .klant-ig-knop span, .klant-beheer-knop span { display: none; }
-  .klant-ig-knop, .klant-beheer-knop { width: 44px; justify-content: center; padding: 0; }
-}
+
 
 /* ── Navigatie tussen start en de vier catalogi ──
    Gsm: onderaan, binnen bereik van je duim. Groot scherm: bovenaan, als tabbladen van een binder. */
@@ -52,7 +50,7 @@ body { overflow-x: clip; }
 @media (min-width: 760px) {
   .klant { padding-bottom: 40px; }
   .klant-nav.onder { display: none; }
-  .klant-nav.boven { display: flex; gap: 4px; align-self: stretch; align-items: flex-end; margin-bottom: -9px; }
+  .klant-nav.boven { display: flex; gap: 4px; align-self: stretch; align-items: flex-end; margin-bottom: -9px; min-width: 0; }
   .klant-nav.boven a { display: flex; align-items: center; gap: 7px; padding: 9px 12px 11px; border-radius: 14px 14px 0 0; font-size: 14.5px; border: 2px solid transparent; border-bottom: 0; white-space: nowrap; }
   .klant-nav.boven a svg { width: 20px; height: 20px; padding: 0; background: none !important; }
   .klant-nav.boven a:hover { background: rgba(255, 248, 239, .7); color: var(--inkt); }
@@ -87,7 +85,8 @@ body { overflow-x: clip; }
 .zipbinder:hover .zip-trekker { animation: trekker 1.6s var(--veer) both; }
 .zip-vlak { position: relative; z-index: 2; display: grid; gap: 12px; padding: 34px 28px 32px 48px; }
 .zip-vlak::before { content: ""; position: absolute; inset: 22px 22px 22px 42px; border: 2px dashed rgba(243, 201, 129, .45); border-radius: 12px 20px 20px 12px; pointer-events: none; }
-.zip-vlak p { position: relative; margin: 0; max-width: 52ch; font-size: 15px; line-height: 1.45; color: var(--room); }
+.zip-vlak > * { min-width: 0; }
+.zip-vlak p { position: relative; margin: 0; max-width: 52ch; font-size: 15px; line-height: 1.45; color: var(--room); overflow-wrap: break-word; hyphens: auto; }
 .kaft-eend { position: absolute; z-index: 3; bottom: -18px; right: 12px; width: 78px; height: 78px; filter: drop-shadow(0 8px 10px rgba(0, 0, 0, .22)); animation: dobber 3.4s ease-in-out infinite; pointer-events: none; }
 .held-knoppen { position: relative; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 2px; }
 .held-knoppen .knop { background: var(--boter); color: var(--inkt); text-decoration: none; }
@@ -294,7 +293,7 @@ body { overflow-x: clip; }
 @media (max-width: 480px) { .binders-rij { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .binder-tekst strong { font-size: 17px; } }
 
 /* Detail */
-.klant .sheet { max-height: calc(100dvh - 24px); }
+.klant .sheet { max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
 .klant-sheet .sheet-inhoud { padding-bottom: 12px; }
 .klant-detail { display: grid; gap: 12px; justify-items: start; }
 .klant-detail-links, .klant-detail-rechts { display: grid; gap: 10px; justify-items: start; width: 100%; }
@@ -314,17 +313,36 @@ body { overflow-x: clip; }
 .detail-stand strong { color: var(--inkt); font-size: 14.5px; }
 .kaart-groot .artikel-vlak { border-radius: 18px; }
 
-/* ── Onderaan: Instagram en het logo ── */
+/* ── Onderaan: Instagram en Facebook, het logo, wie we zijn (wettelijk) en de links ── */
 .klant-voet { margin-top: 30px; display: grid; justify-items: center; gap: 6px; text-align: center; color: var(--inkt-2); font-size: 13px; }
 .klant-voet p { margin: 0; }
-.ig-blok { width: 100%; display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 20px; text-align: left; text-decoration: none; color: var(--inkt);
-  background: var(--room); border: 1.5px solid var(--lijn); margin-bottom: 14px; transition: border-color .2s; }
-.ig-blok:hover { border-color: var(--zee); }
-.ig-blok-icoon { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; background: var(--zee-licht); color: var(--zee-donker); flex: none; }
-.ig-blok-tekst { flex: 1; display: grid; gap: 2px; }
-.ig-blok-tekst strong { font-family: var(--titel); font-size: 18px; font-weight: 600; }
-.ig-blok-tekst span { font-size: 13.5px; color: var(--inkt-2); }
+.sociaal { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.sociaal-knop { display: inline-flex; align-items: center; gap: 10px; padding: 10px 16px 10px 12px; border-radius: 16px; background: var(--room); border: 1.5px solid var(--lijn); color: var(--inkt); text-decoration: none; transition: border-color .2s; }
+.sociaal-knop:hover { border-color: var(--zee); }
+.sociaal-knop svg { width: 34px; height: 34px; padding: 7px; border-radius: 11px; background: var(--zee-licht); color: var(--zee-donker); flex: none; }
+.sociaal-knop span { display: grid; text-align: left; font-family: var(--titel); font-weight: 600; font-size: 16px; line-height: 1.15; }
+.sociaal-knop em { font-style: normal; font-family: var(--tekst); font-weight: 500; font-size: 12.5px; color: var(--inkt-2); }
+.sociaal-tekst { max-width: 44ch; margin-bottom: 8px !important; }
 .voet-logo { width: 120px; height: auto; margin-top: 6px; opacity: .95; }
+.voet-wettelijk { display: grid; gap: 3px; max-width: 64ch; margin-top: 8px; padding-top: 10px; border-top: 1.5px dashed var(--lijn); font-size: 12.5px; line-height: 1.45; color: var(--inkt-3); overflow-wrap: anywhere; }
+.voet-wettelijk strong { color: var(--inkt-2); }
+.voet-wettelijk a { color: inherit; }
+.voet-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px; margin-top: 6px; font-size: 13px; }
+.voet-links a { color: var(--inkt-2); padding: 6px 2px; }
+.voet-links .voet-beheer { color: var(--inkt-3); opacity: .75; }
+
+/* ── Privacy en verkoopvoorwaarden ── */
+.juridisch { display: grid; gap: 14px; max-width: 760px; }
+.juridisch section { display: grid; gap: 8px; padding: 16px 18px; border-radius: 18px; background: var(--room); }
+.juridisch h2 { font-size: 20px; line-height: 1.2; }
+.juridisch p, .juridisch li { margin: 0; font-size: 15px; line-height: 1.55; overflow-wrap: anywhere; }
+.juridisch ul { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.juridisch a { color: var(--zee-donker); font-weight: 600; }
+.modelformulier { padding: 10px 12px; border-radius: 12px; background: var(--wit); }
+.modelformulier summary { cursor: pointer; font-weight: 700; }
+.modelformulier p { margin-top: 8px; font-size: 14px; }
+.juridisch-terug { padding: 4px 0; }
+.juridisch-terug .knop { text-decoration: none; }
 
 /* ── De eend met een tekstballon, linksonder (boven de navigatie op de gsm) ── */
 .eend-popup { position: fixed; left: 12px; bottom: calc(80px + var(--onder)); z-index: 50; display: flex; align-items: flex-end; gap: 0; pointer-events: none; }
@@ -347,7 +365,6 @@ body { overflow-x: clip; }
 @media (min-width: 760px) {
   .klant { padding-inline: 24px; }
   .held { margin-top: 44px; }
-  .held.met-etalage { grid-template-columns: minmax(0, 1fr) 360px; align-items: center; gap: 30px; }
   .zip-rug { width: 38px; }
   .zip-rug::after { left: 16px; }
   .zip-rits { inset: 6px 6px 6px 28px; border-width: 11px; border-radius: 0 34px 34px 0; }
@@ -357,13 +374,14 @@ body { overflow-x: clip; }
   .kaft-eend { width: 112px; height: 112px; top: -54px; bottom: auto; right: 30px; }
   .gravure { padding-right: 96px; }
   @keyframes straal { 0% { left: 0; opacity: 1; } 94% { opacity: 1; } 100% { left: calc(100% - 96px); opacity: 0; } }
-  .etalage { height: 460px; margin: 0; z-index: auto; }
-  .etalage-foto { --b: 152px; }
-  .etalage-foto.e0 { left: 4px; top: 6px; --hoek: -6deg; }
-  .etalage-foto.e1 { left: auto; right: 0; top: 34px; --b: 164px; --hoek: 5deg; z-index: 0; }
-  .etalage-foto.e2 { right: auto; left: 92px; top: 172px; --b: 172px; --hoek: 2deg; z-index: 2; }
-  .etalage-foto.e3 { left: -8px; top: 300px; --b: 140px; --hoek: -8deg; --duur: 6.8s; --vertraag: -3s; }
-  .etalage-foto.e4 { right: 6px; top: 286px; --b: 148px; --hoek: 8deg; --duur: 5.9s; --vertraag: -1s; z-index: 1; }
+  /* Tablet rechtop (tot 1100 px): de etalage als strook onder de kaft, zodat de kaft breed blijft. */
+  .etalage { height: 250px; margin: -12px 0 0; }
+  .etalage-foto { --b: 142px; }
+  .etalage-foto.e0 { left: 0; top: 34px; --hoek: -7deg; }
+  .etalage-foto.e1 { left: calc(21% - 10px); top: 8px; --b: 148px; --hoek: 3deg; z-index: 1; }
+  .etalage-foto.e2 { right: auto; left: calc(50% - 74px); top: 44px; --b: 148px; --hoek: -2deg; z-index: 2; }
+  .etalage-foto.e3 { right: calc(21% - 10px); top: 6px; --hoek: 5deg; --duur: 6.8s; --vertraag: -3s; z-index: 1; }
+  .etalage-foto.e4 { right: 0; top: 38px; --hoek: 8deg; --duur: 5.9s; --vertraag: -1s; }
   .pockets { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; padding: 18px 20px; }
   .binderpagina { grid-template-columns: 30px minmax(0, 1fr); }
   .pagina-rug::after { left: 13px; }
@@ -399,7 +417,7 @@ body { overflow-x: clip; }
 /* ── Ontwerp je binder ── */
 .ontwerp { display: grid; gap: 18px; margin-top: 6px; }
 .ontwerp-binder { position: relative; display: grid; justify-items: center; gap: 6px; }
-.ontwerp-canvas { width: min(100%, 380px); aspect-ratio: 720 / 1000; height: auto; cursor: pointer; }
+.ontwerp-canvas { width: min(100%, 380px); aspect-ratio: 722 / 1008; height: auto; cursor: pointer; filter: drop-shadow(0 9px 20px rgba(38, 30, 22, .18)); }
 /* Enkel met een ontwerp erop: dan versleep je het, en scrolt de pagina niet mee. */
 .ontwerp-canvas.sleepbaar { cursor: grab; touch-action: none; }
 .ontwerp-canvas.sleepbaar:active { cursor: grabbing; }
@@ -459,6 +477,18 @@ body { overflow-x: clip; }
 }
 @media (prefers-reduced-motion: reduce) { .aanvraag-vink { animation: none; } }
 
+/* Breed scherm (vanaf 1100 px): de etalage naast de kaft, als een collage. */
+@media (min-width: 1100px) {
+  .held.met-etalage { grid-template-columns: minmax(0, 1fr) 360px; align-items: center; gap: 30px; }
+  .etalage { height: 460px; margin: 0; z-index: auto; }
+  .etalage-foto { --b: 152px; }
+  .etalage-foto.e0 { left: 4px; top: 6px; --hoek: -6deg; }
+  .etalage-foto.e1 { left: auto; right: 0; top: 34px; --b: 164px; --hoek: 5deg; z-index: 0; }
+  .etalage-foto.e2 { right: auto; left: 92px; top: 172px; --b: 172px; --hoek: 2deg; z-index: 2; }
+  .etalage-foto.e3 { left: -8px; right: auto; top: 300px; --b: 140px; --hoek: -8deg; }
+  .etalage-foto.e4 { right: 6px; top: 286px; --b: 148px; --hoek: 8deg; z-index: 1; }
+}
+
 /* Zes tabbladen bovenaan: op een smaller groot scherm wat compacter, Instagram enkel als icoon. */
 @media (min-width: 760px) and (max-width: 1099px) {
   .klant-nav.boven { gap: 0; }
@@ -466,3 +496,31 @@ body { overflow-x: clip; }
   .klant-ig-knop span { display: none; }
   .klant-ig-knop { width: 44px; justify-content: center; padding: 0; }
 }
+/* Een tablet rechtop (Galaxy Tab: 800 px): zonder icoontjes passen ook zes tabbladen. */
+@media (min-width: 760px) and (max-width: 959px) { .klant-nav.boven a svg { display: none; } }
+
+/* ── Ontwerp je binder: afbeeldingen bij het idee, de schakelaar en de proef op de binder ── */
+.keuze-groep legend em { font-style: normal; font-weight: 500; color: var(--inkt-3); }
+.kleur-naam { font-weight: 600; color: var(--inkt-2); }
+.idee-beelden { display: flex; flex-wrap: wrap; gap: 10px; }
+.idee-beeld { position: relative; width: 92px; height: 92px; }
+.idee-beeld img { width: 100%; height: 100%; object-fit: cover; border-radius: 14px; box-shadow: var(--schaduw); display: block; }
+.idee-weg { position: absolute; top: -7px; right: -7px; width: 26px; height: 26px; border-radius: 50%; background: var(--inkt); color: var(--room); font-size: 12px; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--room); }
+.idee-nieuw { width: 92px; height: 92px; border-radius: 14px; display: grid; place-content: center; justify-items: center; gap: 4px; padding: 6px; border: 2px dashed var(--lijn); background: var(--wit); color: var(--inkt-2); font-size: 11.5px; font-weight: 600; line-height: 1.2; text-align: center; }
+.proef-schakel { display: grid; gap: 14px; padding: 14px; border-radius: 18px; background: var(--zee-licht); }
+.proef-schakel.aan { background: var(--perzik); box-shadow: inset 0 0 0 2px var(--zee); }
+.schakel-rij { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
+.schakel-rij > span { display: grid; gap: 2px; }
+.schakel-rij strong { font-size: 15.5px; }
+.schakel-rij input[type="checkbox"] { appearance: none; -webkit-appearance: none; flex: none; width: 50px; height: 30px; border-radius: 15px; background: rgba(59, 42, 18, .2); position: relative; cursor: pointer; transition: background .25s; margin: 0; }
+.schakel-rij input[type="checkbox"]::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); transition: transform .3s var(--veer); }
+.schakel-rij input[type="checkbox"]:checked { background: var(--zee); }
+.schakel-rij input[type="checkbox"]:checked::after { transform: translateX(20px); }
+.proef { display: grid; gap: 14px; }
+.proef-binder { position: relative; display: grid; justify-items: center; gap: 6px; }
+.ontwerp-canvas.laden { aspect-ratio: 722 / 1008; background: linear-gradient(100deg, var(--lijn) 30%, var(--room) 50%, var(--lijn) 70%); background-size: 300% 100%; animation: glanslaad 1.3s ease-in-out infinite; border-radius: 18px; }
+.proef .ontwerp-keuzes { background: var(--wit); }
+@media (min-width: 760px) {
+  .proef { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+}
+@media (prefers-reduced-motion: reduce) { .ontwerp-canvas.laden { animation: none; } }

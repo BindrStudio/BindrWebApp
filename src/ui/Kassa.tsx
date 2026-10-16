@@ -342,8 +342,6 @@ function BodPaneel() {
   const exact = exactBod(mandje.regels, pct);
   const eigenPct = heeftEigenPct(mandje.regels);
   const samen = samenPct(mandje.regels, pct);
-  // Waar "samen" op de schuifknop valt (de duim is 30 px breed).
-  const plek = Math.min(1, Math.max(0, (samen - PCT_MIN) / (PCT_MAX - PCT_MIN)));
   const keuzes = afrondKeuzes(exact, b.afronding);
   const zonderMarkt = mandje.regels.filter((r) => r.richting === "in" && !((r.referentie ?? 0) > 0)).reduce((x, r) => x + r.prijs, 0);
   const kies = (w: Partial<BodInstelling>) => { zetBod(w); tril(); };
@@ -366,19 +364,34 @@ function BodPaneel() {
         <Segment waarde={b.perKaart ? "kaart" : "alles"} onKies={(w) => { zetPerKaart(w === "kaart"); tril(15); }}
           opties={[{ waarde: "alles", label: "Eén % voor alles" }, { waarde: "kaart", label: "Per kaart" }]} />
       )}
-      <label className="bod-slider">
-        <span className="bod-slider-kop">
-          <span>{ruil ? "Ruil" : "Inkoop"} · {b.perKaart ? "algemeen" : "% van de marktwaarde"}</span>
-          <strong className={eigenPct ? "samen" : ""}>{eigenPct ? <><small>samen</small> {samen}%</> : `${pct}%`}</strong>
-        </span>
-        <span className="bod-slider-baan">
-          <input type="range" min={PCT_MIN} max={PCT_MAX} step={5} value={pct} aria-label={b.perKaart ? "Algemeen percentage" : "Percentage van de marktwaarde"}
-            onChange={(e) => { setEigen(""); kies({ pct: Number(e.target.value), afronding: b.afronding === "eigen" ? "exact" : b.afronding, eigen: null }); }} />
-          {eigenPct && <span className="bod-samen" style={{ left: `calc(15px + (100% - 30px) * ${plek})` }} aria-hidden="true" />}
-        </span>
-        <span className="bod-schaal" aria-hidden="true">{Array.from({ length: (PCT_MAX - PCT_MIN) / 5 + 1 }, (_, i) => <span key={i}>{PCT_MIN + i * 5}</span>)}</span>
-      </label>
-      {b.perKaart && <p className="zacht klein bod-uitleg">{eigenPct ? `Algemeen ${pct}%, met een eigen % voor sommige kaarten: samen ${samen}% van de marktwaarde.` : "Kies hierboven per kaart een ander percentage (− en +). De rest volgt de schuifknop."}</p>}
+      {b.perKaart ? (
+        // Per kaart: geen grote schuifknop meer, enkel het algemene percentage voor de kaarten zonder eigen %.
+        <div className="bod-algemeen">
+          <span className="bod-algemeen-tekst">
+            <strong>{ruil ? "Ruil" : "Inkoop"} · algemeen</strong>
+            <span className="zacht klein">voor de kaarten zonder eigen %</span>
+          </span>
+          <span className="pct-stapper groot">
+            <button onClick={() => { setEigen(""); kies({ pct: Math.max(PCT_MIN, pct - 5), afronding: b.afronding === "eigen" ? "exact" : b.afronding, eigen: null }); }} disabled={pct <= PCT_MIN} aria-label="Algemeen 5% minder">−</button>
+            <span>{pct}%</span>
+            <button onClick={() => { setEigen(""); kies({ pct: Math.min(PCT_MAX, pct + 5), afronding: b.afronding === "eigen" ? "exact" : b.afronding, eigen: null }); }} disabled={pct >= PCT_MAX} aria-label="Algemeen 5% meer">+</button>
+          </span>
+          {eigenPct && <span className="bod-samen-label">samen <strong>{samen}%</strong></span>}
+        </div>
+      ) : (
+        <label className="bod-slider">
+          <span className="bod-slider-kop">
+            <span>{ruil ? "Ruil" : "Inkoop"} · % van de marktwaarde</span>
+            <strong>{pct}%</strong>
+          </span>
+          <span className="bod-slider-baan">
+            <input type="range" min={PCT_MIN} max={PCT_MAX} step={5} value={pct} aria-label="Percentage van de marktwaarde"
+              onChange={(e) => { setEigen(""); kies({ pct: Number(e.target.value), afronding: b.afronding === "eigen" ? "exact" : b.afronding, eigen: null }); }} />
+          </span>
+          <span className="bod-schaal" aria-hidden="true">{Array.from({ length: (PCT_MAX - PCT_MIN) / 5 + 1 }, (_, i) => <span key={i}>{PCT_MIN + i * 5}</span>)}</span>
+        </label>
+      )}
+      {b.perKaart && !eigenPct && <p className="zacht klein bod-uitleg">Geef een kaart hierboven met − en + een eigen percentage.</p>}
       <div className="bod-som">{eigenPct ? `Samen ${samen}%` : `${pct}%`} van {euro(m.totaal)} = <strong>{euro(exact)}</strong></div>
       <div className="bod-keuzes">
         {keuzes.map((k) => (

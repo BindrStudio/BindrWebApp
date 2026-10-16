@@ -6,10 +6,12 @@ import { schoonArtikel, schoonExemplaar } from "../lib/exemplaar";
 
 const SESSIE_SLEUTEL = "bindr-sessie-v1";
 const VERSIE_SLEUTEL = "bindr-schema-v1";
-/** De versie van het schema die alles van de app kan (supabase/schema.sql van 0.10). */
-export const NIEUWSTE = 9;
+/** De versie van het schema die alles van de app kan (supabase/schema.sql van 0.11). */
+export const NIEUWSTE = 10;
 /** Vanaf deze versie (schema 0.10): meer foto's per artikel, de etalage en aanvragen voor een eigen binder. */
 export const ETALAGE_VANAF = 9;
+/** Vanaf deze versie (schema 0.11): aanvragen met toploader ja/nee en afbeeldingen van het idee. */
+export const AANVRAAG_BEELDEN_VANAF = 10;
 /** Vanaf deze versie kan de boekhouding van 0.8 (kas, overschrijving, privé, aankoopfoto's …) naar de server. */
 export const BOEKHOUDING_VANAF = 7;
 const PAGINA = 1000;
@@ -103,15 +105,18 @@ export class SupabaseBackend implements Backend {
     return { email: this.sessie.email, naam: this.sessie.naam };
   }
 
+  /** Uit = niets meer op het toestel bewaren (na uitloggen, of zolang een herstellink nog niet nagekeken is). */
+  private opslaan = true;
+
   private bewaar() {
-    localStorage.setItem(SESSIE_SLEUTEL, JSON.stringify(this.sessie));
+    if (this.opslaan) localStorage.setItem(SESSIE_SLEUTEL, JSON.stringify(this.sessie));
   }
 
   /** De sessie werd op de server ingetrokken of is te oud: opnieuw inloggen (de wachtrij blijft bewaard). */
   verlopen = false;
 
   private async token(): Promise<string> {
-    if (this.verlopen) throw new Fout("Je sessie is verlopen. Log opnieuw in met je e-mail en pincode.", 401);
+    if (this.verlopen) throw new Fout("Je sessie is verlopen. Log opnieuw in met je e-mail en wachtwoord.", 401);
     if (this.sessie.expires_at - 60 > Date.now() / 1000) return this.sessie.access_token;
     if (!this.vernieuwen) {
       this.vernieuwen = authVraag("token?grant_type=refresh_token", { refresh_token: this.sessie.refresh_token })
@@ -121,7 +126,7 @@ export class SupabaseBackend implements Backend {
           // als 401 melden, zodat de wachtrij niets weggooit.
           if (e instanceof Fout && e.status !== undefined && e.status < 500) {
             this.verlopen = true;
-            throw new Fout("Je sessie is verlopen. Log opnieuw in met je e-mail en pincode.", 401);
+            throw new Fout("Je sessie is verlopen. Log opnieuw in met je e-mail en wachtwoord.", 401);
           }
           throw e;
         })
@@ -169,7 +174,7 @@ export class SupabaseBackend implements Backend {
   private async controleerBeheerder() {
     const rijen = await this.vraag<{ naam: string }[]>("GET", `beheerders?select=naam&user_id=eq.${this.sessie.user_id}`);
     if (!rijen.length) {
-      localStorage.removeItem(SESSIE_SLEUTEL);
+      if (this.opslaan) localStorage.removeItem(SESSIE_SLEUTEL);
       throw new Fout("Dit account is (nog) geen beheerder. Voeg het toe aan de tabel beheerders in Supabase.");
     }
     this.sessie.naam = rijen[0].naam;
@@ -189,7 +194,7 @@ export class SupabaseBackend implements Backend {
   /** True als de database nog het schema van fase 1 heeft (geen beurzen en transacties). */
   schemaOud = false;
 
-  /** 9 = etalage, meer foto's per artikel en aanvragen (0.10), 8 = beurzen met uren en link, artikels zichtbaar per stuk (0.9), 7 = inbreng van kaarten die al in de app staan (0.8), 6 = aankoopfoto's en privé (0.7), 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
+  /** 10 = aanvragen met toploader en afbeeldingen, wettelijke gegevens (0.11), 9 = etalage, meer foto's per artikel en aanvragen (0.10), 8 = beurzen met uren en link, artikels zichtbaar per stuk (0.9), 7 = inbreng van kaarten die al in de app staan (0.8), 6 = aankoopfoto's en privé (0.7), 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
   versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v >= 2 && v <= NIEUWSTE ? v : null; })();
 
   private async zekerVersie() {
@@ -223,7 +228,7 @@ export class SupabaseBackend implements Backend {
         if (e instanceof Fout && (e.status === 400 || e.status === 404)) return false; // onbekende kolom of tabel
         throw e;
       });
-      // Vanaf 0.8 zegt de database zelf welke versie ze heeft (schema_versie: 8 = 0.8, 9 = 0.9, 10 = 0.10).
+      // Vanaf 0.8 zegt de database zelf welke versie ze heeft (schema_versie: 8 = 0.8, 9 = 0.9, 10 = 0.10, 11 = 0.11).
       const schema = await this.vraag<number>("GET", "rpc/schema_versie").then((n) => Number(n) || 0, (e) => {
         if (e instanceof Fout && (e.status === 400 || e.status === 404)) return 0;
         throw e;
@@ -319,32 +324,101 @@ export class SupabaseBackend implements Backend {
     await this.vraag("POST", "rpc/markeer_prijzen", { omgeving: omgevingId, lijst });
   }
 
-  async wijzigPincode(pin: string) {
+  /**
+   * Een nieuw wachtwoord voor het account. Eerst het huidige (wie de gsm even vasthoudt, kan het zo niet
+   * veranderen); dat geeft ook een verse sessie, zoals Supabase vraagt voor een wachtwoord. Na een herstelmail
+   * is er geen huidig wachtwoord: dan volstaat de sessie uit de mail (`huidig` = null).
+   * Supabase meldt daarna de andere toestellen af; deze gsm blijft ingelogd.
+   */
+  async wijzigWachtwoord(huidig: string | null, nieuw: string) {
+    if (huidig !== null) {
+      let s: Sessie;
+      try {
+        s = await authVraag("token?grant_type=password", { email: this.sessie.email, password: huidig });
+      } catch (e) {
+        if (e instanceof Fout && e.status === 400) throw new Fout("Je huidige wachtwoord klopt niet.", 400);
+        throw e;
+      }
+      if (s.user_id !== this.sessie.user_id) throw new Fout("Dat is een ander account.", 400);
+      this.sessie = { ...s, naam: this.sessie.naam };
+      this.verlopen = false;
+      this.bewaar();
+    }
     let r: Response;
     const token = await this.token();
     try {
       r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
         method: "PUT",
         headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ password: pin }),
+        body: JSON.stringify({ password: nieuw }),
       });
     } catch {
-      throw new Fout("Geen verbinding: een nieuwe pincode kan enkel met internet.");
+      throw new Fout("Geen verbinding: een nieuw wachtwoord kan enkel met internet.");
     }
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
       const m = j.msg || j.message || j.error_description || `Serverfout ${r.status}`;
-      // Dezelfde pincode als het huidige wachtwoord (bv. op een tweede gsm): niets te wijzigen, dus goed.
-      if (j.error_code === "same_password" || /same|different from the old/i.test(m)) return;
+      if (j.error_code === "same_password" || /same|different from the old/i.test(m)) throw new Fout("Kies een ander wachtwoord dan je huidige.", r.status);
       if (j.error_code === "reauthentication_needed" || /reauthenticat/i.test(m)) {
-        throw new Fout("Supabase vraagt eerst opnieuw in te loggen. Log uit, log in met je huidige pincode en probeer opnieuw.", r.status);
+        throw new Fout("Supabase vraagt eerst opnieuw in te loggen. Log uit, log in met je huidige wachtwoord en probeer opnieuw.", r.status);
       }
-      if (j.error_code === "weak_password" || /least|short|length|weak/i.test(m)) {
-        throw new Fout("Supabase vindt deze pincode te zwak of te kort: zet de minimale wachtwoordlengte op 6 en zet de extra eisen (letters, tekens) uit. Zie de README.", r.status);
+      if (j.error_code === "weak_password" || /least|short|length|weak|pwned|leaked/i.test(m)) {
+        throw new Fout("Supabase vindt dit wachtwoord te zwak (of het staat in een lijst van gelekte wachtwoorden). Kies een ander.", r.status);
       }
       throw new Fout(m, r.status);
     }
   }
+
+  /** Wachtwoord vergeten: Supabase stuurt een mail met een link naar het beheer (zie de README voor de Redirect URL). */
+  static async stuurHerstelmail(email: string, terug: string) {
+    let r: Response;
+    try {
+      r = await fetch(`${SUPABASE_URL}/auth/v1/recover?redirect_to=${encodeURIComponent(terug)}`, {
+        method: "POST",
+        headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ email, redirect_to: terug }),
+      });
+    } catch {
+      throw new Fout("Geen verbinding met de server.");
+    }
+    if (r.status === 429) throw new Fout("Er ging net al een mail. Wacht een uur en probeer dan opnieuw.", 429);
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Fout(j.msg || j.message || j.error_description || `Serverfout ${r.status}`, r.status);
+    }
+  }
+
+  /**
+   * De link uit de herstelmail opent het beheer met de sessie in de hash (#access_token=…&type=recovery).
+   * Geeft een backend met die sessie, of null als de hash geen herstellink is.
+   */
+  static async vanHerstellink(hash: string): Promise<SupabaseBackend | null> {
+    const q = new URLSearchParams(hash.replace(/^#/, ""));
+    if (q.get("type") !== "recovery" || !q.get("access_token") || !q.get("refresh_token")) return null;
+    const access_token = q.get("access_token")!;
+    let r: Response;
+    try {
+      r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${access_token}` } });
+    } catch {
+      throw new Fout("Geen verbinding met de server.");
+    }
+    if (!r.ok) throw new Fout("Deze link is verlopen of al gebruikt. Vraag een nieuwe mail.", r.status);
+    const u = await r.json().catch(() => ({}));
+    const b = new SupabaseBackend({
+      access_token,
+      refresh_token: q.get("refresh_token")!,
+      expires_at: Number(q.get("expires_at")) || Math.floor(Date.now() / 1000) + (Number(q.get("expires_in")) || 3600),
+      email: u.email || "",
+      user_id: u.id || "",
+    });
+    // Pas bewaren als het een beheerder is: een link van een ander account mag de sessie op deze gsm niet wegnemen.
+    b.opslaan = false;
+    await b.controleerBeheerder();
+    b.opslaan = true;
+    b.bewaar();
+    return b;
+  }
+
 
   async laadAlles(): Promise<Alles> {
     // Zonder de tabellen van fase 2 werkt de voorraad gewoon verder; de kassa vraagt om het schema.
@@ -545,12 +619,14 @@ export class SupabaseBackend implements Backend {
   async laadAanvragen(): Promise<Aanvraag[]> {
     await this.zekerVersie();
     if ((this.versie ?? 0) < ETALAGE_VANAF) return [];
-    return this.vraag<Aanvraag[]>("GET", "aanvragen?select=id,naam,email,telefoon,grootte,kleur,idee,status,aangemaakt_op&order=aangemaakt_op.desc&limit=200");
+    const extra = (this.versie ?? 0) >= AANVRAAG_BEELDEN_VANAF ? ",toploader" : "";
+    return this.vraag<Aanvraag[]>("GET", `aanvragen?select=id,naam,email,telefoon,grootte,kleur,idee,status,aangemaakt_op${extra}&order=aangemaakt_op.desc&limit=200`);
   }
 
   async laadAanvraagBeelden(id: string) {
-    const r = await this.vraag<Pick<Aanvraag, "artwork" | "voorbeeld">[]>("GET", `aanvragen?select=artwork,voorbeeld&id=eq.${id}`);
-    return r[0] ?? { artwork: null, voorbeeld: null };
+    const extra = (this.versie ?? 0) >= AANVRAAG_BEELDEN_VANAF ? ",beelden" : "";
+    const r = await this.vraag<Pick<Aanvraag, "artwork" | "voorbeeld" | "beelden">[]>("GET", `aanvragen?select=artwork,voorbeeld${extra}&id=eq.${id}`);
+    return r[0] ?? { artwork: null, voorbeeld: null, beelden: null };
   }
 
   async verwijderAanvraag(id: string) {
@@ -585,6 +661,9 @@ export class SupabaseBackend implements Backend {
   }
 
   async logUit() {
+    // Eerst van het toestel (meteen, ook als de app nu afgesloten wordt), dan pas de server.
+    this.opslaan = false;
+    localStorage.removeItem(SESSIE_SLEUTEL);
     try {
       // Enkel deze gsm uitloggen, niet je andere toestellen. Met een vers token, anders blijft de sessie op de server geldig.
       const token = await this.token().catch(() => this.sessie.access_token);
@@ -592,8 +671,7 @@ export class SupabaseBackend implements Backend {
         method: "POST",
         headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}` },
       });
-    } catch { /* offline: lokaal toch uitloggen */ }
-    localStorage.removeItem(SESSIE_SLEUTEL);
+    } catch { /* offline: lokaal is de sessie al weg */ }
   }
 }
 

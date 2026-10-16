@@ -204,7 +204,7 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
 
       {lijst.length === 0 ? (
         aantalStuks === 0 ? (
-          <Leeg titel={catalogus ? "De catalogus is leeg" : "De vault is leeg"} tekst={catalogus ? "Voeg kaarten toe, of laad de testset in via Meer." : "Kaarten die je bijhoudt voor later komen hier."}>
+          <Leeg titel={catalogus ? "De catalogus is leeg" : "De vault is leeg"} tekst={catalogus ? "Voeg kaarten toe, of laad de testset in via Instellingen (het tandwiel)." : "Kaarten die je bijhoudt voor later komen hier."}>
             <button className="knop" onClick={() => openToevoegen(undefined, undefined, opslag)}><Icoon naam="plus" maat={18} /> Toevoegen</button>
           </Leeg>
         ) : (

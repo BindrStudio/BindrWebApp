@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { standaardExemplaar } from "../src/lib/exemplaar";
 import { losConflictOp, marge, nieuweTransactie, pasToe, regelUit, type Voorraad } from "../src/lib/kassa";
 import { fotoBronnen, ptcgioSet, setLogo, uitCatalogus } from "../src/lib/foto";
-import { pinFout } from "../src/lib/pin";
+import { isOudePin, pinFout, wachtwoordFout } from "../src/lib/pin";
 import { GELUKT, KAART, kies } from "../src/lib/grapjes";
 import { grapje } from "../src/lib/markt";
 import type { Exemplaar } from "../src/types";
@@ -62,6 +62,22 @@ test("pincode: 6 cijfers, geen reeks en niet zes keer hetzelfde", () => {
   assert.match(pinFout("123456")!, /reeks/);
   assert.match(pinFout("654321")!, /reeks/);
   assert.match(pinFout("567890")!, /reeks/);
+});
+
+test("wachtwoord (0.11): lang, niet enkel cijfers, niet te raden; de pincode blijft op de gsm", () => {
+  assert.equal(wachtwoordFout("Glurak regent op dinsdag"), null);
+  assert.equal(wachtwoordFout("mijn-binder-is-blauw-42"), null);
+  assert.match(wachtwoordFout("482915")!, /Minstens 12 tekens/);
+  assert.match(wachtwoordFout("123456789012")!, /enkel cijfers/);
+  assert.match(wachtwoordFout("aaaaaaaaaaaaaa")!, /verschillende/);
+  assert.match(wachtwoordFout("Wachtwoord2026!")!, /raden/);
+  assert.match(wachtwoordFout("Bindr12345678")!, /raden/);
+  assert.match(wachtwoordFout("lotte.peeters-1990", "lotte.peeters@voorbeeld.be")!, /e-mailadres/);
+  // Een pincode van vóór 0.11 (zonder v) was ook het wachtwoord.
+  const r = { email: "a@b.be", naam: null, user_id: "x", zout: "z", hash: "h" };
+  assert.equal(isOudePin(r), true);
+  assert.equal(isOudePin({ ...r, v: 2 }), false);
+  assert.equal(isOudePin(null), false);
 });
 
 test("fotobronnen: TCGdex eerst, dan Limitless, dan pokemontcg.io", () => {

@@ -1,8 +1,12 @@
-// Inloggen met een pincode van 6 cijfers.
+// Inloggen: een sterk wachtwoord voor het account, een pincode van 6 cijfers per toestel.
 //
-// De pincode is het wachtwoord van je Supabase-account. Dit toestel onthoudt wie je bent
-// (e-mail en naam) en een gezouten hash van de pincode, zodat je de app ook zonder
-// internet kunt ontgrendelen op de beurs. De pincode zelf wordt nergens bewaard.
+// Het wachtwoord van je Supabase-account vraagt de app enkel op een nieuwe gsm of als je sessie
+// verliep. De pincode opent de app op deze gsm (ook zonder internet op de beurs) en gaat nooit naar
+// de server: dit toestel onthoudt wie je bent (e-mail en naam) en een gezouten hash van de pincode.
+// Na 10 foute pincodes wist de gsm de sessie en moet je opnieuw inloggen met je wachtwoord.
+//
+// Tot 0.10 was de pincode ook het wachtwoord (een record zonder `v`). Zo'n toestel vraagt na het
+// ontgrendelen eerst een sterk wachtwoord; de pincode blijft dezelfde.
 
 const SLEUTEL = "bindr-pin-v1";
 const ACTIEF = "bindr-actief-v1";
@@ -15,7 +19,12 @@ export interface PinRecord {
   user_id: string;
   zout: string;
   hash: string;
+  /** 2 = enkel voor dit toestel. Ontbreekt = van vóór 0.11, toen de pincode ook het wachtwoord was. */
+  v?: 2;
 }
+
+/** Na zoveel foute pincodes wist de gsm de sessie (opnieuw inloggen met het wachtwoord). */
+export const MAX_POGINGEN = 10;
 
 function lees<T>(sleutel: string): T | null {
   try { return JSON.parse(localStorage.getItem(sleutel) || "null") as T | null; } catch { return null; }
@@ -40,12 +49,22 @@ export function leesPin(): PinRecord | null {
 /** Na een geslaagde login of een nieuwe pincode: onthoud wie dit toestel gebruikt. */
 export async function bewaarPin(info: { email: string; naam?: string | null; user_id: string }, pin: string) {
   const zout = hex(crypto.getRandomValues(new Uint8Array(16)));
-  schrijf(SLEUTEL, { email: info.email, naam: info.naam ?? null, user_id: info.user_id, zout, hash: await hashVan(pin, zout) } satisfies PinRecord);
+  schrijf(SLEUTEL, { email: info.email, naam: info.naam ?? null, user_id: info.user_id, zout, hash: await hashVan(pin, zout), v: 2 } satisfies PinRecord);
   wisPogingen();
+}
+
+/** Een pincode van vóór 0.11: toen was ze ook het wachtwoord van het account. */
+export const isOudePin = (r: PinRecord | null) => !!r && r.v !== 2;
+
+/** Na een nieuw wachtwoord: de oude pincode is niet langer het wachtwoord, enkel nog de pincode van dit toestel. */
+export function maakPinVanToestel() {
+  const r = leesPin();
+  if (r && r.v !== 2) schrijf(SLEUTEL, { ...r, v: 2 } satisfies PinRecord);
 }
 
 export function wisPin() {
   try { localStorage.removeItem(SLEUTEL); } catch { /* */ }
+  wisPogingen();
 }
 
 /** Controleert de pincode op dit toestel (werkt ook offline). */
@@ -72,6 +91,23 @@ export function pinFout(pin: string): string | null {
   return null;
 }
 
+/** Het minimum voor een wachtwoord (zet in Supabase dezelfde minimale lengte, zie de README). */
+export const WACHTWOORD_MIN = 12;
+const ZWAK = ["wachtwoord", "paswoord", "password", "bindr", "pokemon", "azerty", "qwerty", "welkom", "123456"];
+
+/** Een sterk wachtwoord: minstens 12 tekens, niet enkel cijfers en geen voor de hand liggend woord. */
+export function wachtwoordFout(w: string, email?: string): string | null {
+  if (w.length < WACHTWOORD_MIN) return `Minstens ${WACHTWOORD_MIN} tekens (nu ${w.length}).`;
+  if (/^\d+$/.test(w)) return "Niet enkel cijfers: dat is een pincode, geen wachtwoord.";
+  if (/^(.)\1+$/.test(w) || new Set(w.toLowerCase()).size < 5) return "Te weinig verschillende tekens.";
+  const klein = w.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const naam = email?.split("@")[0]?.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (naam && naam.length >= 4 && klein.includes(naam)) return "Niet je e-mailadres in je wachtwoord.";
+  // Een bekend woord met wat cijfers of tekens errond (Wachtwoord2026!, Bindr123456) is snel geraden.
+  for (const z of ZWAK) if (klein.includes(z) && klein.replace(z, "").replace(/\d/g, "").length < 4) return "Te makkelijk te raden. Kies een zin van een paar woorden.";
+  return null;
+}
+
 // ── Vergrendelen na een tijd niets doen ─────────────────────────────────────
 
 export function markeerActief() {
@@ -90,12 +126,22 @@ interface Pogingen { aantal: number; tot: number }
 function telPoging() {
   const p = lees<Pogingen>(POGINGEN) ?? { aantal: 0, tot: 0 };
   const aantal = p.aantal + 1;
-  // Na 5 foute pogingen 30 seconden wachten, daarna telkens langer.
+  // Na 5 foute pogingen 30 seconden wachten, daarna telkens langer; na 10 wist de app de sessie.
   const tot = aantal >= 5 ? Date.now() + Math.min(15 * 60, 30 * 2 ** (aantal - 5)) * 1000 : 0;
   schrijf(POGINGEN, { aantal, tot });
 }
 
-function wisPogingen() {
+/** Te veel foute pincodes op dit toestel: de sessie moet weg. */
+export function teVeelPogingen(): boolean {
+  return (lees<Pogingen>(POGINGEN)?.aantal ?? 0) >= MAX_POGINGEN;
+}
+
+/** Hoeveel pogingen er nog zijn voor de gsm de sessie wist. */
+export function pogingenOver(): number {
+  return Math.max(0, MAX_POGINGEN - (lees<Pogingen>(POGINGEN)?.aantal ?? 0));
+}
+
+export function wisPogingen() {
   try { localStorage.removeItem(POGINGEN); } catch { /* */ }
 }
 

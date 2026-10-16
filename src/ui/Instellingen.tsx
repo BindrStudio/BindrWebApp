@@ -2,13 +2,15 @@
 // (artikels, historiek, inzichten, boekhouding, je account) staat in Profiel.
 import { useState, type ReactNode } from "react";
 import {
-  backup, importeerTestset, meld, offlineKlaarzetten, openLabels, sluit, useApp, vernieuwPrijsgids, wisDemo, zetInstagram, zetInstellingen, zetZichtbaarVoorKlanten,
+  backup, importeerTestset, meld, offlineKlaarzetten, openLabels, sluit, useApp, vernieuwPrijsgids, wisDemo, zetBedrijfPubliek, zetFacebook, zetInstagram, zetInstellingen,
+  zetZichtbaarVoorKlanten,
 } from "../state";
 import { APP_VERSIE, klantUrl } from "../config";
 import { datumKort, euro, getal, vandaag } from "../lib/format";
 import { STANDAARD_INSTELLINGEN, type Drempel } from "../lib/pricing";
 import { PCT_MAX, PCT_MIN } from "../lib/bod";
-import { Icoon, QrBeeld, Sheet } from "./common";
+import { Icoon, QrBeeld, Sheet, Veld } from "./common";
+import type { BedrijfPubliek } from "../types";
 import { BedrijfVelden } from "./Boekhouding";
 import { bewaarBestand } from "./Afdruk";
 
@@ -149,7 +151,7 @@ function Klantencatalogus() {
   const bekijk = klantUrl(backend?.soort === "demo");
   return (
     <Groep titel="Klantencatalogus">
-      <p className="groep-uitleg">De pagina die klanten zien via onze link, zonder login: eerst wie we zijn, wat we aanbieden en onze komende beurzen (Profiel › Beurzen), dan de kaarten, binders, 3D-prints en sealed van de aangevinkte omgevingen. Kaarten waarvan het hartje eerst moet wisselen, blijven verborgen tot het nieuwe hartje bewaard is. Welke artikels klanten zien, kies je per artikel. Rechtsboven staat de knop Beheer.</p>
+      <p className="groep-uitleg">De pagina die klanten zien via onze link, zonder login: eerst wie we zijn, wat we aanbieden en onze komende beurzen (Profiel › Beurzen), dan de kaarten, binders, 3D-prints en sealed van de aangevinkte omgevingen. Kaarten waarvan het hartje eerst moet wisselen, blijven verborgen tot het nieuwe hartje bewaard is. Welke artikels klanten zien, kies je per artikel. Onderaan staat een kleine link Beheer.</p>
       {omgevingen.length > 0 && omgevingen.map((o) => (
         <label key={o.id} className="schakel rij">
           <input type="checkbox" checked={o.zichtbaar_voor_klanten} onChange={(e) => zetZichtbaarVoorKlanten(o.id, e.target.checked)} />
@@ -165,6 +167,8 @@ function Klantencatalogus() {
           {naam.trim().replace(/^@/, "") !== instagram && <button className="tekstknop klein" onClick={() => zetInstagram(naam)}>Bewaar</button>}
         </span>
       </div>
+      <FacebookRij />
+      <WettelijkeGegevens />
       <details className="wie-ziet-wat">
         <summary>Wie ziet wat?</summary>
         <table>
@@ -190,6 +194,68 @@ function Klantencatalogus() {
         </Sheet>
       )}
     </Groep>
+  );
+}
+
+function FacebookRij() {
+  const { facebook } = useApp();
+  const [link, setLink] = useState(facebook);
+  return (
+    <div className="rij facebook-rij">
+      <span><Icoon naam="facebook" maat={18} /> Facebook</span>
+      <span className="facebook-veld">
+        <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://www.facebook.com/…" inputMode="url" autoCapitalize="none" autoCorrect="off" aria-label="Link naar Facebook" />
+        {link.trim() !== facebook && <button className="tekstknop klein" onClick={() => { if (!zetFacebook(link)) setLink(facebook); }}>Bewaar</button>}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Wat de wet vraagt op de website van een onderneming: naam, vestigingsadres, ondernemingsnummer, e-mail.
+ * Staat onderaan de klantenpagina en in de privacyverklaring en de verkoopvoorwaarden.
+ */
+function WettelijkeGegevens() {
+  const { bedrijfPubliek, boekhouding, omgeving } = useApp();
+  const [open, setOpen] = useState(false);
+  const leeg: BedrijfPubliek = { handelsnaam: "Bind'r", naam: "", adres: "", kbo: "", email: "", telefoon: "", vrijstelling: true };
+  const [v, setV] = useState<BedrijfPubliek>(() => ({ ...leeg, ...(bedrijfPubliek ?? {}) }));
+  const ontbreekt = ["naam", "adres", "kbo", "email"].filter((k) => !(bedrijfPubliek?.[k as keyof BedrijfPubliek] as string | undefined)?.trim());
+  const boek = omgeving ? boekhouding.bedrijven[omgeving] : undefined;
+  const veld = (k: keyof BedrijfPubliek, label: string, extra: { placeholder?: string; type?: string; hint?: string; autoComplete?: string } = {}) => (
+    <Veld label={label} hint={extra.hint}>
+      <input type={extra.type ?? "text"} value={(v[k] as string | null | undefined) ?? ""} placeholder={extra.placeholder} autoComplete={extra.autoComplete}
+        onChange={(e) => setV({ ...v, [k]: e.target.value })} />
+    </Veld>
+  );
+  return (
+    <div className="wettelijk">
+      <button className="rij-knop" onClick={() => setOpen(!open)}>
+        <Icoon naam="boek" maat={18} /> Wettelijke gegevens op de klantenpagina
+        {ontbreekt.length > 0 && <span className="badge rood-badge">nog in te vullen</span>}
+      </button>
+      {open && (
+        <div className="formulier wettelijk-form">
+          <p className="groep-uitleg">De wet vraagt dat een onderneming op haar website toont wie ze is: de naam van de ondernemer, het vestigingsadres, het ondernemingsnummer en een e-mailadres. Ze komen onderaan de klantenpagina, in de privacyverklaring en in de verkoopvoorwaarden.</p>
+          {boek && (boek.naam || boek.adres || boek.kbo) && (
+            <button type="button" className="tekstknop klein" onClick={() => setV({ ...v, naam: v.naam || boek.naam || "", adres: v.adres || boek.adres || "", kbo: v.kbo || boek.kbo || "" })}>
+              Overnemen uit de gegevens voor de boekhouding
+            </button>
+          )}
+          {veld("handelsnaam", "Naam van de zaak", { placeholder: "Bind'r" })}
+          {veld("naam", "Naam van de ondernemer", { placeholder: "Voornaam Naam", hint: "Bij een eenmanszaak: jouw naam.", autoComplete: "name" })}
+          {veld("adres", "Vestigingsadres", { placeholder: "Straat 1, 9000 Gent", autoComplete: "street-address" })}
+          {veld("kbo", "Ondernemingsnummer", { placeholder: "0123.456.789" })}
+          {veld("email", "E-mail voor klanten", { type: "email", placeholder: "hallo@…", autoComplete: "email" })}
+          {veld("telefoon", "Telefoon (optioneel)", { type: "tel" })}
+          <label className="schakel rij">
+            <input type="checkbox" checked={v.vrijstelling !== false} onChange={(e) => setV({ ...v, vrijstelling: e.target.checked })} />
+            <span>Bijzondere vrijstellingsregeling kleine ondernemingen <span className="zacht klein">(we rekenen geen btw aan)</span></span>
+          </label>
+          <button className="knop" onClick={() => { zetBedrijfPubliek(v); meld("Wettelijke gegevens bewaard"); setOpen(false); }}>Bewaren</button>
+        </div>
+      )}
+    </div>
   );
 }
 

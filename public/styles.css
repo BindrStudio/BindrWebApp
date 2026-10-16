@@ -1,6 +1,15 @@
 /* Bind'r Voorraad — huisstijl uit het logo: perzik, zeeblauw met stiksel, boter en bruine inkt.
    Titels in Fredoka (rond, zoals de letters van het logo), de rest in de systeemletter. */
 
+/* Fredoka staat zelf in vendor/ (geen Google Fonts: zo gaat er geen IP-adres naar Google, zie de privacyverklaring). */
+@font-face {
+  font-family: "Fredoka";
+  src: url("vendor/fredoka/fredoka-latin.woff") format("woff");
+  font-weight: 500 600;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --perzik: #fcebd7;
   --room: #fff8ef;
@@ -58,14 +67,14 @@ h1, h2, h3 { font-family: var(--titel); font-weight: 600; margin: 0; letter-spac
 .naam-origineel { color: var(--inkt-2); font-size: 14px; }
 
 /* ── Opstart en login ─────────────────────────────────────────────────── */
-.splash { min-height: 100dvh; display: grid; place-content: center; gap: 24px; justify-items: center; }
+.splash { min-height: 100vh; min-height: 100dvh; display: grid; place-content: center; gap: 24px; justify-items: center; }
 .splash img { animation: dobber 2.4s ease-in-out infinite; }
 .laadbalk { width: 120px; height: 6px; border-radius: 3px; background: var(--lijn); overflow: hidden; }
 .laadbalk span { display: block; height: 100%; width: 40%; border-radius: 3px; background: var(--zee); animation: laad 1.1s ease-in-out infinite; }
 @keyframes laad { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
 @keyframes dobber { 50% { transform: translateY(-6px) rotate(-1deg); } }
 
-.login { min-height: 100dvh; max-width: 420px; margin: 0 auto; padding: calc(32px + var(--boven)) 24px 32px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.login { min-height: 100vh; min-height: 100dvh; max-width: 420px; margin: 0 auto; padding: calc(32px + var(--boven)) 24px 32px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .login-logo img { width: 240px; margin: 8px 0 -8px; }
 .login-titel { font-size: 30px; }
 .login-sub { margin: -8px 0 12px; color: var(--inkt-2); }
@@ -75,7 +84,7 @@ h1, h2, h3 { font-family: var(--titel); font-weight: 600; margin: 0; letter-spac
 .login-voet { font-size: 13px; color: var(--inkt-3); margin: 0; }
 
 /* ── App-kader ─────────────────────────────────────────────────────────── */
-.app { min-height: 100dvh; padding-bottom: calc(76px + var(--onder)); }
+.app { min-height: 100vh; min-height: 100dvh; padding-bottom: calc(76px + var(--onder)); }
 .tab-inhoud { animation: verschijn .25s var(--zacht-uit); }
 @keyframes verschijn { from { opacity: 0; transform: translateY(6px); } }
 .scherm { max-width: 900px; margin: 0 auto; padding: calc(14px + var(--boven)) 16px 24px; display: flex; flex-direction: column; gap: 14px; }
@@ -91,7 +100,8 @@ h1, h2, h3 { font-family: var(--titel); font-weight: 600; margin: 0; letter-spac
 .tabbalk {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
   display: grid; grid-template-columns: repeat(5, 1fr);
-  padding: 6px 6px calc(6px + var(--onder));
+  /* Op een tablet niet over de hele breedte: de tabs blijven bij elkaar en binnen bereik van je duimen. */
+  padding: 6px max(6px, calc(50vw - 340px)) calc(6px + var(--onder));
   background: rgba(255, 248, 239, .82);
   backdrop-filter: saturate(1.6) blur(18px); -webkit-backdrop-filter: saturate(1.6) blur(18px);
   border-top: 1px solid rgba(59, 42, 18, .08);
@@ -256,17 +266,17 @@ h1, h2, h3 { font-family: var(--titel); font-weight: 600; margin: 0; letter-spac
 .sheet-achtergrond { position: fixed; inset: 0; z-index: 60; background: rgba(40, 28, 10, .38); display: flex; align-items: flex-end; justify-content: center; animation: vervaag .25s ease both; }
 @keyframes vervaag { from { opacity: 0; } }
 .sheet {
-  width: 100%; max-width: 640px; max-height: calc(100dvh - 40px - var(--boven));
+  width: 100%; max-width: 640px; max-height: calc(100vh - 40px - var(--boven)); max-height: calc(100dvh - 40px - var(--boven));
   display: flex; flex-direction: column;
   background: var(--perzik); border-radius: 24px 24px 0 0; box-shadow: var(--schaduw-hoog);
   animation: omhoog .45s var(--veer) both;
 }
-.sheet.vol { height: calc(100dvh - 40px - var(--boven)); }
+.sheet.vol { height: calc(100vh - 40px - var(--boven)); height: calc(100dvh - 40px - var(--boven)); }
 @keyframes omhoog { from { transform: translateY(100%); } }
 @media (min-width: 700px) {
   .sheet-achtergrond { align-items: center; }
-  .sheet { border-radius: 24px; max-height: 88dvh; }
-  .sheet.vol { height: 88dvh; }
+  .sheet { border-radius: 24px; max-height: 88vh; max-height: 88dvh; }
+  .sheet.vol { height: 88vh; height: 88dvh; }
   .sheet-greep { display: none; }
 }
 .sheet-greep { width: 38px; height: 5px; border-radius: 3px; background: rgba(59, 42, 18, .2); margin: 8px auto 0; flex: none; }
@@ -389,7 +399,7 @@ h1, h2, h3 { font-family: var(--titel); font-weight: 600; margin: 0; letter-spac
 @keyframes twinkel { 0%, 100% { transform: scale(.6) rotate(0); opacity: .5; } 50% { transform: scale(1.15) rotate(20deg); opacity: 1; } }
 
 /* ── Scannen ───────────────────────────────────────────────────────────── */
-.camera-vak { position: relative; aspect-ratio: 1; max-height: 56dvh; width: 100%; border-radius: 22px; overflow: hidden; background: #241a0b; box-shadow: var(--schaduw); }
+.camera-vak { position: relative; aspect-ratio: 1; max-height: 56vh; max-height: 56dvh; width: 100%; border-radius: 22px; overflow: hidden; background: #241a0b; box-shadow: var(--schaduw); }
 .camera-vak.kaartvorm { aspect-ratio: 3 / 4; }
 .camera-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .camera-laden { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255, 255, 255, .7); font-size: 14px; }
@@ -744,8 +754,8 @@ a.knop { text-decoration: none; }
 
 /* Scannen: drie in één, met een lijstje */
 .scanner { display: grid; gap: 10px; }
-.scanner .camera-vak.kaartvorm { aspect-ratio: 4 / 5; max-height: 52dvh; }
-.scanner.compact .camera-vak.kaartvorm { aspect-ratio: 4 / 3; max-height: 32dvh; }
+.scanner .camera-vak.kaartvorm { aspect-ratio: 4 / 5; max-height: 52vh; max-height: 52dvh; }
+.scanner.compact .camera-vak.kaartvorm { aspect-ratio: 4 / 3; max-height: 32vh; max-height: 32dvh; }
 .scanner.compact .zoeker.kaart { width: 46%; }
 .camera-status { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 2; display: inline-flex; align-items: center; gap: 8px; max-width: calc(100% - 80px);
   padding: 7px 12px; border-radius: 999px; background: rgba(36, 26, 11, .62); color: #fff; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -926,7 +936,7 @@ a.knop { text-decoration: none; }
 /* De kaart in het groot (tik op de foto in een detail) */
 .kaart-groot { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; align-content: center; gap: 14px; padding: calc(var(--boven) + 56px) 16px calc(var(--onder) + 28px);
   background: rgba(28, 20, 8, .86); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: vervaag .2s ease both; cursor: zoom-out; }
-.kaart-groot-kaart { width: min(92vw, calc((100dvh - 190px) * .716), 560px); animation: groot-in .32s var(--veer) both; }
+.kaart-groot-kaart { width: min(92vw, calc((100vh - 190px) * .716), 560px); width: min(92vw, calc((100dvh - 190px) * .716), 560px); animation: groot-in .32s var(--veer) both; }
 .kaart-groot-kaart .foto { border-radius: 4.5% / 3.2%; box-shadow: 0 24px 60px rgba(0, 0, 0, .45); }
 .kaart-groot-sluit { position: absolute; top: calc(var(--boven) + 12px); right: 16px; background: rgba(255, 255, 255, .92); }
 .kaart-groot-tekst { display: grid; gap: 2px; text-align: center; color: #fff; }
@@ -1391,6 +1401,8 @@ a.knop { text-decoration: none; }
 .pct-terug { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border-radius: 50%; text-decoration: none; }
 /* Het binnenschuiven van een scherm mag de pagina nooit even breder maken (iPhone zoomt dan uit). */
 .app { overflow-x: clip; }
+/* Oudere Safari (iOS 15) kent clip niet: dan liever niet schuiven dan een pagina die verspringt. */
+@supports not (overflow-x: clip) { .tab-inhoud.van-rechts, .tab-inhoud.van-links { animation-name: none; } }
 .zoeker-chips { flex: none; }
 .boek-lijst { grid-template-columns: minmax(0, 1fr); }
 .boek-lijst input[type="date"] { min-width: 0; width: 100%; }
@@ -1477,3 +1489,27 @@ a.knop { text-decoration: none; }
 .aanvraag-beelden button { display: grid; gap: 4px; text-align: center; font-size: 12px; color: var(--inkt-2); }
 .aanvraag-beelden img { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 12px; background: var(--wit); box-shadow: var(--schaduw); }
 ol.stappen { margin: 6px 0; padding-left: 20px; gap: 6px; }
+
+/* Kassa: per kaart een eigen % — dan geen grote schuifknop, enkel het algemene percentage */
+.bod-algemeen { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border-radius: 14px; background: var(--zee-licht); }
+.bod-algemeen-tekst { display: grid; gap: 0; flex: 1; min-width: 140px; }
+.bod-algemeen-tekst strong { font-size: 14px; color: var(--inkt); }
+.pct-stapper.groot button { width: 38px; height: 38px; font-size: 20px; }
+.pct-stapper.groot span { min-width: 54px; font-family: var(--titel); font-size: 20px; font-weight: 600; text-align: center; }
+.bod-samen-label { padding: 4px 10px; border-radius: 999px; background: var(--hart-licht); color: var(--hart-inkt); font-size: 13px; }
+.bod-algemeen .pct-stapper { background: var(--wit); margin-top: 0; }
+.facebook-rij { align-items: center; gap: 10px; }
+.facebook-rij > span:first-child { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.facebook-veld { display: inline-flex; align-items: center; gap: 6px; flex: 1; min-width: 0; justify-content: flex-end; }
+.facebook-veld input { flex: 1; min-width: 0; max-width: 260px; border: 0; border-bottom: 1.5px solid var(--lijn); background: none; padding: 4px 2px; font-size: 14px; text-align: right; }
+.facebook-veld input:focus { outline: none; border-color: var(--zee); }
+.wettelijk .rij-knop .badge { margin-left: auto; }
+.wettelijk-form { padding: 6px 0 12px; }
+
+/* Wachtwoord kiezen (0.11): uitleg onder het veld, tonen wat je typt. */
+.wachtwoord-uitleg { margin: -2px 0 0; font-size: 13px; color: var(--inkt-3); line-height: 1.4; }
+.wachtwoord-uitleg.fout { color: var(--hart-inkt); }
+.wachtwoord-uitleg.goed { color: var(--zee-donker); font-weight: 600; }
+.toon-wachtwoord { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--inkt-2); }
+.login-form .toon-wachtwoord input { width: 18px; height: 18px; padding: 0; accent-color: var(--zee); }
+.wachtwoord-sheet { padding: 4px 0 12px; }

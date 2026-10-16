@@ -60,13 +60,13 @@ export function AanvragenSheet({ id }: { id?: string }) {
 }
 
 function AanvraagDetail({ a }: { a: Aanvraag }) {
-  const [beelden, setBeelden] = useState<Pick<Aanvraag, "artwork" | "voorbeeld"> | null>(null);
+  const [beelden, setBeelden] = useState<Pick<Aanvraag, "artwork" | "voorbeeld" | "beelden"> | null>(null);
   const [wissen, setWissen] = useState(false);
   const [groot, setGroot] = useState<string | null>(null);
   useEffect(() => {
     let weg = false;
     if (a.status === "nieuw") zetAanvraagStatus(a.id, "bekeken");
-    laadAanvraagBeelden(a.id).then((b) => { if (!weg) setBeelden(b); }, () => { if (!weg) setBeelden({ artwork: null, voorbeeld: null }); });
+    laadAanvraagBeelden(a.id).then((b) => { if (!weg) setBeelden(b); }, () => { if (!weg) setBeelden({ artwork: null, voorbeeld: null, beelden: null }); });
     return () => { weg = true; };
   }, [a.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const onderwerp = encodeURIComponent("Je binder bij Bind'r");
@@ -74,6 +74,7 @@ function AanvraagDetail({ a }: { a: Aanvraag }) {
   const mailbaar = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(a.email);
   const tekst = encodeURIComponent(`Hallo ${a.naam.split(" ")[0]},\n\nBedankt voor je aanvraag voor een eigen binder!\n\n`);
   const fotos = [beelden?.voorbeeld, beelden?.artwork].map(veiligeFoto).filter((x): x is string => !!x);
+  const ideeen = (beelden?.beelden ?? []).map(veiligeFoto).filter((x): x is string => !!x);
 
   return (
     <Sheet titel={a.naam} onSluit={() => openAanvragen()}>
@@ -82,13 +83,23 @@ function AanvraagDetail({ a }: { a: Aanvraag }) {
         <dl className="gegevens">
           <dt>E-mail</dt><dd>{mailbaar ? <a href={`mailto:${a.email}?subject=${onderwerp}&body=${tekst}`}>{a.email}</a> : a.email}</dd>
           {a.telefoon && <><dt>Telefoon</dt><dd><a href={`tel:${a.telefoon.replace(/[^\d+]/g, "")}`}>{a.telefoon}</a></dd></>}
-          {a.grootte && <><dt>Binder</dt><dd>{a.grootte}</dd></>}
+          {a.grootte && <><dt>Binder</dt><dd>{a.grootte}{a.toploader === true ? ", voor toploaders" : a.toploader === false ? ", geen toploaders" : ""}</dd></>}
           {a.kleur && <><dt>Kleur</dt><dd>{a.kleur}</dd></>}
         </dl>
         <section className="blok">
           <h3>Het idee</h3>
           <p className="aanvraag-volledig">{a.idee}</p>
         </section>
+        {ideeen.length > 0 && (
+          <section className="blok">
+            <h3>Afbeeldingen bij het idee</h3>
+            <div className="aanvraag-beelden">
+              {ideeen.map((f, i) => (
+                <button key={i} type="button" onClick={() => setGroot(f)} aria-label={`Afbeelding ${i + 1} groot bekijken`}><img src={f} alt="" /><span>Idee {i + 1}</span></button>
+              ))}
+            </div>
+          </section>
+        )}
         {beelden == null ? <p className="zacht klein">Afbeeldingen laden…</p> : fotos.length > 0 && (
           <section className="blok">
             <h3>Ontwerp</h3>

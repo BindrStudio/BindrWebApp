@@ -1,4 +1,4 @@
--- Bind'r Stock & Beurs App — databaseschema (versie 0.10: etalage, meer foto's per artikel, aanvragen voor een eigen binder)
+-- Bind'r Stock & Beurs App — databaseschema (versie 0.11: aanvragen met toploader en afbeeldingen, wettelijke gegevens en Facebook op de klantenpagina)
 --
 -- Uitvoeren: Supabase-dashboard › SQL Editor › New query › dit hele bestand plakken › Run.
 -- Het script mag gerust een tweede keer lopen; het overschrijft geen gegevens.
@@ -340,6 +340,22 @@ alter table public.aanvragen add constraint aanvragen_velden_check check (
 ) not valid;
 create index if not exists aanvragen_tijd_idx on public.aanvragen (aangemaakt_op desc);
 
+-- 0.11: toploader ja/nee en tot drie afbeeldingen van het idee (foto's, schetsen, screenshots).
+alter table public.aanvragen add column if not exists toploader boolean;
+alter table public.aanvragen add column if not exists beelden text[];
+create or replace function public.beelden_ok(b text[])
+returns boolean
+language sql
+immutable
+as $$
+  select b is null or (
+    coalesce(array_length(b, 1), 0) <= 3
+    and not exists (select 1 from unnest(b) x where x is null or length(x) > 250000 or x !~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$')
+  )
+$$;
+alter table public.aanvragen drop constraint if exists aanvragen_beelden_check;
+alter table public.aanvragen add constraint aanvragen_beelden_check check (public.beelden_ok(beelden)) not valid;
+
 -- Tegen spam en een volle database: hoogstens 20 aanvragen per uur en 60 per dag in totaal, 3 per e-mailadres
 -- per dag. Afbeeldingen bewaren we van hoogstens 10 aanvragen per dag en zolang er minder dan 40 open aanvragen
 -- met afbeeldingen zijn (daarna enkel de tekst): zo blijven de afbeeldingen samen onder ~30 MB. Het slot zorgt
@@ -352,6 +368,9 @@ set search_path = public
 as $$
 begin
   perform pg_advisory_xact_lock(hashtext('bindr-aanvragen'));
+  if coalesce(array_length(new.beelden, 1), 0) = 0 then
+    new.beelden := null; -- een lege lijst telt niet als afbeeldingen
+  end if;
   if (select count(*) from public.aanvragen where aangemaakt_op > now() - interval '1 hour') >= 20
      or (select count(*) from public.aanvragen where aangemaakt_op > now() - interval '1 day') >= 60 then
     raise exception 'Te veel aanvragen op korte tijd. Probeer het straks opnieuw.';
@@ -359,11 +378,12 @@ begin
   if (select count(*) from public.aanvragen where lower(email) = lower(new.email) and aangemaakt_op > now() - interval '1 day') >= 3 then
     raise exception 'Je stuurde vandaag al drie aanvragen. We antwoorden zo snel mogelijk.';
   end if;
-  if (new.artwork is not null or new.voorbeeld is not null) and (
-       (select count(*) from public.aanvragen where aangemaakt_op > now() - interval '1 day' and (artwork is not null or voorbeeld is not null)) >= 10
-       or (select count(*) from public.aanvragen where status in ('nieuw', 'bekeken') and (artwork is not null or voorbeeld is not null)) >= 40) then
+  if (new.artwork is not null or new.voorbeeld is not null or new.beelden is not null) and (
+       (select count(*) from public.aanvragen where aangemaakt_op > now() - interval '1 day' and (artwork is not null or voorbeeld is not null or beelden is not null)) >= 10
+       or (select count(*) from public.aanvragen where status in ('nieuw', 'bekeken') and (artwork is not null or voorbeeld is not null or beelden is not null)) >= 40) then
     new.artwork := null;
     new.voorbeeld := null;
+    new.beelden := null;
   end if;
   new.status := 'nieuw';
   new.aangemaakt_op := now();
@@ -594,8 +614,9 @@ revoke all on public.beheerders, public.exemplaren, public.artikelen, public.ins
   public.etalage, public.artikelfotos from anon;
 -- Een aanvraag indienen (Ontwerp je binder): enkel toevoegen, met deze kolommen; de omgeving komt van standaard_omgeving().
 revoke all on public.aanvragen from anon;
-grant insert (naam, email, telefoon, grootte, kleur, idee, artwork, voorbeeld) on public.aanvragen to anon;
+grant insert (naam, email, telefoon, grootte, kleur, idee, artwork, voorbeeld, toploader, beelden) on public.aanvragen to anon;
 grant execute on function public.standaard_omgeving() to anon;
+grant execute on function public.beelden_ok(text[]) to anon, authenticated;
 
 -- ── Kassa: transacties boeken, ongedaan maken en conflicten oplossen ─────────
 -- Dezelfde regels als src/lib/kassa.ts (pasToe, maakOngedaan, losConflictOp).
@@ -950,12 +971,12 @@ revoke all on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid)
 grant execute on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid),
   public.los_conflict_op(uuid, uuid, uuid), public.aanvaard_conflict(uuid, text), public.markeer_prijzen(uuid, jsonb) to authenticated;
 
--- Welke versie van dit schema draait er? De app vraagt het na het inloggen (0.8 = 8, 0.9 = 9, 0.10 = 10).
+-- Welke versie van dit schema draait er? De app vraagt het na het inloggen (0.8 = 8, 0.9 = 9, 0.10 = 10, 0.11 = 11).
 create or replace function public.schema_versie()
 returns integer
 language sql
 stable
-as $$ select 10 $$;
+as $$ select 11 $$;
 revoke all on function public.schema_versie() from public, anon;
 grant execute on function public.schema_versie() to authenticated;
 
@@ -1007,11 +1028,12 @@ create view public.publieke_etalage as
     from public.etalage
    where omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten);
 
--- Instellingen die de klantenpagina nodig heeft (de Instagram-naam, de sleutel om aanvragen te mailen).
+-- Instellingen die de klantenpagina nodig heeft: Instagram en Facebook, de sleutel om aanvragen te mailen en de
+-- wettelijke gegevens van de onderneming (naam, vestigingsadres, ondernemingsnummer, contact).
 create or replace view public.publieke_instellingen as
   select sleutel, waarde
     from public.instellingen
-   where sleutel in ('instagram', 'catalogus_tekst', 'aanvraag_sleutel');
+   where sleutel in ('instagram', 'catalogus_tekst', 'aanvraag_sleutel', 'facebook', 'bedrijf_publiek');
 
 -- Komende beurzen ("kom langs op onze stand"), met uren en de website van de beurs.
 drop view if exists public.publieke_beurzen;

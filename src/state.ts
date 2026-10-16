@@ -4,11 +4,11 @@
 // werkt) en gaat daarna via een wachtrij naar de server. Lukt dat niet door een
 // netwerkfout, dan blijft ze in de wachtrij tot er weer verbinding is.
 import { useSyncExternalStore } from "react";
-import { isNetwerkFout, type Alles, type Backend, type PrijsMarkering } from "./store/backend";
+import { Fout, isNetwerkFout, type Alles, type Backend, type PrijsMarkering } from "./store/backend";
 import { DemoBackend } from "./store/demo";
 import { BOEKHOUDING_VANAF, ETALAGE_VANAF, SupabaseBackend } from "./store/supabase";
-import type { Aankoopfoto, Aanvraag, AanvraagStatus, Aanwezig, Artikel, Artikelfoto, Etalagefoto, ArtikelType, Bedrijf, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Tegenpartij, Transactie } from "./types";
-import { bewaarPin, controleerPin, isVergrendeld, leesPin, markeerActief, wisPin, VERGRENDEL_NA_MS } from "./lib/pin";
+import type { Aankoopfoto, Aanvraag, AanvraagStatus, Aanwezig, Artikel, Artikelfoto, Etalagefoto, ArtikelType, Bedrijf, BedrijfPubliek, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Tegenpartij, Transactie } from "./types";
+import { bewaarPin, controleerPin, isOudePin, isVergrendeld, leesPin, maakPinVanToestel, markeerActief, pinFout, teVeelPogingen, wachtwoordFout, wisPin, wisPogingen, VERGRENDEL_NA_MS } from "./lib/pin";
 import { laadPrijsgids, type Prijsgids } from "./lib/prices";
 import { prijscheck, STANDAARD_INSTELLINGEN, type Instellingen, type TeWijzigen } from "./lib/pricing";
 import { dagVan, euro, vandaag } from "./lib/format";
@@ -25,7 +25,7 @@ import {
 } from "./lib/kassa";
 import { toonCode } from "./lib/code";
 import { bodVanExact, exactBod, marktwaarde, pasBodToe, PCT_MAX, PCT_MIN, type BodInstelling } from "./lib/bod";
-import { APP_VERSIE, INSTAGRAM } from "./config";
+import { APP_VERSIE, BEHEER_PAD, FACEBOOK, INSTAGRAM } from "./config";
 
 export interface Toast {
   id: number;
@@ -62,7 +62,7 @@ export interface Mandje {
 
 export interface State {
   // slot = vergrendeld (pincode ingeven), pin = een pincode kiezen
-  fase: "start" | "login" | "slot" | "pin" | "laden" | "klaar";
+  fase: "start" | "login" | "slot" | "pin" | "wachtwoord" | "laden" | "klaar";
   backend: Backend | null;
   exemplaren: Exemplaar[];
   artikelen: Artikel[];
@@ -74,6 +74,8 @@ export interface State {
   prijscheckOp: string | null;
   instellingen: Instellingen;
   instagram: string;
+  facebook: string;                // link naar onze Facebook-pagina (leeg = niet tonen)
+  bedrijfPubliek: BedrijfPubliek | null; // wettelijke gegevens op de klantenpagina
   aanvraagSleutel: string | null; // Web3Forms: aanvragen van klanten ook per mail (openbaar bedoeld)
   /** Boekhouding (gedeeld via de database): bedrijfsgegevens en welke dagen al in Dexxter staan, per omgeving. */
   boekhouding: { bedrijven: Record<string, Bedrijf>; ingegeven: Record<string, Record<string, boolean>> };
@@ -132,6 +134,8 @@ let state: State = {
   prijscheckOp: null,
   instellingen: leesJson(INSTELLINGEN, STANDAARD_INSTELLINGEN),
   instagram: INSTAGRAM,
+  facebook: FACEBOOK,
+  bedrijfPubliek: null,
   aanvraagSleutel: null,
   boekhouding: { bedrijven: {}, ingegeven: {} },
   toasts: [],
@@ -523,16 +527,18 @@ function vervangTransactie(t: Transactie) {
   zet({ transacties: i < 0 ? [...state.transacties, t] : state.transacties.map((x) => (x.id === t.id ? t : x)) });
 }
 
-/** Werd de sessie op de server ingetrokken (bv. nieuwe pincode op een andere gsm)? */
+/** Werd de sessie op de server ingetrokken (bv. een nieuw wachtwoord op een andere gsm)? */
 const sessieVerlopen = () => state.backend?.soort === "supabase" && (state.backend as SupabaseBackend).verlopen;
 
 /** Opnieuw inloggen; de wachtrij blijft op het toestel en gaat door na de login. */
 function naarLoginNaVerlopen() {
   void state.backend?.logUit(); // de oude sessie van dit toestel opruimen
-  wisPin();
+  // Een pincode van dit toestel mag blijven (na het inloggen met je wachtwoord volstaat ze weer). Een oude
+  // pincode (van vóór 0.11 ook het wachtwoord) gaat weg.
+  if (isOudePin(leesPin())) wisPin();
   wachtend = null;
   zet({ backend: null, fase: "login", open: null });
-  meld("Je sessie is verlopen. Log opnieuw in met je e-mail en pincode; wat nog moest doorgaan, blijft bewaard.", "fout", undefined, 9000);
+  meld("Je sessie is verlopen. Log opnieuw in met je e-mail en wachtwoord; wat nog moest doorgaan, blijft bewaard.", "fout", undefined, 9000);
 }
 
 // ── Start, login, demo ───────────────────────────────────────────────────────
@@ -556,6 +562,7 @@ export async function start() {
         return;
       }
       if (state.fase === "klaar" && moetVergrendelen()) return vergrendel();
+      if (state.fase === "wachtwoord" && wachtwoordStapVerlopen()) return void stopWachtwoordStap();
       if (state.fase === "klaar") void synchroniseer();
     });
     // Elke tik of toets telt als "bezig": pas na 10 minuten niets doen vraagt de app de pincode opnieuw.
@@ -568,7 +575,11 @@ export async function start() {
     window.addEventListener("pointerdown", bezigMet, { passive: true });
     window.addEventListener("keydown", bezigMet, { passive: true });
     // Ook als de gsm open op tafel ligt: na 10 minuten zonder tik vergrendelen.
-    setInterval(() => { if (state.fase === "klaar" && moetVergrendelen()) vergrendel(); }, 30000);
+    setInterval(() => {
+      if (state.fase === "klaar" && moetVergrendelen()) vergrendel();
+      // Ook het scherm voor een nieuw wachtwoord blijft niet open liggen (het kent je huidige wachtwoord).
+      if (state.fase === "wachtwoord" && wachtwoordStapVerlopen()) void stopWachtwoordStap();
+    }, 30000);
     // Samen werken: om de 30 seconden ophalen wat de anderen deden, om de minuut melden dat je er bent.
     setInterval(() => {
       if (document.visibilityState === "visible" && state.fase === "klaar" && state.backend?.soort === "supabase") void haalWijzigingen();
@@ -576,6 +587,13 @@ export async function start() {
     setInterval(() => {
       if (document.visibilityState === "visible" && state.fase === "klaar" && state.backend?.soort === "supabase") void meldAanwezig();
     }, 60000);
+  }
+  // De link uit een herstelmail (wachtwoord vergeten): een nieuw wachtwoord kiezen. Een verlopen of al gebruikte
+  // link komt terug als #error=…&error_code=otp_expired.
+  if (typeof location !== "undefined" && /type=recovery/.test(location.hash)) return herstelVanLink(location.hash);
+  if (typeof location !== "undefined" && /error_code=/.test(location.hash)) {
+    try { history.replaceState(null, "", location.pathname + location.search); } catch { /* */ }
+    meld("Deze link is verlopen of al gebruikt. Vraag op het inlogscherm een nieuwe mail.", "fout", undefined, 12000);
   }
   const modus = localStorage.getItem(MODUS);
   if (modus === "demo") return gebruik(new DemoBackend());
@@ -591,11 +609,18 @@ export async function start() {
     await backend.logUit();
     return zet({ fase: "login" });
   }
+  // Te veel foute pincodes, maar de app werd afgesloten voor de sessie weg was: alsnog weg.
+  if (teVeelPogingen()) return wisNaTeVeelPogingen();
+  if (isOudePin(pin)) markeerZwak(backend.gebruikerId());
   if (isVergrendeld()) return zet({ fase: "slot", backend: null });
+  if (moetNieuwWachtwoord(backend)) return naarWachtwoord(backend, { huidig: null, pin: null, reden: isOudePin(pin) ? "oud" : "zwak" });
   await gebruik(backend);
 }
 
-// ── Pincode ──────────────────────────────────────────────────────────────────
+// ── Pincode en wachtwoord ───────────────────────────────────────────────────
+// Het wachtwoord van het account vraagt de app enkel bij het inloggen (nieuwe gsm, sessie verlopen, na
+// uitloggen). De pincode opent de app op dit toestel en gaat nooit naar de server (lib/pin.ts).
+
 /** De pincode op dit toestel, enkel als ze van wie nu ingelogd is. */
 function eigenPin(b: Backend | null = state.backend ?? wachtend) {
   const p = leesPin();
@@ -610,49 +635,218 @@ function vergrendel() {
   zet({ fase: "slot", open: null });
 }
 
-/** De pincode op dit toestel: ontgrendelt de app (ook zonder internet). */
-export async function ontgrendel(pin: string): Promise<boolean> {
-  if (!eigenPin()) { await logUit(); return false; }
-  if (!(await controleerPin(pin))) return false;
+/**
+ * Voor het verplichte nieuwe wachtwoord (fase "wachtwoord"), enkel in het geheugen: het huidige wachtwoord als
+ * het net ingetypt werd (de oude pincode die ook het wachtwoord was, of een zwak wachtwoord bij het inloggen;
+ * anders vraagt het scherm het), de pincode die daarna de pincode van dit toestel wordt, en sinds wanneer
+ * (na 10 minuten vergeet de app het huidige wachtwoord en gaat ze op slot).
+ */
+let nieuwWachtwoord: { huidig: string | null; pin: string | null; reden: "oud" | "zwak" | "herstel"; sinds: number } | null = null;
+
+/** Waarom de app een nieuw wachtwoord vraagt (voor de uitleg op het scherm). */
+export const redenNieuwWachtwoord = () => nieuwWachtwoord?.reden ?? null;
+/** Moet het scherm het huidige wachtwoord vragen? (niet na een herstelmail, niet als het net ingetypt werd) */
+export const vraagHuidigWachtwoord = () => !!nieuwWachtwoord && nieuwWachtwoord.reden !== "herstel" && nieuwWachtwoord.huidig === null;
+
+// Weet dit toestel dat het wachtwoord van deze gebruiker nog zwak is (de oude pincode)? Dan vraagt de app een
+// nieuw, ook na herladen of als iemand intussen enkel de pincode wijzigde. Weg zodra het nieuwe bewaard is.
+const ZWAK_WACHTWOORD = "bindr-zwak-wachtwoord-v1";
+function markeerZwak(id: string | null) { if (id) try { localStorage.setItem(ZWAK_WACHTWOORD, id); } catch { /* */ } }
+function wisZwak() { try { localStorage.removeItem(ZWAK_WACHTWOORD); } catch { /* */ } }
+const zwakVoor = (id: string | null) => { try { return !!id && localStorage.getItem(ZWAK_WACHTWOORD) === id; } catch { return false; } };
+/** Enkel met internet: zonder gaat de app gewoon open en vraagt ze het de volgende keer. */
+const moetNieuwWachtwoord = (b: Backend) => b.soort === "supabase" && zwakVoor(b.gebruikerId()) && navigator.onLine !== false;
+
+function naarWachtwoord(b: Backend, w: Omit<NonNullable<typeof nieuwWachtwoord>, "sinds">) {
+  nieuwWachtwoord = { ...w, sinds: Date.now() };
+  wachtend = b;
+  zet({ fase: "wachtwoord", open: null });
+}
+
+const wachtwoordStapVerlopen = () => !!nieuwWachtwoord && Date.now() - nieuwWachtwoord.sinds > VERGRENDEL_NA_MS;
+
+/** Te lang op het scherm voor een nieuw wachtwoord: het huidige vergeten, op slot (of opnieuw inloggen). */
+async function stopWachtwoordStap() {
+  const b = state.backend ?? wachtend;
+  nieuwWachtwoord = null;
+  if (b && eigenPin(b)) {
+    wachtend = b;
+    zet({ fase: "slot", open: null });
+  } else {
+    await afmelden();
+    meld("Te lang gewacht. Log opnieuw in.", "info");
+  }
+}
+
+/** Verder na het slot of de login: eerst nog een sterk wachtwoord of een pincode, dan de app. */
+async function verder(b: Backend, o: { oudMag?: boolean; later?: boolean } = {}) {
   markeerActief();
-  if (state.backend && state.exemplaren.length + state.artikelen.length + state.beurzen.length > 0) {
+  if (!o.later && moetNieuwWachtwoord(b)) return naarWachtwoord(b, { huidig: null, pin: null, reden: "zwak" });
+  const p = eigenPin(b);
+  if (!p || (!o.oudMag && isOudePin(p))) {
+    wachtend = b;
+    return zet({ fase: "pin" });
+  }
+  if (state.backend === b && state.exemplaren.length + state.artikelen.length + state.beurzen.length > 0) {
+    wachtend = null;
     zet({ fase: "klaar" });
     void synchroniseer();
-  } else if (wachtend) {
-    await gebruik(wachtend);
+  } else {
+    await gebruik(b);
   }
+}
+
+/** Een pincode nagaan (slot, of eerst de huidige bij wijzigen). Na 10 foute weg met de sessie van deze gsm. */
+export async function controleerEigenPin(pin: string): Promise<boolean> {
+  if (await controleerPin(pin)) return true;
+  if (teVeelPogingen()) await wisNaTeVeelPogingen();
+  return false;
+}
+
+/** De pincode op dit toestel: ontgrendelt de app (ook zonder internet). */
+export async function ontgrendel(pin: string): Promise<boolean> {
+  const p = eigenPin();
+  if (!p) { await logUit(); return false; }
+  if (!(await controleerEigenPin(pin))) return false;
+  const b = state.backend ?? wachtend;
+  if (!b) { await logUit(); return false; }
+  // Een pincode van vóór 0.11 was ook het wachtwoord: eerst een sterk wachtwoord (zonder internet de volgende keer).
+  if (isOudePin(p)) markeerZwak(b.gebruikerId());
+  if (moetNieuwWachtwoord(b)) {
+    markeerActief();
+    naarWachtwoord(b, isOudePin(p) ? { huidig: pin, pin, reden: "oud" } : { huidig: null, pin: null, reden: "zwak" });
+    return true;
+  }
+  await verder(b, { oudMag: true });
   return true;
 }
 
-/** Inloggen met e-mail en pincode (de pincode is het wachtwoord van het account). */
-export async function logInMetPin(email: string, pin: string) {
-  const b = await SupabaseBackend.logIn(email, pin);
-  localStorage.setItem(MODUS, "supabase");
-  await bewaarPin(b.sessieInfo(), pin);
-  markeerActief();
-  await gebruik(b);
+/** Na 10 foute pincodes: de sessie van deze gsm weg. Wat nog moest doorgaan, blijft bewaard tot de volgende login. */
+async function wisNaTeVeelPogingen() {
+  await afmelden();
+  meld("Te veel foute pincodes. Log opnieuw in met je e-mail en wachtwoord; wat nog moest doorgaan, blijft bewaard.", "fout", undefined, 12000);
 }
 
-/** De eerste keer: met het oude wachtwoord inloggen, daarna een pincode kiezen. */
+/** Inloggen met e-mail en wachtwoord (nieuwe gsm, sessie verlopen of na uitloggen). */
 export async function logInMetWachtwoord(email: string, wachtwoord: string) {
   const b = await SupabaseBackend.logIn(email, wachtwoord);
   localStorage.setItem(MODUS, "supabase");
-  wisPin(); // met het wachtwoord inloggen = de pincode opnieuw instellen (ook als je ze vergat)
+  wisPogingen(); // met het wachtwoord bewezen wie je bent: de foute pincodes van daarvoor tellen niet meer
+  const id = b.gebruikerId();
+  if (leesPin() && leesPin()!.user_id !== id) wisPin(); // de pincode van iemand anders hoort hier niet
   wachtend = b;
-  zet({ fase: "pin" });
+  if (wachtwoordFout(wachtwoord, email)) {
+    markeerZwak(id);
+    // Was het wachtwoord de oude pincode (6 cijfers), dan wordt die daarna de pincode van deze gsm,
+    // tenzij hier al een eigen pincode is.
+    const p = eigenPin(b);
+    const pin = /^\d{6}$/.test(wachtwoord) && (!p || isOudePin(p)) ? wachtwoord : null;
+    return naarWachtwoord(b, { huidig: wachtwoord, pin, reden: pin ? "oud" : "zwak" });
+  }
+  // Een sterk wachtwoord: niets meer te vragen. Een oude pincode (het oude wachtwoord) heeft geen zin meer.
+  if (zwakVoor(id)) wisZwak();
+  if (isOudePin(eigenPin(b))) wisPin();
+  await verder(b);
 }
 
-/** Een nieuwe pincode instellen (online): wordt het wachtwoord van je account. */
-export async function kiesPincode(pin: string, huidige?: string) {
+/** Wachtwoord vergeten: een herstelmail. De link opent het beheer en vraagt een nieuw wachtwoord. */
+export async function stuurHerstelmail(email: string) {
+  const terug = new URL(BEHEER_PAD, location.href).href.replace(/[?#].*$/, "");
+  await SupabaseBackend.stuurHerstelmail(email, terug);
+}
+
+async function herstelVanLink(hash: string) {
+  // De tokens meteen uit de adresbalk (en de geschiedenis) halen.
+  try { history.replaceState(null, "", location.pathname + location.search); } catch { /* */ }
+  try {
+    const b = await SupabaseBackend.vanHerstellink(hash);
+    if (!b) return zet({ fase: "login" });
+    localStorage.setItem(MODUS, "supabase");
+    if (leesPin()?.user_id !== b.gebruikerId()) wisPin();
+    naarWachtwoord(b, { huidig: null, pin: null, reden: "herstel" });
+  } catch (e) {
+    zet({ fase: "login" });
+    meld(e instanceof Error ? e.message : String(e), "fout", undefined, 9000);
+  }
+}
+
+/** Na een nieuw wachtwoord: een oude pincode is niet langer het wachtwoord en blijft de pincode van deze gsm. */
+async function naNieuwWachtwoord(b: Backend, pin: string | null) {
+  wisZwak();
+  const p = eigenPin(b);
+  if (p && isOudePin(p)) maakPinVanToestel();
+  else if (!p && pin) await bewaarPin((b as SupabaseBackend).sessieInfo(), pin);
+}
+
+/** Het verplichte nieuwe wachtwoord (fase "wachtwoord"). `huidig` = wat de gebruiker intypte als het scherm erom vroeg. */
+export async function kiesWachtwoord(nieuw: string, huidig?: string) {
   const b = (state.backend?.soort === "supabase" ? state.backend : wachtend) as SupabaseBackend | null;
-  if (!b) throw new Error("Log eerst in");
-  // Wie de gsm even vasthoudt, mag de pincode (= het wachtwoord) niet zomaar veranderen.
-  if (eigenPin(b) && !(huidige && (await controleerPin(huidige)))) throw new Error("Je huidige pincode klopt niet.");
-  await b.wijzigPincode(pin);
-  await bewaarPin(b.sessieInfo(), pin);
+  if (!b || !nieuwWachtwoord) throw new Error("Log eerst in");
+  if (wachtwoordStapVerlopen()) { await stopWachtwoordStap(); return; }
+  const fout = wachtwoordFout(nieuw, b.sessieInfo().email);
+  if (fout) throw new Error(fout);
+  const w = nieuwWachtwoord;
+  const oud = w.reden === "herstel" ? null : (w.huidig ?? huidig ?? "");
+  if (oud === "") throw new Error("Vul eerst je huidige wachtwoord in.");
+  try {
+    await b.wijzigWachtwoord(oud, nieuw);
+  } catch (e) {
+    // De oude pincode werkt niet meer als wachtwoord: op een andere gsm koos iemand al een nieuw wachtwoord.
+    if (w.reden === "oud" && w.huidig !== null && e instanceof Fout && e.status === 400 && /klopt niet/.test(e.message)) {
+      nieuwWachtwoord = null;
+      wisZwak();
+      wisPin();
+      wachtend = null;
+      void b.logUit();
+      zet({ backend: null, fase: "login", open: null });
+      meld("Je wachtwoord werd al aangepast, misschien op een andere gsm. Log in met je nieuwe wachtwoord.", "fout", undefined, 9000);
+      return;
+    }
+    throw e;
+  }
+  nieuwWachtwoord = null;
+  await naNieuwWachtwoord(b, w.pin);
+  meld("Nieuw wachtwoord bewaard. Je andere gsm's vragen het bij de volgende keer.");
+  await verder(b, { oudMag: true });
+}
+
+/** Geen internet bij het verplichte wachtwoord: de app toch openen (hij vraagt het de volgende keer). */
+export async function wachtwoordLater() {
+  const b = state.backend ?? wachtend;
+  if (!b || !nieuwWachtwoord || nieuwWachtwoord.reden === "herstel") return;
+  const { pin } = nieuwWachtwoord;
+  nieuwWachtwoord = null;
+  // De oude pincode blijft voorlopig de pincode van deze gsm; het zwakke wachtwoord blijft gemarkeerd.
+  if (pin && !eigenPin(b)) await bewaarPin((b as SupabaseBackend).sessieInfo(), pin);
+  await verder(b, { oudMag: true, later: true });
+}
+
+/** Een nieuw wachtwoord vanuit Profiel: eerst het huidige. */
+export async function wijzigWachtwoord(huidig: string, nieuw: string) {
+  const b = state.backend;
+  if (!b || b.soort !== "supabase") throw new Error("In de demo is er geen wachtwoord.");
+  const fout = wachtwoordFout(nieuw, (b as SupabaseBackend).sessieInfo().email);
+  if (fout) throw new Error(fout);
+  await b.wijzigWachtwoord(huidig, nieuw);
+  await naNieuwWachtwoord(b, null);
+  markeerActief();
+  meld("Nieuw wachtwoord bewaard. Je andere gsm's vragen het bij de volgende keer.");
+}
+
+/** Een pincode voor dit toestel kiezen of wijzigen (ook zonder internet). */
+export async function kiesPincode(pin: string, huidige?: string) {
+  const b = state.backend ?? wachtend;
+  if (!b || b.soort !== "supabase") throw new Error("Log eerst in");
+  // Wie de gsm even vasthoudt, mag de pincode niet zomaar veranderen (ook een oude pincode niet).
+  if (eigenPin(b) && !(huidige && (await controleerEigenPin(huidige)))) throw new Error("Je huidige pincode klopt niet.");
+  const f = pinFout(pin);
+  if (f) throw new Error(f);
+  // Was de oude pincode ook het wachtwoord, dan blijft het wachtwoord zwak tot er een nieuw is.
+  if (isOudePin(eigenPin(b))) markeerZwak(b.gebruikerId());
+  await bewaarPin((b as SupabaseBackend).sessieInfo(), pin);
   markeerActief();
   if (state.fase === "klaar") meld("Nieuwe pincode bewaard");
-  else await gebruik(b);
+  else await verder(b);
 }
 
 /** Zonder pincode verder (enkel tot de volgende keer dat de app start). */
@@ -665,6 +859,12 @@ export const heeftEigenPin = () => !!eigenPin();
 
 /** Wie dit toestel gebruikt (voor het slotscherm). */
 export const pinGebruiker = () => eigenPin();
+
+/** Het e-mailadres van wie inlogt (om een wachtwoordmanager het juiste account te laten bewaren). */
+export const ingelogdEmail = () => {
+  const b = state.backend ?? wachtend;
+  return b?.soort === "supabase" ? (b as SupabaseBackend).sessieInfo().email : "";
+};
 
 async function gebruik(backend: Backend) {
   zet({ backend, fase: "laden" });
@@ -730,6 +930,8 @@ function pasGedeeldToe(g: Record<string, unknown>) {
   const pr = g.prijsregels as Partial<Instellingen> | undefined;
   const deel: Partial<State> = {
     instagram: typeof g.instagram === "string" && g.instagram ? g.instagram : INSTAGRAM,
+    facebook: typeof g.facebook === "string" ? g.facebook : FACEBOOK,
+    bedrijfPubliek: g.bedrijf_publiek && typeof g.bedrijf_publiek === "object" ? g.bedrijf_publiek as BedrijfPubliek : null,
     aanvraagSleutel: typeof g.aanvraag_sleutel === "string" && g.aanvraag_sleutel ? g.aanvraag_sleutel : null,
   };
   const bedrijven: Record<string, Bedrijf> = {};
@@ -773,7 +975,17 @@ export async function logUit() {
   if (b?.soort === "demo" && rij.length && !confirm(`Er wachten nog ${rij.length} wijzigingen. Toch stoppen?`)) return;
   if (b?.soort === "supabase" && rij.length
     && !confirm(`Er wachten nog ${rij.length} wijzigingen op internet. Ze blijven op deze gsm en gaan door zodra jij hier weer inlogt. Toch uitloggen?`)) return;
-  await b?.logUit();
+  await afmelden();
+}
+
+/** Uitloggen zonder te vragen: de sessie, de pincode en de kopie (tenzij er nog iets moet doorgaan) gaan weg. */
+async function afmelden() {
+  const b = state.backend ?? wachtend;
+  nieuwWachtwoord = null;
+  // Eerst alles op het toestel wissen (de sessie meteen, in logUit), pas daarna wachten op de server:
+  // wie de app afsluit terwijl die nog bezig is, houdt zo toch geen sessie of pincode over.
+  wisPin();
+  const weg = b?.logUit();
   if (b?.soort === "demo") localStorage.removeItem(rijSleutel(b));
   // De kopie op het toestel (voorraad, aankoopprijzen) gaat weg, tenzij er nog iets moet doorgaan.
   if (b?.soort === "supabase" && !rij.length) try { localStorage.removeItem(kopieSleutel(b)); } catch { /* */ }
@@ -784,7 +996,6 @@ export async function logUit() {
   } catch { /* */ }
   buiten = { exemplaren: [], artikelen: [], beurzen: [], transacties: [] };
   wachtend = null;
-  wisPin();
   localStorage.removeItem(MODUS);
   zet({
     backend: null, fase: "login", exemplaren: [], artikelen: [], beurzen: [], transacties: [], teWijzigen: new Map(), prijscheckOp: null,
@@ -792,6 +1003,7 @@ export async function logUit() {
   });
   artikelfotoCache.clear();
   etalageCache = null;
+  await weg?.catch(() => undefined);
 }
 
 // ── Samen werken: wijzigingen van de anderen en wie er bezig is ─────────────
@@ -1149,6 +1361,26 @@ export function zetInstagram(naam: string) {
   const schoon = naam.trim().replace(/^@/, "").replace(/^https?:\/\/(www\.)?instagram\.com\//, "").replace(/\/.*$/, "");
   zet({ instagram: schoon });
   inRij({ soort: "instelling", sleutel: "instagram", waarde: schoon });
+}
+
+/** De link naar onze Facebook-pagina op de klantenpagina (enkel http(s); leeg = niet tonen). */
+export function zetFacebook(link: string): boolean {
+  const schoon = link.trim() ? veiligeLink(link) : "";
+  if (schoon == null) { meld("Die link werkt niet: begin met https://", "fout"); return false; }
+  zet({ facebook: schoon });
+  inRij({ soort: "instelling", sleutel: "facebook", waarde: schoon });
+  return true;
+}
+
+/** De wettelijke gegevens op de klantenpagina (naam, adres, ondernemingsnummer, contact). */
+export function zetBedrijfPubliek(b: BedrijfPubliek) {
+  const kort = (x: string | null | undefined, n: number) => (x ?? "").trim().slice(0, n) || null;
+  const schoon: BedrijfPubliek = {
+    handelsnaam: kort(b.handelsnaam, 80), naam: kort(b.naam, 120), adres: kort(b.adres, 200), kbo: kort(b.kbo, 20),
+    email: kort(b.email, 200), telefoon: kort(b.telefoon, 40), vrijstelling: b.vrijstelling !== false,
+  };
+  zet({ bedrijfPubliek: schoon });
+  inRij({ soort: "instelling", sleutel: "bedrijf_publiek", waarde: schoon });
 }
 
 /** De access key van Web3Forms (of null): nieuwe aanvragen van klanten komen dan ook per mail. */
@@ -1714,7 +1946,7 @@ export async function laadAanvragen(): Promise<void> {
 }
 
 export function laadAanvraagBeelden(id: string) {
-  return state.backend?.laadAanvraagBeelden(id) ?? Promise.resolve({ artwork: null, voorbeeld: null });
+  return state.backend?.laadAanvraagBeelden(id) ?? Promise.resolve({ artwork: null, voorbeeld: null, beelden: null });
 }
 
 /** Een aanvraag wissen (spam, of afgewerkt): ze staat dan ook niet meer in de database. */

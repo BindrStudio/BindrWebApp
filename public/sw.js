@@ -1,6 +1,6 @@
 // Service worker: de app start ook zonder (goed) internet op de beurs.
 // VERSIE wordt bij elke build aangepast door scripts/build.mjs.
-const VERSIE = "fcef2a652b";
+const VERSIE = "9d42556d63";
 const APP = `bindr-app-${VERSIE}`;
 const DATA = "bindr-data-v1";
 const FOTOS = "bindr-fotos-v2"; // v1 kon ontbrekende foto's (404) bewaren
@@ -9,7 +9,7 @@ const MAX_FOTOS = 1500;
 
 const SCHIL = [
   "beheer.html", "app.js", "styles.css", "manifest.webmanifest",
-  "vendor/qrcode.js", "vendor/jsQR.js", "vendor/niimbot.js",
+  "vendor/qrcode.js", "vendor/jsQR.js", "vendor/niimbot.js", "vendor/fredoka/fredoka-latin.woff",
   "img/logo.png", "img/logo-woord.png", "img/logo-zwart.png", "img/eend.png", "img/favicon.png", "img/icon-192.png",
 ];
 

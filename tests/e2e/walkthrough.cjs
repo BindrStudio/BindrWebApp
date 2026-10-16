@@ -117,14 +117,16 @@ function fouten(page) {
   async function kas() { return page.locator(".beurs-balk").innerText(); }
 
   // ── A. Voorbereiding ───────────────────────────────────────────────────────
-  stap("klantenpagina eerst, rechtsboven Beheer, daar inloggen met pincode of de demo");
+  stap("klantenpagina eerst, onderaan Beheer, daar inloggen met e-mail en wachtwoord, of de demo");
   await page.goto(BASIS + "?demo=1");
-  await page.locator(".klant-beheer-knop").click();
+  assert.equal(await page.locator(".klant-balk a[href$='beheer.html']").count(), 0, "Beheer staat niet meer bovenaan");
+  await page.locator(".voet-beheer").click();
   await page.waitForURL(/beheer\.html/);
-  await page.getByLabel("Pincode").waitFor();
-  await page.getByRole("button", { name: "Eerste keer? Log in met je wachtwoord" }).click();
-  await page.getByPlaceholder("Wachtwoord").waitFor();
-  await page.getByRole("button", { name: "Inloggen met pincode" }).click();
+  await page.getByPlaceholder("Wachtwoord", { exact: true }).waitFor();
+  assert.equal(await page.getByLabel("Pincode").count(), 0, "inloggen gaat met het wachtwoord, de pincode is enkel van de gsm");
+  await page.getByRole("button", { name: "Wachtwoord vergeten?" }).click();
+  await page.getByRole("button", { name: "Stuur de mail" }).waitFor();
+  await page.getByRole("button", { name: "Terug naar inloggen" }).click();
   await foto("00-login");
   await geenHorizontaleScroll("login");
   await page.getByText("Uitproberen zonder account").click();
@@ -535,12 +537,14 @@ function fouten(page) {
   await klantKaart([{ naam: "Vintage Base", waarde: 400 }, { naam: "Modern A", waarde: 160 }, { naam: "Modern B", waarde: 160 }]);
   const pk = page.locator(".bod-paneel");
   await pk.getByRole("button", { name: "Per kaart" }).click();
-  await pk.locator(".bod-slider input").fill("80");
+  assert.equal(await pk.locator(".bod-slider").count(), 0, "per kaart: geen grote schuifknop");
+  for (let i = 0; i < 2; i++) { await pk.getByRole("button", { name: "Algemeen 5% meer" }).click(); await wacht(80); }
+  assert.match(await pk.locator(".bod-algemeen").innerText(), /80%/);
   const vintage = page.locator(".regel", { hasText: "Vintage Base" });
   await vintage.evaluate((el) => el.scrollIntoView({ block: "center" }));
   for (let i = 0; i < 3; i++) { await vintage.getByRole("button", { name: /5% minder/ }).dispatchEvent("click"); await wacht(120); }
-  await pk.locator(".bod-samen").waitFor({ state: "attached" });
-  assert.match(await pk.locator(".bod-slider-kop").innerText(), /samen\s*72%/, "de algemene schuifknop toont het nieuwe totaal");
+  await pk.locator(".bod-samen-label").waitFor();
+  assert.match(await pk.locator(".bod-samen-label").innerText(), /samen\s*72%/, "het algemene percentage toont het nieuwe totaal");
   assert.match(await pk.locator(".bod-som").innerText(), /Samen 72% van €\s?720(,00)? = €\s?516(,00)?/);
   assert.match(await vintage.innerText(), /65%/);
   await foto("22-per-kaart");
@@ -782,7 +786,7 @@ function fouten(page) {
   // De start: wie we zijn, wat we aanbieden (een binderpagina met vier vakken), onze komende beurzen.
   await klant.getByRole("heading", { name: "Binders die even uniek zijn als je collectie" }).waitFor();
   assert.ok(await klant.locator(".klant-merk img").isVisible(), "logo linksboven");
-  assert.match(await klant.locator(".klant-ig-knop").getAttribute("href"), /instagram\.com\/bindr\.test\//);
+  assert.match(await klant.locator(".klant-balk .klant-ig-knop").first().getAttribute("href"), /instagram\.com\/bindr\.test\//);
   assert.equal(await klant.locator(".binderpagina .pocket").count(), 4, "kaarten, binders, 3D-prints en sealed");
   assert.equal(await klant.locator(".zipbinder .zip-rits").count(), 1, "de kaft is een zip-binder");
   assert.match(await klant.locator(".beurzen").innerText(), /Beurs Antwerpen[\s\S]*Antwerp Expo[\s\S]*10:00–17:00/, "geplande beurs op de klantenpagina, met de uren");
@@ -859,14 +863,33 @@ function fouten(page) {
     await klant.locator(".sectie-kop h1", { hasText: naam }).waitFor();
     assert.ok(await klant.locator(".klant .tegel").count() > 0, `${naam} op de klantenpagina`);
   }
-  // Ontwerp je binder: een zwart-wit SVG proberen op een zip-binder en een aanvraag sturen.
+  // Wettelijk: onderaan wie we zijn, de vrijstelling van btw, privacy en verkoopvoorwaarden; Facebook naast Instagram.
+  assert.match(await klant.locator(".voet-wettelijk").innerText(), /vrijstellingsregeling kleine ondernemingen/);
+  assert.match(await klant.locator(".klant-balk a[aria-label='Facebook']").getAttribute("href"), /facebook\.com/);
+  await klant.locator(".voet-links a", { hasText: "Privacy en cookies" }).click();
+  await klant.locator(".juridisch h1", { hasText: "Privacy en cookies" }).waitFor();
+  assert.match(await klant.locator(".juridisch").innerText(), /geen cookies/);
+  await geenHorizontaleScroll("privacy", klant);
+  await klant.locator(".voet-links a", { hasText: "Verkoopvoorwaarden" }).click();
+  await klant.locator(".juridisch h1", { hasText: "Verkoopvoorwaarden" }).waitFor();
+  assert.match(await klant.locator(".juridisch").innerText(), /Lasergravure[\s\S]*licht verschillen/);
+  await geenHorizontaleScroll("verkoopvoorwaarden", klant);
+  // Ontwerp je binder: de aanvraag (met toploader, kleur en een afbeelding van het idee), en als extra een eigen
+  // zwart-wit SVG proberen op een echte zip-binder.
   await klant.locator(".klant-nav.onder a", { hasText: "Ontwerp" }).click();
   await klant.waitForURL(/#ontwerp$/);
-  await klant.locator(".ontwerp-canvas").waitFor();
+  await klant.locator(".aanvraag-form").waitFor();
+  assert.equal(await klant.locator(".ontwerp-canvas").count(), 0, "de proef op de binder is een extra (standaard uit)");
+  await klant.getByRole("button", { name: "Koningsblauw" }).click();
+  await klant.locator(".keuze-groep", { hasText: "Voor toploaders?" }).getByRole("button", { name: "Ja" }).click();
+  await klant.locator(".idee-beelden").locator("..").locator("input[type=file]").setInputFiles(path.resolve(__dirname, "../../public/img/eend.png"));
+  await klant.locator(".idee-beeld img").waitFor();
+  await klant.locator(".proef-schakel input[type=checkbox]").check();
+  await klant.locator(".ontwerp-canvas:not(.laden)").waitFor();
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="38" fill="none" stroke="#000" stroke-width="9"/><path d="M30 52 48 68 72 34" fill="none" stroke="#000" stroke-width="10"/></svg>';
   await klant.locator(".ontwerp-bestand input[type=file]").setInputFiles({ name: "logo.svg", mimeType: "image/svg+xml", buffer: Buffer.from(svg) });
   await klant.getByRole("button", { name: "Wit en zwart omkeren" }).waitFor();
-  await klant.getByRole("button", { name: "Blauw" }).click();
+  await klant.getByRole("button", { name: "Tot aan het stiksel" }).click();
   await klant.getByRole("button", { name: "Verstuur mijn aanvraag" }).isDisabled().then((x) => assert.ok(x, "eerst naam, e-mail en idee"));
   await klant.locator(".wens-chips .chip", { hasText: "Een naam of tekst" }).click();
   await klant.getByLabel("Je idee").fill("Mijn logo met mijn naam eronder");
@@ -877,7 +900,9 @@ function fouten(page) {
   await klant.getByRole("button", { name: "Verstuur mijn aanvraag" }).click();
   await klant.getByText("Bedankt, Lotte!").waitFor();
   const aanvraag = await klant.evaluate(() => JSON.parse(localStorage.getItem("bindr-demo-v1")).aanvragen?.[0]);
-  assert.equal(aanvraag?.kleur, "Blauw");
+  assert.equal(aanvraag?.kleur, "Koningsblauw");
+  assert.equal(aanvraag?.toploader, true);
+  assert.equal(aanvraag?.beelden?.length, 1, "de afbeelding bij het idee gaat mee");
   assert.match(aanvraag?.idee ?? "", /Wensen: Een naam of tekst[\s\S]*Mijn logo/);
   assert.match(aanvraag?.artwork ?? "", /^data:image\/png;base64,/, "het ontwerp gaat mee");
   assert.match(aanvraag?.voorbeeld ?? "", /^data:image\/jpeg;base64,/, "het voorbeeld op de binder gaat mee");
@@ -891,7 +916,8 @@ function fouten(page) {
   await page.locator(".profiel-tegel", { hasText: "Aanvragen" }).click();
   await sheet().locator(".aanvraag-rij", { hasText: "Lotte Test" }).click();
   await sheet().locator(".aanvraag-beelden img").nth(1).waitFor();
-  assert.match(await sheet().innerText(), /lotte@voorbeeld\.be[\s\S]*9-pocket[\s\S]*Blauw/);
+  assert.match(await sheet().innerText(), /lotte@voorbeeld\.be[\s\S]*9-pocket, voor toploaders[\s\S]*Koningsblauw/);
+  await sheet().locator(".aanvraag-beelden img").nth(2).waitFor();
   await foto("14f-aanvraag");
   await sheet().getByRole("button", { name: "Sluiten", exact: true }).last().click();
   await page.keyboard.press("Escape"); await wacht(200);

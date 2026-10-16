@@ -1,4 +1,5 @@
-# Controleert elke wijziging: types, tests en of public/app.js mee is herbouwd.
+# Controleert elke wijziging: types, tests en of public/app.js mee is herbouwd. Daarna de app zelf in
+# Chrome (ook als Galaxy Tab), Safari (WebKit, iPhone en iPad) en Firefox, en de volledige doorloop.
 name: Controle
 
 on:
@@ -34,3 +35,40 @@ jobs:
             echo "::error::Voer 'npm run build' uit en commit public/app.js, public/catalogus/app.js en public/sw.js mee."
             exit 1
           }
+
+  browsers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - run: npm install --no-audit --no-fund
+
+      - name: Playwright en de drie browsers (enkel voor de test, niet in de app)
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium firefox webkit
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Chrome, Safari (WebKit) en Firefox op gsm, tablet en computer
+        run: |
+          python3 -m http.server 8080 --directory public >/dev/null 2>&1 &
+          sleep 1
+          node tests/e2e/browsers.cjs .tests/browsers
+
+      - name: Doorloop beursdag, inloggen en printen (Chromium)
+        run: |
+          python3 -m http.server 8080 --directory public >/dev/null 2>&1 &
+          sleep 1
+          npm run e2e
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: .tests
+          retention-days: 7

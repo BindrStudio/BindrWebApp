@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { heeftEigenPin, kiesPincode, logInMetPin, logInMetWachtwoord, logUit, ontgrendel, pinGebruiker, pincodeLater, startDemo } from "../state";
-import { controleerPin, pinFout, wachtNog } from "../lib/pin";
+import {
+  controleerEigenPin, heeftEigenPin, ingelogdEmail, kiesPincode, kiesWachtwoord, logInMetWachtwoord, logUit, ontgrendel, pinGebruiker, pincodeLater,
+  redenNieuwWachtwoord, startDemo, stuurHerstelmail, vraagHuidigWachtwoord, wachtwoordLater, wijzigWachtwoord,
+} from "../state";
+import { pinFout, pogingenOver, wachtNog, wachtwoordFout, WACHTWOORD_MIN } from "../lib/pin";
 import { kies, SLOT } from "../lib/grapjes";
 import { Icoon } from "./common";
 
@@ -55,6 +58,9 @@ function Kader({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** De laatste pogingen: zeg dat de gsm daarna de sessie vergeet. */
+const laatste = (over: number) => (over > 0 && over <= 3 ? ` Daarna nog ${over} ${over === 1 ? "poging" : "pogingen"}, dan moet je opnieuw inloggen met je wachtwoord.` : "");
+
 /** Vergrendeld: enkel de pincode van wie dit toestel gebruikt. */
 export function Slot() {
   const wie = pinGebruiker();
@@ -72,18 +78,21 @@ export function Slot() {
     setBezig(true);
     const ok = await ontgrendel(pin);
     setBezig(false);
-    if (!ok) { setFout("Die pincode klopt niet"); setWacht(wachtNog()); }
+    if (!ok) {
+      setFout(`Die pincode klopt niet.${laatste(pogingenOver())}`);
+      setWacht(wachtNog());
+    }
   };
   return (
     <Kader>
       <PinPad titel={`Hallo${wie?.naam ? ` ${wie.naam}` : ""}`} sub={sub} onKlaar={(p) => void probeer(p)} bezig={bezig || wacht > 0}
-        fout={wacht > 0 ? `Te veel pogingen: wacht nog ${wacht} s` : fout} />
+        fout={wacht > 0 ? `Te veel pogingen: wacht nog ${wacht} s.${laatste(pogingenOver())}` : fout} />
       <button className="tekstknop" onClick={() => void logUit()}>Iemand anders, of pincode vergeten?</button>
     </Kader>
   );
 }
 
-/** Een pincode kiezen: na de eerste login met wachtwoord, of later via Meer. */
+/** Een pincode kiezen: na het inloggen met je wachtwoord, of later via Profiel. */
 export function PinKiezen({ inSheet = false, onKlaar }: { inSheet?: boolean; onKlaar?: () => void }) {
   // Een bestaande pincode wijzigen: eerst de huidige, zodat niemand anders ze kan veranderen.
   const [huidige, setHuidige] = useState<string | null>(() => (heeftEigenPin() ? null : ""));
@@ -91,10 +100,13 @@ export function PinKiezen({ inSheet = false, onKlaar }: { inSheet?: boolean; onK
   const [fout, setFout] = useState<string | null>(null);
   const [bezig, setBezig] = useState(false);
   const controleer = async (pin: string) => {
+    // Zelfde regels als het slot: wachten na 5 foute, na 10 weg met de sessie.
+    const wacht = wachtNog();
+    if (wacht) return setFout(`Te veel pogingen: wacht nog ${wacht} s.`);
     setBezig(true);
-    const ok = await controleerPin(pin);
+    const ok = await controleerEigenPin(pin);
     setBezig(false);
-    if (ok) { setFout(null); setHuidige(pin); } else setFout("Die pincode klopt niet");
+    if (ok) { setFout(null); setHuidige(pin); } else setFout(`Die pincode klopt niet.${laatste(pogingenOver())}`);
   };
   if (huidige === null) {
     const inhoud = <PinPad key="huidig" titel="Huidige pincode" sub="Geef eerst je huidige pincode in" onKlaar={(p) => void controleer(p)} fout={fout} bezig={bezig} />;
@@ -123,7 +135,7 @@ export function PinKiezen({ inSheet = false, onKlaar }: { inSheet?: boolean; onK
   const inhoud = (
     <>
       <PinPad key={eerste ? "2" : "1"} titel={eerste ? "Nog een keer" : "Kies je pincode"} bezig={bezig}
-        sub={eerste ? "Typ dezelfde 6 cijfers opnieuw" : "6 cijfers. Daarmee open je voortaan de app; de eerste keer op een nieuwe gsm vraagt hij ook je e-mail."}
+        sub={eerste ? "Typ dezelfde 6 cijfers opnieuw" : "6 cijfers om de app op deze gsm te openen. Ze blijft op deze gsm; je wachtwoord heb je enkel nodig op een nieuwe gsm."}
         onKlaar={(p) => void klaar(p)} fout={fout} />
       {!inSheet && <button className="tekstknop" onClick={() => void pincodeLater()}>Later</button>}
     </>
@@ -131,30 +143,173 @@ export function PinKiezen({ inSheet = false, onKlaar }: { inSheet?: boolean; onK
   return inSheet ? <div className="pin-in-sheet">{inhoud}</div> : <Kader>{inhoud}</Kader>;
 }
 
-/** Niet ingelogd: e-mail en pincode, of de eerste keer met het wachtwoord. */
+/** Een nieuw wachtwoord, twee keer, met uitleg wat sterk genoeg is. Een wachtwoordmanager kan het bewaren. */
+function NieuwWachtwoord({ email, waarde, herhaal, onWaarde, onHerhaal }: {
+  email: string; waarde: string; herhaal: string; onWaarde: (w: string) => void; onHerhaal: (w: string) => void;
+}) {
+  const [toon, setToon] = useState(false);
+  const fout = waarde ? wachtwoordFout(waarde, email) : null;
+  return (
+    <>
+      {/* Zo weet de wachtwoordmanager van iCloud of Google voor welk account dit wachtwoord is. */}
+      <input type="email" autoComplete="username" value={email} readOnly hidden />
+      <input type={toon ? "text" : "password"} autoComplete="new-password" placeholder="Nieuw wachtwoord" value={waarde}
+        onChange={(e) => onWaarde(e.target.value)} required aria-label="Nieuw wachtwoord" aria-describedby="wachtwoord-uitleg" />
+      <input type={toon ? "text" : "password"} autoComplete="new-password" placeholder="Nog een keer" value={herhaal}
+        onChange={(e) => onHerhaal(e.target.value)} required aria-label="Nieuw wachtwoord, nog een keer" />
+      <label className="toon-wachtwoord"><input type="checkbox" checked={toon} onChange={(e) => setToon(e.target.checked)} /> Toon wat ik typ</label>
+      <p id="wachtwoord-uitleg" className={`wachtwoord-uitleg${fout ? " fout" : waarde ? " goed" : ""}`}>
+        {fout ?? (waarde ? "Sterk genoeg." : `Minstens ${WACHTWOORD_MIN} tekens. Een zin van een paar woorden is lang en makkelijk te onthouden. Laat je gsm het bewaren (iCloud-sleutelhanger of Google).`)}
+      </p>
+    </>
+  );
+}
+
+const UITLEG: Record<"oud" | "zwak" | "herstel", { titel: string; sub: string }> = {
+  oud: {
+    titel: "Kies een wachtwoord",
+    sub: "Tot nu was je pincode ook het wachtwoord van je account. Zes cijfers raadt iemand op afstand te snel. Je pincode blijft dezelfde, maar opent voortaan enkel de app op deze gsm.",
+  },
+  zwak: {
+    titel: "Kies een sterker wachtwoord",
+    sub: "Dit wachtwoord is te kort of te makkelijk te raden. Je hebt het enkel nodig op een nieuwe gsm; daarna volstaat je pincode.",
+  },
+  herstel: {
+    titel: "Nieuw wachtwoord",
+    sub: "Kies een nieuw wachtwoord voor je account. Heb je op deze gsm nog geen pincode, dan kies je er daarna een.",
+  },
+};
+
+/** Een sterk wachtwoord kiezen: verplicht na een oude pincode of een zwak wachtwoord, en na een herstelmail. */
+export function WachtwoordKiezen() {
+  const reden = redenNieuwWachtwoord() ?? "zwak";
+  const email = ingelogdEmail();
+  const vraagHuidig = vraagHuidigWachtwoord();
+  const [huidig, setHuidig] = useState("");
+  const [w, setW] = useState("");
+  const [h, setH] = useState("");
+  const [fout, setFout] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
+  const [bezig, setBezig] = useState(false);
+  const verstuur = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const f = wachtwoordFout(w, email);
+    if (f) return setFout(f);
+    if (w !== h) return setFout("De twee wachtwoorden zijn niet gelijk.");
+    setFout(null);
+    setBezig(true);
+    try {
+      await kiesWachtwoord(w, vraagHuidig ? huidig : undefined);
+    } catch (err) {
+      const m = err instanceof Error ? err.message : String(err);
+      setFout(m);
+      setOffline(/verbinding|internet/i.test(m));
+    } finally {
+      setBezig(false);
+    }
+  };
+  return (
+    <Kader>
+      <h1 className="login-titel">{UITLEG[reden].titel}</h1>
+      <p className="login-sub">{UITLEG[reden].sub}</p>
+      <form onSubmit={verstuur} className="login-form">
+        {vraagHuidig && (
+          <input type="password" autoComplete="current-password" placeholder="Huidig wachtwoord (bij de meesten de oude pincode)" value={huidig}
+            onChange={(e) => setHuidig(e.target.value)} required aria-label="Huidig wachtwoord" />
+        )}
+        <NieuwWachtwoord email={email} waarde={w} herhaal={h} onWaarde={setW} onHerhaal={setH} />
+        {fout && <p className="fouttekst" role="alert">{fout}</p>}
+        <button className="knop groot" disabled={bezig}>{bezig ? "Bewaren…" : "Bewaar wachtwoord"}</button>
+      </form>
+      {reden !== "herstel" && offline && <button className="tekstknop" onClick={() => void wachtwoordLater()}>Geen internet: later</button>}
+      <button className="tekstknop zacht" onClick={() => void logUit()}>Uitloggen</button>
+    </Kader>
+  );
+}
+
+/** Profiel › Wachtwoord wijzigen: eerst het huidige, dan twee keer het nieuwe. */
+export function WachtwoordWijzigen({ onKlaar }: { onKlaar: () => void }) {
+  const email = ingelogdEmail();
+  const [huidig, setHuidig] = useState("");
+  const [w, setW] = useState("");
+  const [h, setH] = useState("");
+  const [fout, setFout] = useState<string | null>(null);
+  const [bezig, setBezig] = useState(false);
+  const verstuur = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const f = wachtwoordFout(w, email);
+    if (f) return setFout(f);
+    if (w !== h) return setFout("De twee wachtwoorden zijn niet gelijk.");
+    setFout(null);
+    setBezig(true);
+    try {
+      await wijzigWachtwoord(huidig, w);
+      onKlaar();
+    } catch (err) {
+      setFout(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBezig(false);
+    }
+  };
+  return (
+    <form onSubmit={verstuur} className="login-form wachtwoord-sheet">
+      <input type="password" autoComplete="current-password" placeholder="Huidig wachtwoord" value={huidig} onChange={(e) => setHuidig(e.target.value)} required aria-label="Huidig wachtwoord" />
+      <NieuwWachtwoord email={email} waarde={w} herhaal={h} onWaarde={setW} onHerhaal={setH} />
+      {fout && <p className="fouttekst" role="alert">{fout}</p>}
+      <button className="knop groot" disabled={bezig}>{bezig ? "Bewaren…" : "Bewaar wachtwoord"}</button>
+      <p className="zacht klein">Je andere gsm's vragen daarna één keer het nieuwe wachtwoord. Je pincode blijft dezelfde.</p>
+    </form>
+  );
+}
+
+/** Niet ingelogd: e-mail en wachtwoord. Daarna opent de pincode de app op deze gsm. */
 export function Login() {
   const [email, setEmail] = useState(() => { try { return localStorage.getItem("bindr-laatste-email") ?? ""; } catch { return ""; } });
-  const [code, setCode] = useState("");
-  const [metWachtwoord, setMetWachtwoord] = useState(false);
+  const [wachtwoord, setWachtwoord] = useState("");
+  const [vergeten, setVergeten] = useState(false);
+  const [verstuurd, setVerstuurd] = useState(false);
   const [fout, setFout] = useState<string | null>(null);
   const [bezig, setBezig] = useState(false);
 
   const verstuur = async (e: React.FormEvent) => {
     e.preventDefault();
     setFout(null);
-    if (!metWachtwoord && !/^\d{6}$/.test(code)) return setFout("Een pincode heeft 6 cijfers.");
     setBezig(true);
     try {
       try { localStorage.setItem("bindr-laatste-email", email.trim()); } catch { /* */ }
-      if (metWachtwoord) await logInMetWachtwoord(email.trim(), code);
-      else await logInMetPin(email.trim(), code);
+      if (vergeten) {
+        await stuurHerstelmail(email.trim());
+        setVerstuurd(true);
+      } else {
+        await logInMetWachtwoord(email.trim(), wachtwoord);
+      }
     } catch (err) {
-      const m = err instanceof Error ? err.message : String(err);
-      setFout(/klopt niet/.test(m) && !metWachtwoord ? "E-mail of pincode klopt niet. Nog geen pincode? Log de eerste keer in met je wachtwoord." : m);
+      setFout(err instanceof Error ? err.message : String(err));
     } finally {
       setBezig(false);
     }
   };
+
+  if (vergeten) {
+    return (
+      <Kader>
+        <h1 className="login-titel">Wachtwoord vergeten</h1>
+        {verstuurd ? (
+          <p className="login-sub">Is <strong>{email.trim()}</strong> een beheerder, dan krijg je zo een mail met een link. Open de link en kies een nieuw wachtwoord. Gebruik je de app vanop je beginscherm of in Bluefy, log daar daarna in met dat nieuwe wachtwoord.</p>
+        ) : (
+          <>
+            <p className="login-sub">Je krijgt een mail met een link om een nieuw wachtwoord te kiezen.</p>
+            <form onSubmit={verstuur} className="login-form">
+              <input type="email" autoComplete="username" placeholder="E-mailadres" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              {fout && <p className="fouttekst" role="alert">{fout}</p>}
+              <button className="knop groot" disabled={bezig}>{bezig ? "Versturen…" : "Stuur de mail"}</button>
+            </form>
+          </>
+        )}
+        <button className="tekstknop" onClick={() => { setVergeten(false); setVerstuurd(false); setFout(null); }}>Terug naar inloggen</button>
+      </Kader>
+    );
+  }
 
   return (
     <Kader>
@@ -162,20 +317,13 @@ export function Login() {
       <p className="login-sub">Voor de beheerders van Bind'r</p>
       <form onSubmit={verstuur} className="login-form">
         <input type="email" autoComplete="username" placeholder="E-mailadres" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        {metWachtwoord ? (
-          <input type="password" autoComplete="current-password" placeholder="Wachtwoord" value={code} onChange={(e) => setCode(e.target.value)} required />
-        ) : (
-          <input className="pin-veld" type="password" inputMode="numeric" autoComplete="current-password" placeholder="Pincode (6 cijfers)" maxLength={6}
-            value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} required aria-label="Pincode" />
-        )}
-        {fout && <p className="fouttekst">{fout}</p>}
+        <input type="password" autoComplete="current-password" placeholder="Wachtwoord" value={wachtwoord} onChange={(e) => setWachtwoord(e.target.value)} required aria-label="Wachtwoord" />
+        {fout && <p className="fouttekst" role="alert">{fout}</p>}
         <button className="knop groot" disabled={bezig}>{bezig ? "Inloggen…" : "Inloggen"}</button>
       </form>
-      <button className="tekstknop" onClick={() => { setMetWachtwoord(!metWachtwoord); setCode(""); setFout(null); }}>
-        {metWachtwoord ? "Inloggen met pincode" : "Eerste keer? Log in met je wachtwoord"}
-      </button>
+      <button className="tekstknop" onClick={() => { setVergeten(true); setFout(null); }}>Wachtwoord vergeten?</button>
       <button className="tekstknop zacht" onClick={() => void startDemo()}>Uitproberen zonder account</button>
-      <p className="login-voet">Daarna onthoudt deze gsm wie je bent: voortaan volstaat je pincode. De demo bewaart alles enkel op dit toestel.</p>
+      <p className="login-voet">Je wachtwoord vraagt de app enkel op een nieuwe gsm. Daarna open je de app met een pincode van 6 cijfers, ook zonder internet. De demo bewaart alles enkel op dit toestel.</p>
     </Kader>
   );
 }

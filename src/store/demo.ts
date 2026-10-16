@@ -101,8 +101,8 @@ export class DemoBackend implements Backend {
     this.bewaar();
   }
 
-  async wijzigPincode() {
-    throw new Fout("In de demo is er geen pincode.", 400);
+  async wijzigWachtwoord() {
+    throw new Fout("In de demo is er geen wachtwoord.", 400);
   }
 
   async laadBeheerders() {
@@ -256,13 +256,13 @@ export class DemoBackend implements Backend {
     // De klantenpagina schrijft in dezelfde opslag: opnieuw lezen.
     try { this.data.aanvragen = (JSON.parse(localStorage.getItem(SLEUTEL) || "null") as Opslag | null)?.aanvragen ?? this.data.aanvragen; } catch { /* laat staan */ }
     return [...(this.data.aanvragen ?? [])]
-      .map(({ artwork: _a, voorbeeld: _v, ...rest }) => rest as Aanvraag)
+      .map(({ artwork: _a, voorbeeld: _v, beelden: _b, ...rest }) => rest as Aanvraag)
       .sort((a, b) => b.aangemaakt_op.localeCompare(a.aangemaakt_op));
   }
 
   async laadAanvraagBeelden(id: string) {
     const a = (this.data.aanvragen ?? []).find((x) => x.id === id);
-    return { artwork: a?.artwork ?? null, voorbeeld: a?.voorbeeld ?? null };
+    return { artwork: a?.artwork ?? null, voorbeeld: a?.voorbeeld ?? null, beelden: a?.beelden ?? null };
   }
 
   async verwijderAanvraag(id: string) {

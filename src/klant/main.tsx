@@ -7,12 +7,12 @@
 // enkel config, types en kleine hulpfuncties.
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ToetsEvent, type PointerEvent as WijsEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { INSTAGRAM, SUPABASE_KEY, SUPABASE_URL } from "../config";
+import { BEHEER_PAD, FACEBOOK, INSTAGRAM, SUPABASE_KEY, SUPABASE_URL } from "../config";
 
 // De pagina staat op de hoofdlink (index.html) en, voor oude links, op /catalogus/.
 // Afbeeldingen en gegevens zoeken we relatief aan dit script (catalogus/app.js).
 const BASIS = new URL("../", import.meta.url).href;
-import { TALEN } from "../types";
+import { TALEN, type BedrijfPubliek } from "../types";
 import { euro, vandaag as vandaagLokaal } from "../lib/format";
 import { kantel, kantelVrij } from "../lib/kantel";
 import { veiligeFoto } from "../lib/eigenfoto";
@@ -20,6 +20,7 @@ import { TECHNIEKEN } from "../lib/categorie";
 import { fotoBronnen, setLogo, type FotoKaart } from "../lib/foto";
 import { SetKiezer } from "../gedeeld/SetKiezer";
 import { OntwerpPagina } from "./Ontwerp";
+import { kboMooi, Privacy, Voorwaarden } from "./Juridisch";
 import {
   artikelZichtbaar, groepeer, groepSleutel, isNieuw, pastFilters, pastZoek, perSet, SNELFILTERS, SORTERINGEN, setIdVan, setNaam, setTaal, sorteer, zoekTekst, zoekWoorden,
   type Groep, type SetInfo, type Snelfilter, type Sortering, type Toonbaar,
@@ -57,7 +58,7 @@ interface ArtikelRij {
 
 /** De vier catalogi en de startpagina. */
 type Plek = "kaarten" | "binders" | "3d" | "sealed";
-type Route = "start" | Plek | "ontwerp";
+type Route = "start" | Plek | "ontwerp" | "privacy" | "voorwaarden";
 
 /** Eén ding in de catalogus: een kaart (één exemplaar) of een artikel (met een aantal). */
 interface Stuk extends Toonbaar {
@@ -118,14 +119,14 @@ async function haal<T>(pad: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-interface Data { stukken: Stuk[]; instagram: string; beurzen: KomendeBeurs[]; etalage: EtalageRij[]; sleutel: string | null }
+interface Data { stukken: Stuk[]; instagram: string; facebook: string; bedrijf: BedrijfPubliek | null; beurzen: KomendeBeurs[]; etalage: EtalageRij[]; sleutel: string | null }
 
 /** Met ?demo=1 toont de pagina de demo van dit toestel (om te kijken hoe klanten het zien). */
 function laadDemo(): Data | null {
   if (!new URLSearchParams(location.search).has("demo")) return null;
   try {
     const d = JSON.parse(localStorage.getItem("bindr-demo-v1") || "null");
-    if (!d) return { stukken: [], instagram: INSTAGRAM, beurzen: [], etalage: [], sleutel: null };
+    if (!d) return { stukken: [], instagram: INSTAGRAM, facebook: FACEBOOK, bedrijf: null, beurzen: [], etalage: [], sleutel: null };
     // Zoals de publieke weergaven: enkel aangevinkte omgevingen, geen kaarten waarvan het hartje moet wisselen of het label nog niet hangt.
     const zichtbaar = new Set(((d.omgevingen ?? []) as { id: string; zichtbaar_voor_klanten: boolean }[]).filter((o) => o.zichtbaar_voor_klanten).map((o) => o.id));
     const toon = (r: { omgeving_id?: string | null }) => !zichtbaar.size || !r.omgeving_id || zichtbaar.has(r.omgeving_id);
@@ -145,8 +146,10 @@ function laadDemo(): Data | null {
       .sort((a, b) => a.datum.localeCompare(b.datum));
     const etalage = ((d.etalage ?? []) as (EtalageRij & { omgeving_id?: string | null })[]).filter(toon)
       .sort((a, b) => (a.volgorde ?? 0) - (b.volgorde ?? 0));
-    const sleutel = typeof d.instellingen?.aanvraag_sleutel === "string" ? d.instellingen.aanvraag_sleutel : null;
-    return { stukken: [...kaarten, ...artikelen], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, beurzen, etalage, sleutel };
+    const sleutel = typeof d.instellingen?.aanvraag_sleutel === "string" && d.instellingen.aanvraag_sleutel ? d.instellingen.aanvraag_sleutel : null;
+    const fb = d.instellingen?.facebook;
+    const bedrijf = d.instellingen?.bedrijf_publiek && typeof d.instellingen.bedrijf_publiek === "object" ? d.instellingen.bedrijf_publiek as BedrijfPubliek : null;
+    return { stukken: [...kaarten, ...artikelen], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, facebook: typeof fb === "string" ? fb : FACEBOOK, bedrijf, beurzen, etalage, sleutel };
   } catch {
     return null;
   }
@@ -170,7 +173,8 @@ const ROUTES: { id: Route; label: string; titel: string; icoon: () => ReactNode 
 ];
 function routeVan(hash: string): Route {
   const h = hash.replace(/^#\/?/, "").toLowerCase();
-  return (["kaarten", "binders", "3d", "sealed", "ontwerp"] as const).find((r) => r === h) ?? "start";
+  if (h === "cookies") return "privacy";
+  return (["kaarten", "binders", "3d", "sealed", "ontwerp", "privacy", "voorwaarden"] as const).find((r) => r === h) ?? "start";
 }
 const hrefVan = (r: Route) => (r === "start" ? "#" : `#${r}`);
 
@@ -190,11 +194,20 @@ function KlantPagina() {
   const [kaartFilter, setKaartFilter] = useState<KaartFilter>({ cat: "alles", zoek: "", filters: new Set(), set: "", sort: "nieuw" });
 
   useEffect(() => {
-    const wissel = () => { setRoute(routeVan(location.hash)); setOpen(null); window.scrollTo({ top: 0 }); };
+    const wissel = () => {
+      setRoute(routeVan(location.hash));
+      setOpen(null);
+      window.scrollTo({ top: 0 });
+      // #cookies: naar dat stuk van de privacyverklaring.
+      if (location.hash === "#cookies") setTimeout(() => document.getElementById("cookies")?.scrollIntoView({ block: "start" }), 50);
+    };
     window.addEventListener("hashchange", wissel);
     return () => window.removeEventListener("hashchange", wissel);
   }, []);
-  useEffect(() => { document.title = route === "start" ? "Bind'r · Custom binders en beurscatalogus" : `${ROUTES.find((r) => r.id === route)?.titel} · Bind'r`; }, [route]);
+  useEffect(() => {
+    const titel = route === "privacy" ? "Privacy en cookies" : route === "voorwaarden" ? "Verkoopvoorwaarden" : ROUTES.find((r) => r.id === route)?.titel;
+    document.title = route === "start" ? "Bind'r · Custom binders en beurscatalogus" : `${titel} · Bind'r`;
+  }, [route]);
 
   // De bovenbalk schuift weg als je naar beneden scrolt en komt terug als je omhoog scrolt.
   const [balkWeg, setBalkWeg] = useState(false);
@@ -225,8 +238,11 @@ function KlantPagina() {
     ]).then(([kaarten, artikelen, inst, beurzen, etalage]) => {
       const ig = inst.find((x) => x.sleutel === "instagram")?.waarde;
       const sleutel = inst.find((x) => x.sleutel === "aanvraag_sleutel")?.waarde;
+      const fb = inst.find((x) => x.sleutel === "facebook")?.waarde;
+      const bedrijf = inst.find((x) => x.sleutel === "bedrijf_publiek")?.waarde;
       setData({
         stukken: [...kaarten.map(vanKaart), ...artikelen.map(vanArtikel)], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, beurzen, etalage,
+        facebook: typeof fb === "string" ? fb : FACEBOOK, bedrijf: bedrijf && typeof bedrijf === "object" ? bedrijf as BedrijfPubliek : null,
         sleutel: typeof sleutel === "string" && sleutel ? sleutel : null,
       });
       // De foto's van de etalage: eerst de vijf die meteen zweven, de rest rustig daarna (om de 7 seconden drie,
@@ -259,6 +275,8 @@ function KlantPagina() {
 
   const stukken = data?.stukken ?? [];
   const ig = data?.instagram ?? INSTAGRAM;
+  const fb = veiligeLink(data?.facebook ?? FACEBOOK);
+  const bedrijf = data?.bedrijf ?? null;
   const beurzen = data?.beurzen ?? [];
   const telling = useMemo(() => {
     const t: Record<Plek, number> = { kaarten: 0, binders: 0, "3d": 0, sealed: 0 };
@@ -280,12 +298,14 @@ function KlantPagina() {
           ))}
         </nav>
         <div className="klant-balk-rechts">
-          <a className="klant-ig-knop" href={igProfiel(ig)} target="_blank" rel="noreferrer" aria-label={`Instagram @${ig}`}>
-            <IgIcoon /> <span>@{ig}</span>
+          <a className="klant-ig-knop" href={igProfiel(ig)} target="_blank" rel="noreferrer" aria-label={`Instagram @${ig}`} title={`Instagram @${ig}`}>
+            <IgIcoon />
           </a>
-          <a className="klant-beheer-knop" href={`${BASIS}beheer.html`} title="Beheer (enkel voor Bind'r)">
-            <SlotIcoon /> <span>Beheer</span>
-          </a>
+          {fb && (
+            <a className="klant-ig-knop" href={fb} target="_blank" rel="noreferrer" aria-label="Facebook" title="Facebook">
+              <FbIcoon />
+            </a>
+          )}
         </div>
       </header>
 
@@ -294,7 +314,11 @@ function KlantPagina() {
         {route === "start" ? (
           <Start data={data} stukken={stukken} telling={telling} beurzen={beurzen} ig={ig} demo={!!demo} />
         ) : route === "ontwerp" ? (
-          <OntwerpPagina demo={!!demo} sleutel={data?.sleutel ?? null} ig={ig} igLink={igProfiel(ig)} />
+          <OntwerpPagina demo={!!demo} sleutel={data?.sleutel ?? null} ig={ig} igLink={igProfiel(ig)} basis={BASIS} />
+        ) : route === "privacy" ? (
+          <Privacy b={bedrijf} mail={!!data?.sleutel} />
+        ) : route === "voorwaarden" ? (
+          <Voorwaarden b={bedrijf} />
         ) : route === "kaarten" ? (
           <Kaarten data={data} stukken={stukken} sets={sets} f={kaartFilter} zetF={setKaartFilter} onOpen={setOpen} onZoekFocus={setZoekFocus} />
         ) : (
@@ -302,7 +326,7 @@ function KlantPagina() {
         )}
       </main>
 
-      <Voet ig={ig} />
+      <Voet ig={ig} fb={fb} b={bedrijf} />
 
       <nav className="klant-nav onder" aria-label="Catalogi">
         {routes.map((r) => (
@@ -311,7 +335,7 @@ function KlantPagina() {
       </nav>
 
       {open && <Detail g={open} beurzen={beurzen} sets={sets} demo={!!demo} onSluit={() => setOpen(null)} />}
-      {data && route !== "ontwerp" && <Eend ig={ig} verborgen={!!open || zoekFocus} />}
+      {data && route !== "ontwerp" && route !== "privacy" && route !== "voorwaarden" && <Eend ig={ig} verborgen={!!open || zoekFocus} />}
     </div>
   );
 }
@@ -691,7 +715,7 @@ function Kaarten({ data, stukken, sets, f, zetF, onOpen, onZoekFocus }: {
 const PLEK_TEKST: Record<Exclude<Plek, "kaarten">, { titel: string; uitleg: string; leeg: string }> = {
   binders: {
     titel: "Binders",
-    uitleg: "Ontworpen en gelaserd door Bind'r. Ligt er één niet op de stand? Vraag ernaar, we hebben ze mee.",
+    uitleg: "Ontworpen en gelaserd door Bind'r. Elke gravure is handwerk: kleine verschillen tussen binders horen erbij. Ligt er één niet op de stand? Vraag ernaar, we hebben ze mee.",
     leeg: "Onze binders staan binnenkort online. Je ziet ze nu al aan onze stand en op Instagram.",
   },
   "3d": { titel: "3D-prints", uitleg: "Zelf geprint: standaards, deckboxen en andere handige spullen voor je kaarten.", leeg: "Er staan nog geen 3D-prints online. Kom kijken aan onze stand." },
@@ -907,6 +931,7 @@ function Detail({ g, beurzen, sets, demo, onSluit }: { g: Groep<Stuk>; beurzen: 
                     {s.binder?.grootte && <><dt>Grootte</dt><dd>{s.binder.grootte}{s.binder.toploader ? ", voor toploaders" : ""}</dd></>}
                     {s.binder?.merk && <><dt>Binder</dt><dd>{s.binder.merk}</dd></>}
                     <dt>Beschikbaar</dt><dd>{n > 5 ? "ja" : `nog ${n}`}{s.uitgestald === false ? " (niet uitgestald: vraag ernaar aan onze stand)" : ""}</dd>
+                    {s.binder?.techniek === "laser" && <><dt>Gravure</dt><dd className="zacht">Handwerk: kleur en diepte kunnen licht verschillen van de foto.</dd></>}
                   </>
                 ) : s.soort === "eigen product" ? (
                   <><dt>Soort</dt><dd>Bind'r-product</dd><dt>Beschikbaar</dt><dd>{n > 1 ? `nog ${n}` : "één stuk"}</dd></>
@@ -957,19 +982,30 @@ function Prijs({ p, groot = false }: { p: number; groot?: boolean }) {
 
 // ── Onderaan: Instagram en het logo ──────────────────────────────────────────
 
-function Voet({ ig }: { ig: string }) {
+function Voet({ ig, fb, b }: { ig: string; fb: string | null; b: BedrijfPubliek | null }) {
+  const kbo = kboMooi(b?.kbo);
   return (
     <footer className="klant-voet">
-      <a className="ig-blok" href={igProfiel(ig)} target="_blank" rel="noreferrer">
-        <span className="ig-blok-icoon"><IgIcoon maat={28} /></span>
-        <span className="ig-blok-tekst">
-          <strong>Volg ons op Instagram</strong>
-          <span>Onze nieuwste binders, lasergravures en kaarten, en waar we binnenkort staan. @{ig}</span>
-        </span>
-      </a>
+      <div className="sociaal">
+        <a className="sociaal-knop" href={igProfiel(ig)} target="_blank" rel="noreferrer"><IgIcoon /> <span>Instagram<em>@{ig}</em></span></a>
+        {fb && <a className="sociaal-knop" href={fb} target="_blank" rel="noreferrer"><FbIcoon /> <span>Facebook<em>Bind'r</em></span></a>}
+      </div>
+      <p className="sociaal-tekst">Onze nieuwste binders, lasergravures en kaarten, en waar we binnenkort staan.</p>
       <img src={`${BASIS}img/logo-woord.png`} alt="Bind'r" className="voet-logo" width={120} height={53} />
       <p>Collectibles, crafts en 3D-prints</p>
-      <p className="zacht">Prijzen in euro, zolang de voorraad strekt.</p>
+      <div className="voet-wettelijk">
+        <p>
+          <strong>{b?.handelsnaam || "Bind'r"}</strong>{b?.naam ? ` · ${b.naam}` : ""}{b?.adres ? ` · ${b.adres}` : ""}
+          {b?.email ? <> · <a href={`mailto:${b.email}`}>{b.email}</a></> : null}{b?.telefoon ? ` · ${b.telefoon}` : ""}
+        </p>
+        {kbo && <p>Ondernemingsnummer {kbo} · btw BE {kbo}</p>}
+        {b?.vrijstelling !== false && <p>Bijzondere vrijstellingsregeling kleine ondernemingen: we rekenen geen btw aan. Alle prijzen zijn eindprijzen in euro, zolang de voorraad strekt.</p>}
+      </div>
+      <nav className="voet-links" aria-label="Over deze site">
+        <a href="#privacy">Privacy en cookies</a>
+        <a href="#voorwaarden">Verkoopvoorwaarden</a>
+        <a className="voet-beheer" href={`${BASIS}beheer.html`}>Beheer</a>
+      </nav>
     </footer>
   );
 }
@@ -1030,7 +1066,7 @@ function Eend({ ig, verborgen }: { ig: string; verborgen: boolean }) {
 function Svg({ maat = 20, children }: { maat?: number; children: ReactNode }) {
   return <svg width={maat} height={maat} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>;
 }
-const SlotIcoon = () => <Svg maat={16}><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></Svg>;
+const FbIcoon = ({ maat = 20 }: { maat?: number }) => <Svg maat={maat}><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><path d="M15.5 8.5h-1.6a2 2 0 0 0-2 2v10M9.5 13h5" /></Svg>;
 const IgIcoon = ({ maat = 20 }: { maat?: number }) => <Svg maat={maat}><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><circle cx="12" cy="12" r="4" /><path d="M17 7h.01" /></Svg>;
 const ZoekIcoon = () => <Svg maat={18}><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></Svg>;
 const SorteerIcoon = () => <Svg maat={18}><path d="M7 4v16M3.5 16.5 7 20l3.5-3.5M17 20V4M13.5 7.5 17 4l3.5 3.5" /></Svg>;
@@ -1048,4 +1084,7 @@ const LaserIcoon = () => <Svg maat={22}><path d="M9 3.5h6v5H9Z" /><path d="M12 8
 const StandIcoon = () => <Svg maat={22}><path d="M3.5 9.5 6 4.5h12l2.5 5" /><path d="M3.5 9.5a2.8 2.8 0 0 0 5.67 0 2.8 2.8 0 0 0 5.66 0 2.8 2.8 0 0 0 5.67 0" /><path d="M5 12v8h14v-8" /></Svg>;
 const Sparkel = () => <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2c.6 4.6 2.4 7.4 10 10-7.6 2.6-9.4 5.4-10 10-.6-4.6-2.4-7.4-10-10 7.6-2.6 9.4-5.4 10-10Z" /></svg>;
 
-createRoot(document.getElementById("app")!).render(<KlantPagina />);
+// Een link uit een herstelmail (wachtwoord vergeten) die hier landt, hoort bij het beheer.
+// (ook een verlopen link: #error=…&error_code=otp_expired, dan legt het beheer het uit).
+if ((/type=recovery/.test(location.hash) && /access_token=/.test(location.hash)) || /error_code=otp_expired/.test(location.hash)) location.replace(BEHEER_PAD + location.hash);
+else createRoot(document.getElementById("app")!).render(<KlantPagina />);

@@ -253,10 +253,26 @@ export interface Aanvraag {
   grootte?: string | null;
   kleur?: string | null;
   idee: string;
+  toploader?: boolean | null; // binder voor toploaders (schema 0.11)
   artwork?: string | null;   // enkel geladen als je de aanvraag opent
   voorbeeld?: string | null;
+  beelden?: string[] | null; // afbeeldingen van het idee (schema 0.11), enkel geladen als je de aanvraag opent
   status: AanvraagStatus;
   aangemaakt_op: string;
+}
+
+/**
+ * Wat de wet vraagt op de website van een onderneming (Boek XII WER): wie we zijn, waar, het ondernemingsnummer
+ * en hoe je ons bereikt. Staat op de klantenpagina (publiek), los van de gegevens voor de boekhouding.
+ */
+export interface BedrijfPubliek {
+  handelsnaam?: string | null;   // Bind'r
+  naam?: string | null;          // naam van de ondernemer (eenmanszaak)
+  adres?: string | null;         // vestigingsadres
+  kbo?: string | null;           // ondernemingsnummer
+  email?: string | null;
+  telefoon?: string | null;
+  vrijstelling?: boolean;        // bijzondere vrijstellingsregeling kleine ondernemingen (geen btw)
 }
 
 /** Gegevens van de onderneming voor het borderel en de rapporten (per omgeving: Bind'r en Brent apart). */

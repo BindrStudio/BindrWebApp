@@ -63,13 +63,13 @@ export interface Backend {
   verwijderEtalage(id: string): Promise<void>;
   /** Aanvragen voor een eigen binder: de lijst zonder afbeeldingen, de afbeeldingen apart. */
   laadAanvragen(): Promise<Aanvraag[]>;
-  laadAanvraagBeelden(id: string): Promise<Pick<Aanvraag, "artwork" | "voorbeeld">>;
+  laadAanvraagBeelden(id: string): Promise<Pick<Aanvraag, "artwork" | "voorbeeld" | "beelden">>;
   zetAanvraagStatus(id: string, status: AanvraagStatus): Promise<void>;
   /** Een aanvraag wissen (spam, of na het afwerken met de afbeeldingen erin). */
   verwijderAanvraag(id: string): Promise<void>;
 
-  /** Het wachtwoord (de pincode) van de ingelogde beheerder wijzigen. */
-  wijzigPincode(pin: string): Promise<void>;
+  /** Het wachtwoord van de ingelogde beheerder wijzigen (eerst het huidige; null = na een herstelmail). */
+  wijzigWachtwoord(huidig: string | null, nieuw: string): Promise<void>;
 
   logUit(): Promise<void>;
 }

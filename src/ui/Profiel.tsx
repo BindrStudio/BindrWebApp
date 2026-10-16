@@ -6,7 +6,7 @@ import {
   actieveBeurs, actieveOmgeving, boekhoudingAan, inkoopThuis, logUit, openAanvragen, openArtikelen, openBoekhouding, openEtalage, openHistoriek, openInzichten, openOverzicht, openPrive,
   synchroniseer, useApp,
 } from "../state";
-import { PinKiezen } from "./Login";
+import { PinKiezen, WachtwoordWijzigen } from "./Login";
 import { datumKort, euro } from "../lib/format";
 import { dagontvangsten } from "../lib/boekhouding";
 import { Icoon, Sheet } from "./common";
@@ -24,6 +24,7 @@ export function Profiel() {
   const gebruiker = backend?.gebruiker();
   const naam = demo ? "Demo" : gebruiker?.naam || gebruiker?.email || "Beheerder";
   const [pinOpen, setPinOpen] = useState(false);
+  const [wachtwoordOpen, setWachtwoordOpen] = useState(false);
   const [beurzenOpen, setBeurzenOpen] = useState(false);
   const omg = actieveOmgeving(s);
   const beurs = actieveBeurs(s);
@@ -117,11 +118,17 @@ export function Profiel() {
           {!demo && <SyncStatus />}
           {!demo && wachtrij > 0 && online && <button className="rij-knop" onClick={() => void synchroniseer()}><Icoon naam="vernieuw" maat={18} /> Nu doorsturen</button>}
           {!demo && <button className="rij-knop" onClick={() => setPinOpen(true)}><Icoon naam="slot" maat={18} /> Pincode wijzigen</button>}
+          {!demo && <button className="rij-knop" onClick={() => setWachtwoordOpen(true)}><Icoon naam="slot" maat={18} /> Wachtwoord wijzigen</button>}
           <button className="rij-knop" onClick={() => void logUit()}><Icoon naam="uit" maat={18} /> {demo ? "Demo verlaten" : "Uitloggen"}</button>
-          {!demo && <p className="groep-uitleg">Na 10 minuten zonder de app vraagt hij je pincode opnieuw. Uitloggen wist ook wat deze gsm over jou onthoudt.</p>}
+          {!demo && <p className="groep-uitleg">Je pincode opent de app op deze gsm; na 10 minuten zonder de app vraagt hij ze opnieuw. Na 10 foute pincodes moet je opnieuw inloggen met je wachtwoord. Uitloggen wist ook wat deze gsm over jou onthoudt.</p>}
         </div>
       </section>
       {beurzenOpen && <BeurzenSheet onSluit={() => setBeurzenOpen(false)} />}
+      {wachtwoordOpen && (
+        <Sheet titel="Wachtwoord wijzigen" onSluit={() => setWachtwoordOpen(false)}>
+          <WachtwoordWijzigen onKlaar={() => setWachtwoordOpen(false)} />
+        </Sheet>
+      )}
       {pinOpen && (
         <Sheet titel="Pincode wijzigen" onSluit={() => setPinOpen(false)}>
           <PinKiezen inSheet onKlaar={() => setPinOpen(false)} />

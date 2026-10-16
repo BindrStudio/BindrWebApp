@@ -46,6 +46,7 @@ const PADEN: Record<string, ReactNode> = {
   grafiek: <path d="M5 20V11M11 20V5M17 20v-6M3 20h18" />,
   qr: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><path d="M14 14h2v2h-2zM18 18h2v2h-2zM14 18h2M18 14h2" /></>,
   instagram: <><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><circle cx="12" cy="12" r="4" /><path d="M17 7h.01" /></>,
+  facebook: <><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><path d="M15.5 8.5h-1.6a2 2 0 0 0-2 2v10M9.5 13h5" /></>,
   geld: <><rect x="2.5" y="6.5" width="19" height="11" rx="1.5" /><circle cx="12" cy="12" r="2.5" /><path d="M6 9.5v5M18 9.5v5" /></>,
   kaartje: <><rect x="2.5" y="5.5" width="19" height="13" rx="2" /><path d="M2.5 10h19M6 15h4" /></>,
   foto: <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><circle cx="9" cy="10" r="1.8" /><path d="m4 17 5-5 4 4 2.5-2.5L20 17" /></>,

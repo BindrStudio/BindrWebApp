@@ -12,7 +12,7 @@ import { AfdrukLaag } from "./ui/Afdruk";
 import { Prive } from "./ui/Prive";
 import { EtalageSheet } from "./ui/Etalage";
 import { AanvragenSheet } from "./ui/Aanvragen";
-import { Login, PinKiezen, Slot } from "./ui/Login";
+import { Login, PinKiezen, Slot, WachtwoordKiezen } from "./ui/Login";
 import { Bovenbalk } from "./ui/Bovenbalk";
 import { ExemplaarSheet } from "./ui/ExemplaarSheet";
 import { ArtikelSheet, Artikelen } from "./ui/Artikelen";
@@ -65,6 +65,7 @@ export function App() {
   if (fase === "login") return <><Login /><Toasts toasts={toasts} /></>;
   if (fase === "slot") return <><Slot /><Toasts toasts={toasts} /></>;
   if (fase === "pin") return <><PinKiezen /><Toasts toasts={toasts} /></>;
+  if (fase === "wachtwoord") return <><WachtwoordKiezen /><Toasts toasts={toasts} /></>;
 
   const inMandje = mandje.regels.length;
   const beursBezig = beurzen.some((b) => b.status === "actief");
