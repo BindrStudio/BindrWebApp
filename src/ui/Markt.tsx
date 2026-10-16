@@ -4,6 +4,7 @@ import type { Catalogus } from "../types";
 import { TALEN } from "../types";
 import { datumKort, euro } from "../lib/format";
 import { laadCatalogus } from "../lib/catalog";
+import { marktprijs } from "../lib/pricing";
 import { cardmarketKentTaal, cardmarketLink, grapje, NIET_OP_CARDMARKET, marktinfo, procent, RICHTING_TEKST, setGrapje, setTrend, type Richting, type SetTrend } from "../lib/markt";
 import { Icoon } from "./common";
 
@@ -24,6 +25,7 @@ export function MarktBlok({ cardmarketId, variant, taal, setId, catalogus, soort
 }) {
   const { gids } = useApp();
   const info = TALEN_MET_GIDS.has(taal) ? marktinfo(cardmarketId, variant, gids) : null;
+  const markt = info ? marktprijs(info) : null;
   const [set, setSet] = useState<{ naam: string; trend: SetTrend | null } | null>(null);
 
   useEffect(() => {
@@ -52,6 +54,13 @@ export function MarktBlok({ cardmarketId, variant, taal, setId, catalogus, soort
       </div>
       {info ? (
         <>
+          {markt != null && (
+            <div className="marktprijs">
+              <span>Marktprijs (NM)</span>
+              <strong>{euro(markt)}</strong>
+              <em>De middelste van trend, week en maand: één uitschieter trekt de prijs niet mee.</em>
+            </div>
+          )}
           <div className="prijsrij">
             <Stat label="Trend" waarde={euro(info.trend)} />
             <Stat label="Laagste" waarde={euro(info.laagste)} />

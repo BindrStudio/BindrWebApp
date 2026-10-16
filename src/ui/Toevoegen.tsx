@@ -89,7 +89,7 @@ export function KiesKaart({ onKies, onHandmatig, metArtikel = true, handmatigTek
       {bron === "foto" && <FotoHerkenning cat={cat} onKies={onKies} />}
       {bron === "handmatig" && (
         <div className="blok">
-          <p>{handmatigTekst ?? "Staat de kaart niet in de catalogus, of is het een slab of een eigen product? Vul dan zelf de gegevens in."}</p>
+          <p>{handmatigTekst ?? "Staat de kaart niet in de catalogus, of is het een slab? Vul dan zelf de gegevens in."}</p>
           <button className="knop" onClick={onHandmatig}>Handmatig invullen</button>
         </div>
       )}
@@ -269,7 +269,8 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
         </div>
       ) : (
         <>
-          <Veld label="Soort"><Kiezer waarde={soort} opties={[{ waarde: "kaart", label: "Kaart" }, { waarde: "slab", label: "Slab" }, { waarde: "eigen product", label: "Eigen product" }]} onKies={setSoort} /></Veld>
+          <Veld label="Soort"><Kiezer waarde={soort} opties={[{ waarde: "kaart", label: "Kaart" }, { waarde: "slab", label: "Slab" }]} onKies={setSoort} /></Veld>
+          <p className="zacht klein">Binders, 3D-prints en sealed krijgen geen QR-label: die voeg je toe bij <button type="button" className="tekstknop klein" onClick={() => openArtikelen("binder")}>Profiel › Artikels</button>.</p>
           <Veld label="Naam (Engels, ook op het label)"><input value={v.naam} onChange={(e) => setV({ ...v, naam: e.target.value })} placeholder={soort === "eigen product" ? "Custom binder 9-pocket, gravure Gengar" : "Pikachu"} /></Veld>
           {soort !== "eigen product" && (
             <div className="twee">
@@ -299,7 +300,7 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
         <MarktBlok cardmarketId={kaart.cardmarket} variant={v.variant} taal={v.taal} setId={kaart.setId} catalogus={kaart.catalogus}>
           {voorstel && (
             <div className="voorstel-rij">
-              <span>Voorstel voor {v.conditie}{voorstel.factor !== 1 ? ` (${Math.round(voorstel.factor * 100)}% van de trend)` : ""}{voorstel.nakijken ? " · nakijken" : ""}</span>
+              <span>Voorstel voor {v.conditie}{voorstel.factor !== 1 ? ` (${Math.round(voorstel.factor * 100)}% van de marktprijs)` : ""}{voorstel.nakijken ? " · nakijken" : ""}</span>
               <strong>{euro(voorstel.voorstel)}</strong>
             </div>
           )}
@@ -324,7 +325,7 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
 
       <div className="twee">
         <Veld label={v.opslag === "vitrine" ? "Prijs op het hartje (€)" : "Verkoopprijs (€)"}
-          hint={voorstel ? <>Voorstel {euro(voorstel.voorstel)} · trend {euro(voorstel.trend)}{voorstel.nakijken ? " · nakijken" : ""}</> : soort === "kaart" ? "Geen voorstel: prijs zelf" : undefined}>
+          hint={voorstel ? <>Voorstel {euro(voorstel.voorstel)} · markt {euro(voorstel.referentie)}{voorstel.nakijken ? " · nakijken" : ""}</> : soort === "kaart" ? "Geen voorstel: prijs zelf" : undefined}>
           <input inputMode="numeric" value={v.prijs} onChange={(e) => { setPrijsAangeraakt(true); setV({ ...v, prijs: e.target.value }); }} />
         </Veld>
         <Veld label="Aankoopprijs (€)"><input inputMode="decimal" value={v.aankoopprijs} onChange={(e) => setV({ ...v, aankoopprijs: e.target.value })} /></Veld>

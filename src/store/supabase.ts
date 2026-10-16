@@ -1,13 +1,15 @@
 // Supabase via de REST- en login-API, zonder extra bibliotheek.
 import { SUPABASE_KEY, SUPABASE_URL } from "../config";
-import type { Aankoopfoto, Aanwezig, Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
+import type { Aankoopfoto, Aanvraag, AanvraagStatus, Aanwezig, Artikel, Artikelfoto, Etalagefoto, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
 import { Fout, type Alles, type Backend, type Beheerder, type PrijsMarkering } from "./backend";
 import { schoonArtikel, schoonExemplaar } from "../lib/exemplaar";
 
 const SESSIE_SLEUTEL = "bindr-sessie-v1";
 const VERSIE_SLEUTEL = "bindr-schema-v1";
-/** De versie van het schema die alles van de app kan (supabase/schema.sql van 0.9). */
-export const NIEUWSTE = 8;
+/** De versie van het schema die alles van de app kan (supabase/schema.sql van 0.10). */
+export const NIEUWSTE = 9;
+/** Vanaf deze versie (schema 0.10): meer foto's per artikel, de etalage en aanvragen voor een eigen binder. */
+export const ETALAGE_VANAF = 9;
 /** Vanaf deze versie kan de boekhouding van 0.8 (kas, overschrijving, privé, aankoopfoto's …) naar de server. */
 export const BOEKHOUDING_VANAF = 7;
 const PAGINA = 1000;
@@ -187,8 +189,8 @@ export class SupabaseBackend implements Backend {
   /** True als de database nog het schema van fase 1 heeft (geen beurzen en transacties). */
   schemaOud = false;
 
-  /** 8 = beurzen met uren en link, artikels zichtbaar per stuk (0.9), 7 = inbreng van kaarten die al in de app staan (0.8), 6 = aankoopfoto's en privé (0.7), 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
-  versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v >= 2 && v <= 8 ? v : null; })();
+  /** 9 = etalage, meer foto's per artikel en aanvragen (0.10), 8 = beurzen met uren en link, artikels zichtbaar per stuk (0.9), 7 = inbreng van kaarten die al in de app staan (0.8), 6 = aankoopfoto's en privé (0.7), 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
+  versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v >= 2 && v <= NIEUWSTE ? v : null; })();
 
   private async zekerVersie() {
     if (this.versie == null) await this.laadOmgevingen().catch(() => undefined);
@@ -221,13 +223,13 @@ export class SupabaseBackend implements Backend {
         if (e instanceof Fout && (e.status === 400 || e.status === 404)) return false; // onbekende kolom of tabel
         throw e;
       });
-      // Vanaf 0.8 zegt de database zelf welke versie ze heeft (schema_versie: 8 = 0.8, 9 = 0.9).
+      // Vanaf 0.8 zegt de database zelf welke versie ze heeft (schema_versie: 8 = 0.8, 9 = 0.9, 10 = 0.10).
       const schema = await this.vraag<number>("GET", "rpc/schema_versie").then((n) => Number(n) || 0, (e) => {
         if (e instanceof Fout && (e.status === 400 || e.status === 404)) return 0;
         throw e;
       });
       if (schema >= 8) {
-        this.zetVersie(Math.min(8, schema - 1));
+        this.zetVersie(Math.min(NIEUWSTE, schema - 1));
         return o;
       }
       const [v4, v5, v6] = await Promise.all([
@@ -451,14 +453,14 @@ export class SupabaseBackend implements Backend {
   }
 
   /** Wat pas kan na de update van het schema (0.6): wachten in plaats van weigeren (en kwijtraken). */
-  private async vraagNieuw(wat: string) {
+  private async vraagNieuw(wat: string, vanaf = BOEKHOUDING_VANAF) {
     await this.zekerVersie();
-    if ((this.versie ?? 0) < BOEKHOUDING_VANAF) {
+    if ((this.versie ?? 0) < vanaf) {
       // Opnieuw nakijken (misschien werd het schema net uitgevoerd); anders blijft het in de wachtrij.
       localStorage.removeItem(VERSIE_SLEUTEL);
       this.versie = null;
       await this.zekerVersie();
-      if ((this.versie ?? 0) < BOEKHOUDING_VANAF) throw new Fout(`${wat} kan pas na de update van de database. Voer supabase/schema.sql opnieuw uit.`, 404);
+      if ((this.versie ?? 0) < vanaf) throw new Fout(`${wat} kan pas na de update van de database. Voer supabase/schema.sql opnieuw uit.`, 404);
     }
   }
 
@@ -494,6 +496,71 @@ export class SupabaseBackend implements Backend {
   async verwijderAankoopfoto(id: string) {
     await this.vraagNieuw("Een foto verwijderen");
     await this.vraag("DELETE", `aankoopfotos?id=eq.${id}`, undefined, { Prefer: "return=minimal" });
+  }
+
+  // ── Schema 0.10: meer foto's per artikel, etalage, aanvragen ──
+  async laadArtikelfotos(ids: string[]): Promise<Artikelfoto[]> {
+    if ((this.versie ?? 0) < ETALAGE_VANAF || !ids.length) return [];
+    const uit: Artikelfoto[] = [];
+    for (let i = 0; i < ids.length; i += 40) {
+      uit.push(...await this.vraag<Artikelfoto[]>("GET", `artikelfotos?select=id,artikel_id,foto,volgorde&artikel_id=in.(${ids.slice(i, i + 40).join(",")})&order=volgorde.asc,aangemaakt_op.asc`));
+    }
+    return uit;
+  }
+
+  async bewaarArtikelfoto(f: Artikelfoto) {
+    await this.vraagNieuw("Meer foto's bij een artikel", ETALAGE_VANAF);
+    const { id, artikel_id, foto, volgorde } = f;
+    await this.vraag("POST", "artikelfotos?on_conflict=id", [{ id, artikel_id, foto, volgorde }], { Prefer: "resolution=merge-duplicates,return=minimal" });
+  }
+
+  async verwijderArtikelfoto(id: string) {
+    await this.vraagNieuw("Een foto verwijderen", ETALAGE_VANAF);
+    await this.vraag("DELETE", `artikelfotos?id=eq.${id}`, undefined, { Prefer: "return=minimal" });
+  }
+
+  async laadEtalage(): Promise<Etalagefoto[]> {
+    await this.zekerVersie();
+    if ((this.versie ?? 0) < ETALAGE_VANAF) return [];
+    return this.vraag<Etalagefoto[]>("GET", "etalage?select=id,foto,titel,link,volgorde,omgeving_id,aangemaakt_op&order=volgorde.asc,aangemaakt_op.asc");
+  }
+
+  async bewaarEtalage(f: Etalagefoto) {
+    await this.vraagNieuw("De etalage", ETALAGE_VANAF);
+    const { id, foto, titel, link, volgorde, omgeving_id } = f;
+    await this.vraag("POST", "etalage?on_conflict=id", [{ id, foto, titel: titel ?? null, link: link ?? null, volgorde, ...(omgeving_id ? { omgeving_id } : {}) }],
+      { Prefer: "resolution=ignore-duplicates,return=minimal" });
+  }
+
+  async wijzigEtalage(id: string, w: Partial<Pick<Etalagefoto, "titel" | "link" | "volgorde">>) {
+    await this.vraagNieuw("De etalage", ETALAGE_VANAF);
+    await this.vraag("PATCH", `etalage?id=eq.${id}`, w, { Prefer: "return=minimal" });
+  }
+
+  async verwijderEtalage(id: string) {
+    await this.vraagNieuw("Een foto uit de etalage halen", ETALAGE_VANAF);
+    await this.vraag("DELETE", `etalage?id=eq.${id}`, undefined, { Prefer: "return=minimal" });
+  }
+
+  async laadAanvragen(): Promise<Aanvraag[]> {
+    await this.zekerVersie();
+    if ((this.versie ?? 0) < ETALAGE_VANAF) return [];
+    return this.vraag<Aanvraag[]>("GET", "aanvragen?select=id,naam,email,telefoon,grootte,kleur,idee,status,aangemaakt_op&order=aangemaakt_op.desc&limit=200");
+  }
+
+  async laadAanvraagBeelden(id: string) {
+    const r = await this.vraag<Pick<Aanvraag, "artwork" | "voorbeeld">[]>("GET", `aanvragen?select=artwork,voorbeeld&id=eq.${id}`);
+    return r[0] ?? { artwork: null, voorbeeld: null };
+  }
+
+  async verwijderAanvraag(id: string) {
+    await this.vraagNieuw("Een aanvraag wissen", ETALAGE_VANAF);
+    await this.vraag("DELETE", `aanvragen?id=eq.${id}`, undefined, { Prefer: "return=minimal" });
+  }
+
+  async zetAanvraagStatus(id: string, status: AanvraagStatus) {
+    await this.vraagNieuw("Een aanvraag bijwerken", ETALAGE_VANAF);
+    await this.vraag("PATCH", `aanvragen?id=eq.${id}`, { status }, { Prefer: "return=minimal" });
   }
 
   maakOngedaan(id: string) {

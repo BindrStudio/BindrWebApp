@@ -4,6 +4,7 @@ import type { Exemplaar } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
 import { dagenGeleden, datumKort, euro, getal } from "../lib/format";
 import { toonCode } from "../lib/code";
+import { krijgtLabel } from "../lib/exemplaar";
 import { voorstelVoor } from "../lib/pricing";
 import { labelDataUrl } from "../lib/label";
 import { huidigeMaat } from "../lib/printer";
@@ -101,7 +102,7 @@ export function ExemplaarSheet({ id }: { id: string }) {
         {voorstel?.nakijken && <p className="nakijken">Trend en 30-dagengemiddelde wijken sterk af: even nakijken.</p>}
       </MarktBlok>}
 
-      <LabelBlok ex={ex} printer={printer} />
+      {krijgtLabel(ex) && <LabelBlok ex={ex} printer={printer} />}
 
       {bewerk ? <Bewerk ex={ex} /> : <Herkomst ex={ex} />}
 
@@ -188,8 +189,8 @@ function KlantZiet({ ex }: { ex: Exemplaar }) {
   const { omgevingen } = useApp();
   if (ex.opslag !== "vitrine" || ex.status !== "in voorraad") return null;
   const redenen: string[] = [];
-  if (ex.label_status === "te printen") redenen.push("het label is nog niet geprint");
-  else if (ex.label_status === "geprint") redenen.push("het label is nog niet geplakt");
+  if (krijgtLabel(ex) && ex.label_status === "te printen") redenen.push("het label is nog niet geprint");
+  else if (krijgtLabel(ex) && ex.label_status === "geprint") redenen.push("het label is nog niet geplakt");
   if (ex.hartjesprijs == null) redenen.push("er staat nog geen hartje op");
   if (ex.nieuw_hartje != null) redenen.push("het hartje moet eerst wisselen");
   const omg = omgevingen.find((o) => o.id === ex.omgeving_id);
@@ -199,7 +200,7 @@ function KlantZiet({ ex }: { ex: Exemplaar }) {
     <div className="klant-ziet">
       <Icoon naam="oog" maat={18} />
       <span>Klanten zien deze kaart nog niet: {redenen.join(", ")}.</span>
-      {ex.label_status === "geprint" && <button className="tekstknop klein" onClick={() => bevestigLabel(ex)}>Label is geplakt</button>}
+      {krijgtLabel(ex) && ex.label_status === "geprint" && <button className="tekstknop klein" onClick={() => bevestigLabel(ex)}>Label is geplakt</button>}
     </div>
   );
 }

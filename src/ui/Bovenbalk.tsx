@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { actieveBeurs, actieveOmgeving, naarTab, openInstellingen, useApp, wisselOmgeving } from "../state";
 import { Icoon, Sheet } from "./common";
+import { klantUrl } from "../config";
 
 const SCHERM: Record<string, string> = { catalogus: "catalogus", vault: "vault", scan: "scannen", kassa: "kassa", profiel: "profiel", meer: "profiel" };
 
@@ -45,7 +46,10 @@ export function Bovenbalk() {
             {s.omgevingen.length > 1 && <Icoon naam="chevron" maat={14} />}
           </button>
         )}
-        <button className="tandwiel-knop" onClick={openInstellingen} aria-label="Instellingen" title="Instellingen">
+        <a className="tandwiel-knop" href={klantUrl(s.backend?.soort === "demo")} target="_blank" rel="noreferrer" aria-label="Bekijk als klant" title="Bekijk als klant">
+          <Icoon naam="oog" maat={22} />
+        </a>
+        <button type="button" className="tandwiel-knop draai" onClick={() => openInstellingen()} aria-label="Instellingen" title="Instellingen">
           <Icoon naam="tandwiel" maat={22} />
         </button>
       </div>

@@ -2,13 +2,14 @@ import { useMemo, useState } from "react";
 import { afstelling, koppelPrinter, loskoppelen, openExemplaar, print, printRandtestNu, printTestlabel, useApp, wijzigVeel, zetInstellingen } from "../state";
 import type { Exemplaar } from "../types";
 import { toonCode } from "../lib/code";
+import { krijgtLabel } from "../lib/exemplaar";
 import { LABELMATEN, labelDataUrl, verschuivingTekst } from "../lib/label";
 import { bluetoothMogelijk, huidigeMaat, isIphone, VERSCHUIVING_MAX } from "../lib/printer";
 import { Icoon, Leeg, Segment } from "./common";
 import { PLAATS } from "../lib/categorie";
 
 type Lijst = "te printen" | "geprint";
-const ACTIEF = (e: Exemplaar) => e.status === "in voorraad";
+const ACTIEF = (e: Exemplaar) => e.status === "in voorraad" && krijgtLabel(e);
 const BLUEFY = "https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055";
 
 export function Labels({ inSheet = false }: { inSheet?: boolean }) {

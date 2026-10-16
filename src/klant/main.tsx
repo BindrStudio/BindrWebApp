@@ -1,8 +1,8 @@
 // De klantenpagina: een aparte, publieke pagina zonder login en zonder beheerfuncties.
 //
-// Opbouw: een startpagina (wie we zijn, wat we aanbieden, onze komende beurzen) en vier catalogi:
-// kaarten, binders, 3D-prints en sealed (#kaarten, #binders, #3d, #sealed). Onderaan op de gsm een
-// balk met icoontjes om ertussen te wisselen; op een groot scherm staan ze bovenaan.
+// Opbouw: een startpagina (een zip-binder als kaft, foto's van ons werk die rond zweven, wat we aanbieden,
+// onze komende beurzen), vier catalogi (#kaarten, #binders, #3d, #sealed) en "Ontwerp je binder" (#ontwerp).
+// Onderaan op de gsm een balk met icoontjes om ertussen te wisselen; op een groot scherm staan ze bovenaan.
 // Ze toont enkel de publieke weergaven in Supabase. Niets uit de beheer-app wordt hier geladen,
 // enkel config, types en kleine hulpfuncties.
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ToetsEvent, type PointerEvent as WijsEvent, type ReactNode } from "react";
@@ -19,6 +19,7 @@ import { veiligeFoto } from "../lib/eigenfoto";
 import { TECHNIEKEN } from "../lib/categorie";
 import { fotoBronnen, setLogo, type FotoKaart } from "../lib/foto";
 import { SetKiezer } from "../gedeeld/SetKiezer";
+import { OntwerpPagina } from "./Ontwerp";
 import {
   artikelZichtbaar, groepeer, groepSleutel, isNieuw, pastFilters, pastZoek, perSet, SNELFILTERS, SORTERINGEN, setIdVan, setNaam, setTaal, sorteer, zoekTekst, zoekWoorden,
   type Groep, type SetInfo, type Snelfilter, type Sortering, type Toonbaar,
@@ -56,7 +57,7 @@ interface ArtikelRij {
 
 /** De vier catalogi en de startpagina. */
 type Plek = "kaarten" | "binders" | "3d" | "sealed";
-type Route = "start" | Plek;
+type Route = "start" | Plek | "ontwerp";
 
 /** Eén ding in de catalogus: een kaart (één exemplaar) of een artikel (met een aantal). */
 interface Stuk extends Toonbaar {
@@ -73,6 +74,9 @@ interface Stuk extends Toonbaar {
 }
 
 interface KomendeBeurs { naam: string; datum: string; locatie: string | null; uren?: string | null; link?: string | null }
+/** Een foto van ons werk op de startpagina (de etalage, beheerd in Profiel › Etalage). */
+interface EtalageRij { id: string; foto?: string | null; titel?: string | null; link?: string | null; volgorde?: number }
+interface EtalageFoto { id: string; src: string; titel: string | null; link: string | null }
 
 const CONDITIE: Record<string, string> = { M: "Mint", NM: "Near Mint", EX: "Excellent", GD: "Good", LP: "Light Played", PL: "Played", PO: "Poor" };
 const taalNaam = (t: string) => TALEN.find((x) => x.code === t)?.label ?? t;
@@ -114,20 +118,20 @@ async function haal<T>(pad: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-interface Data { stukken: Stuk[]; instagram: string; beurzen: KomendeBeurs[] }
+interface Data { stukken: Stuk[]; instagram: string; beurzen: KomendeBeurs[]; etalage: EtalageRij[]; sleutel: string | null }
 
 /** Met ?demo=1 toont de pagina de demo van dit toestel (om te kijken hoe klanten het zien). */
 function laadDemo(): Data | null {
   if (!new URLSearchParams(location.search).has("demo")) return null;
   try {
     const d = JSON.parse(localStorage.getItem("bindr-demo-v1") || "null");
-    if (!d) return { stukken: [], instagram: INSTAGRAM, beurzen: [] };
+    if (!d) return { stukken: [], instagram: INSTAGRAM, beurzen: [], etalage: [], sleutel: null };
     // Zoals de publieke weergaven: enkel aangevinkte omgevingen, geen kaarten waarvan het hartje moet wisselen of het label nog niet hangt.
     const zichtbaar = new Set(((d.omgevingen ?? []) as { id: string; zichtbaar_voor_klanten: boolean }[]).filter((o) => o.zichtbaar_voor_klanten).map((o) => o.id));
     const toon = (r: { omgeving_id?: string | null }) => !zichtbaar.size || !r.omgeving_id || zichtbaar.has(r.omgeving_id);
     type DemoEx = VitrineRij & { opslag: string; status: string; hartjesprijs: number | null; hartjesdatum: string | null; vitrine_sinds?: string | null; nieuw_hartje?: number | null; omgeving_id?: string | null; label_status?: string };
     const kaarten = (d.exemplaren as DemoEx[])
-      .filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null && e.nieuw_hartje == null && e.label_status === "gestickerd" && toon(e))
+      .filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null && e.nieuw_hartje == null && (e.label_status === "gestickerd" || e.soort === "eigen product") && toon(e))
       .map((e) => vanKaart({ ...e, prijs: e.hartjesprijs!, sinds: e.hartjesdatum, toegevoegd: e.vitrine_sinds ?? e.hartjesdatum }));
     type DemoArt = ArtikelRij & { opslag: string; omgeving_id?: string | null; zichtbaar?: boolean | null; details?: Record<string, unknown> | null };
     const artikelen = (d.artikelen as DemoArt[])
@@ -139,7 +143,10 @@ function laadDemo(): Data | null {
       .filter((b) => (b.status === "gepland" || b.status === "actief") && b.datum >= vandaag && toon(b))
       .map((b) => ({ naam: b.naam, datum: b.datum, locatie: b.locatie ?? null, uren: b.uren ?? null, link: b.link ?? null }))
       .sort((a, b) => a.datum.localeCompare(b.datum));
-    return { stukken: [...kaarten, ...artikelen], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, beurzen };
+    const etalage = ((d.etalage ?? []) as (EtalageRij & { omgeving_id?: string | null })[]).filter(toon)
+      .sort((a, b) => (a.volgorde ?? 0) - (b.volgorde ?? 0));
+    const sleutel = typeof d.instellingen?.aanvraag_sleutel === "string" ? d.instellingen.aanvraag_sleutel : null;
+    return { stukken: [...kaarten, ...artikelen], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, beurzen, etalage, sleutel };
   } catch {
     return null;
   }
@@ -159,10 +166,11 @@ const ROUTES: { id: Route; label: string; titel: string; icoon: () => ReactNode 
   { id: "binders", label: "Binders", titel: "Binders", icoon: () => <BinderIcoon /> },
   { id: "3d", label: "3D-prints", titel: "3D-prints", icoon: () => <KubusIcoon /> },
   { id: "sealed", label: "Sealed", titel: "Sealed", icoon: () => <PackIcoon /> },
+  { id: "ontwerp", label: "Ontwerp", titel: "Ontwerp je binder", icoon: () => <OntwerpIcoon maat={22} /> },
 ];
 function routeVan(hash: string): Route {
   const h = hash.replace(/^#\/?/, "").toLowerCase();
-  return (["kaarten", "binders", "3d", "sealed"] as const).find((r) => r === h) ?? "start";
+  return (["kaarten", "binders", "3d", "sealed", "ontwerp"] as const).find((r) => r === h) ?? "start";
 }
 const hrefVan = (r: Route) => (r === "start" ? "#" : `#${r}`);
 
@@ -213,9 +221,28 @@ function KlantPagina() {
       haal<ArtikelRij[]>(`publieke_artikelen?select=${artikelKolommen}`).catch(() => haal<ArtikelRij[]>("publieke_artikelen?select=*")).catch(() => []),
       haal<{ sleutel: string; waarde: unknown }[]>("publieke_instellingen?select=*").catch(() => []),
       haal<KomendeBeurs[]>("publieke_beurzen?select=*").catch(() => []),
-    ]).then(([kaarten, artikelen, inst, beurzen]) => {
+      haal<EtalageRij[]>("publieke_etalage?select=id,titel,link,volgorde&order=volgorde.asc&limit=16").catch(() => [] as EtalageRij[]),
+    ]).then(([kaarten, artikelen, inst, beurzen, etalage]) => {
       const ig = inst.find((x) => x.sleutel === "instagram")?.waarde;
-      setData({ stukken: [...kaarten.map(vanKaart), ...artikelen.map(vanArtikel)], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, beurzen });
+      const sleutel = inst.find((x) => x.sleutel === "aanvraag_sleutel")?.waarde;
+      setData({
+        stukken: [...kaarten.map(vanKaart), ...artikelen.map(vanArtikel)], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, beurzen, etalage,
+        sleutel: typeof sleutel === "string" && sleutel ? sleutel : null,
+      });
+      // De foto's van de etalage: eerst de vijf die meteen zweven, de rest rustig daarna (om de 7 seconden drie,
+      // ongeveer zo snel als er een omdraait), en niet zolang de pagina in de achtergrond staat.
+      void (async () => {
+        for (let i = 0; i < etalage.length; i += i ? 3 : 5) {
+          if (i) {
+            await new Promise((r) => setTimeout(r, 7000));
+            while (document.hidden) await new Promise((r) => setTimeout(r, 2000));
+          }
+          const ids = etalage.slice(i, i + (i ? 3 : 5)).map((e) => e.id);
+          const f = await haal<{ id: string; foto: string | null }[]>(`publieke_etalage?select=id,foto&id=in.(${ids.join(",")})`).catch(() => []);
+          const per = new Map(f.map((x) => [x.id, x.foto]));
+          setData((d) => d && { ...d, etalage: d.etalage.map((e) => (per.has(e.id) ? { ...e, foto: per.get(e.id) } : e)) });
+        }
+      })();
       const vulFotos = (bron: Stuk["bron"], fotos: { id: string; foto: string | null }[]) => {
         const per = new Map(fotos.map((f) => [f.id, veiligeFoto(f.foto)]));
         if (per.size) setData((d) => d && { ...d, stukken: d.stukken.map((x) => (x.bron === bron && per.get(x.id) ? { ...x, foto: per.get(x.id) } : x)) });
@@ -238,8 +265,8 @@ function KlantPagina() {
     for (const s of stukken) t[s.plek] += s.aantal;
     return t;
   }, [stukken]);
-  // Lege catalogi (nog geen 3D-prints online) laten we uit de navigatie; kaarten en binders staan er altijd.
-  const routes = ROUTES.filter((r) => r.id === "start" || r.id === "kaarten" || r.id === "binders" || !data || telling[r.id as Plek] > 0);
+  // Lege catalogi (nog geen 3D-prints online) laten we uit de navigatie; kaarten, binders en ontwerpen staan er altijd.
+  const routes = ROUTES.filter((r) => r.id === "start" || r.id === "kaarten" || r.id === "binders" || r.id === "ontwerp" || !data || telling[r.id as Plek] > 0);
 
   return (
     <div className={`klant route-${route}${balkWeg ? " balk-weg" : ""}`}>
@@ -266,6 +293,8 @@ function KlantPagina() {
         {fout && <p className="klant-fout">{fout}</p>}
         {route === "start" ? (
           <Start data={data} stukken={stukken} telling={telling} beurzen={beurzen} ig={ig} demo={!!demo} />
+        ) : route === "ontwerp" ? (
+          <OntwerpPagina demo={!!demo} sleutel={data?.sleutel ?? null} ig={ig} igLink={igProfiel(ig)} />
         ) : route === "kaarten" ? (
           <Kaarten data={data} stukken={stukken} sets={sets} f={kaartFilter} zetF={setKaartFilter} onOpen={setOpen} onZoekFocus={setZoekFocus} />
         ) : (
@@ -281,8 +310,8 @@ function KlantPagina() {
         ))}
       </nav>
 
-      {open && <Detail g={open} beurzen={beurzen} sets={sets} onSluit={() => setOpen(null)} />}
-      {data && <Eend ig={ig} verborgen={!!open || zoekFocus} />}
+      {open && <Detail g={open} beurzen={beurzen} sets={sets} demo={!!demo} onSluit={() => setOpen(null)} />}
+      {data && route !== "ontwerp" && <Eend ig={ig} verborgen={!!open || zoekFocus} />}
     </div>
   );
 }
@@ -290,44 +319,60 @@ function KlantPagina() {
 // ── Start: wie we zijn, wat we aanbieden, waar we staan ──────────────────────
 
 function Start({ data, stukken, telling, beurzen, ig, demo }: { data: Data | null; stukken: Stuk[]; telling: Record<Plek, number>; beurzen: KomendeBeurs[]; ig: string; demo: boolean }) {
-  // Drie mooie kaarten voor de waaier naast de kaft (de duurste met een foto).
-  const waaier = useMemo(() => stukken.filter((s) => s.plek === "kaarten" && s.afbeelding && s.soort === "kaart")
-    .sort((a, b) => b.prijs - a.prijs).slice(0, 3), [stukken]);
+  // Wat er rond de kaft zweeft: de etalage, aangevuld met de foto's van onze binders; anders onze mooiste kaarten.
+  const fotos = useMemo<EtalageFoto[]>(() => {
+    const uit: EtalageFoto[] = [];
+    for (const e of data?.etalage ?? []) { const src = veiligeFoto(e.foto); if (src) uit.push({ id: e.id, src, titel: e.titel ?? null, link: veiligeLink(e.link) }); }
+    for (const b of stukken) if (b.plek === "binders" && b.foto) uit.push({ id: `b-${b.id}`, src: b.foto, titel: b.binder?.artwork || b.naam, link: null });
+    if (uit.length < 3) {
+      for (const k of stukken.filter((x) => x.plek === "kaarten" && x.soort === "kaart" && x.afbeelding).sort((a, b) => b.prijs - a.prijs).slice(0, 5 - uit.length)) {
+        uit.push({ id: `k-${k.id}`, src: k.afbeelding!, titel: null, link: "#kaarten" });
+      }
+    }
+    return uit;
+  }, [data?.etalage, stukken]);
   // Eén beeld per vak van de binderpagina: de duurste met een foto.
   const beeld = (p: Plek) => stukken.filter((s) => s.plek === p && (p === "kaarten" ? s.afbeelding : s.foto)).sort((a, b) => b.prijs - a.prijs)[0] ?? null;
   return (
     <>
-      <section className="held" aria-labelledby="held-titel">
-        <div className="kaft">
-          <span className="kaft-rug" aria-hidden="true"><i /><i /><i /></span>
-          <div className="kaft-vlak">
+      <section className={`held${fotos.length ? " met-etalage" : ""}`} aria-labelledby="held-titel">
+        <div className="zipbinder">
+          <span className="zip-rits" aria-hidden="true" />
+          <span className="zip-trekker" aria-hidden="true"><i /></span>
+          <span className="zip-rug" aria-hidden="true" />
+          <div className="zip-vlak">
             <h1 id="held-titel" className="gravure"><span className="gravure-tekst">Binders die even uniek zijn als je collectie</span></h1>
             <p>Bind'r ontwerpt custom binders voor Pokémon-verzamelaars en graveert ze met de laser. Op beurzen vind je ons ook met kaarten, slabs, sealed en 3D-prints.{demo ? " (Voorbeeld met de demo.)" : ""}</p>
             <div className="held-knoppen">
               <a className="knop" href="#binders">Bekijk de binders</a>
-              <a className="knop doorzichtig" href="#kaarten">Zoek in de kaarten</a>
+              <a className="knop doorzichtig" href="#ontwerp">Ontwerp je eigen</a>
             </div>
           </div>
           <img className="kaft-eend" src={`${BASIS}img/eend.png`} alt="" width={120} height={120} />
         </div>
-        <div className="held-waaier" aria-hidden="true">
-          {waaier.length === 3 && waaier.map((k, i) => (
-            <img key={k.id} className={`w${i}`} src={k.afbeelding!} alt="" loading="lazy" onLoad={(e) => e.currentTarget.classList.add("geladen")} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-          ))}
-          <span className="held-ster s1"><Sparkel /></span>
-          <span className="held-ster s2"><Sparkel /></span>
-        </div>
+        <Etalage fotos={fotos} />
       </section>
 
       <section className="aanbod" aria-labelledby="aanbod-titel">
         <h2 id="aanbod-titel">Wat je bij ons vindt</h2>
-        <div className="pocketpagina">
-          <Pocket plek="kaarten" titel="Kaarten" tekst={data ? `${telling.kaarten} singles en slabs` : "…"} beeld={beeld("kaarten")} />
-          <Pocket plek="binders" titel="Binders" tekst={data ? (telling.binders ? `${telling.binders} ontwerpen van ons` : "Ons eigen werk") : "…"} beeld={beeld("binders")} />
-          <Pocket plek="3d" titel="3D-prints" tekst={data ? (telling["3d"] ? `${telling["3d"]} stuks` : "Aan onze stand") : "…"} beeld={beeld("3d")} />
-          <Pocket plek="sealed" titel="Sealed" tekst={data ? (telling.sealed ? `${telling.sealed} stuks` : "Aan onze stand") : "…"} beeld={beeld("sealed")} />
+        <div className="binderpagina">
+          <span className="pagina-rug" aria-hidden="true" />
+          <div className="pockets">
+            <Pocket plek="kaarten" titel="Kaarten" tekst={data ? `${telling.kaarten} singles en slabs` : "…"} beeld={beeld("kaarten")} />
+            <Pocket plek="binders" titel="Binders" tekst={data ? (telling.binders ? `${telling.binders} ontwerpen van ons` : "Ons eigen werk") : "…"} beeld={beeld("binders")} />
+            <Pocket plek="3d" titel="3D-prints" tekst={data ? (telling["3d"] ? `${telling["3d"]} stuks` : "Aan onze stand") : "…"} beeld={beeld("3d")} />
+            <Pocket plek="sealed" titel="Sealed" tekst={data ? (telling.sealed ? `${telling.sealed} stuks` : "Aan onze stand") : "…"} beeld={beeld("sealed")} />
+          </div>
         </div>
       </section>
+
+      <a className="ontwerp-banner" href="#ontwerp">
+        <span className="ontwerp-banner-tekst">
+          <strong>Je eigen ontwerp op een binder?</strong>
+          <span>Probeer je tekening of logo op een zip-binder en vraag hem aan.</span>
+        </span>
+        <span className="ontwerp-banner-pijl" aria-hidden="true"><OntwerpIcoon maat={24} /></span>
+      </a>
 
       <Beurzen beurzen={beurzen} ig={ig} geladen={!!data} />
 
@@ -335,7 +380,7 @@ function Start({ data, stukken, telling, beurzen, ig, demo }: { data: Data | nul
         <img className="over-logo" src={`${BASIS}img/logo.png`} alt="" width={240} height={160} loading="lazy" />
         <div className="over-tekst">
           <h2 id="over-titel">Over Bind'r</h2>
-          <p>Een gewone kaartmap wordt bij ons een stuk van je collectie. Wil je een naam of je eigen ontwerp op je binder? Vraag het ons aan de stand of op Instagram.</p>
+          <p>Een gewone kaartmap wordt bij ons een stuk van je collectie. Wil je een naam of je eigen ontwerp op je binder? Vraag het via <a href="#ontwerp">Ontwerp je binder</a>, aan de stand of op Instagram.</p>
           <ul className="over-lijst">
             <li><OntwerpIcoon /><span><strong>Eigen ontwerp.</strong> Elk artwork maken we zelf, geïnspireerd op Pokémon, sets en card art.</span></li>
             <li><LaserIcoon /><span><strong>Lasergravure.</strong> Het ontwerp gaat er met de laser in, op de voorkant of op voor- én achterkant.</span></li>
@@ -347,7 +392,79 @@ function Start({ data, stukken, telling, beurzen, ig, demo }: { data: Data | nul
   );
 }
 
-/** Eén vak van de binderpagina: een kaartgroot hoesje met een beeld, en een etiket eronder. */
+const minderBeweging = () => typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+function useBreed(px: number): boolean {
+  const [breed, setBreed] = useState(() => typeof matchMedia !== "undefined" && matchMedia(`(min-width: ${px}px)`).matches);
+  useEffect(() => {
+    const m = matchMedia(`(min-width: ${px}px)`);
+    const z = () => setBreed(m.matches);
+    m.addEventListener?.("change", z);
+    return () => m.removeEventListener?.("change", z);
+  }, [px]);
+  return breed;
+}
+
+/**
+ * Foto's van ons werk die rond de kaft zweven. Om de paar seconden draait er één om naar een volgende foto,
+ * zodat je na een tijdje alles gezien hebt. Bij "minder beweging" staan ze stil en wisselen ze niet.
+ */
+function Etalage({ fotos }: { fotos: EtalageFoto[] }) {
+  const breed = useBreed(760);
+  const vakken = Math.min(fotos.length, breed ? 5 : 3);
+  // Per vak de id van de foto (niet de plaats in de lijst: die schuift als er later foto's binnenkomen).
+  const [toon, setToon] = useState<string[]>([]);
+  const lijst = useRef(fotos);
+  lijst.current = fotos;
+  const volgende = useRef(0);
+  useEffect(() => {
+    setToon((nu) => {
+      const ids = fotos.map((f) => f.id);
+      const blijft = nu.filter((id) => ids.includes(id)).slice(0, vakken);
+      for (const id of ids) { if (blijft.length >= vakken) break; if (!blijft.includes(id)) blijft.push(id); }
+      return blijft.length === nu.length && blijft.every((x, i) => x === nu[i]) ? nu : blijft;
+    });
+  }, [fotos, vakken]);
+  const wisselt = fotos.length > vakken;
+  useEffect(() => {
+    if (!wisselt || minderBeweging()) return;
+    let beurt = 0;
+    const t = setInterval(() => {
+      if (document.hidden) return;
+      setToon((nu) => {
+        const l = lijst.current;
+        if (!nu.length || l.length <= nu.length) return nu;
+        let k = volgende.current % l.length;
+        for (let i = 0; i < l.length && nu.includes(l[k].id); i++) k = (k + 1) % l.length;
+        volgende.current = k + 1;
+        // De vakken om beurten, niet links naar rechts: dat oogt rustiger.
+        const vak = [0, 2, 1, 4, 3][beurt++ % 5] % nu.length;
+        return nu.map((x, i) => (i === vak ? l[k].id : x));
+      });
+    }, 3600);
+    return () => clearInterval(t);
+  }, [wisselt]);
+  if (!vakken) return null;
+  return (
+    <div className={`etalage n${vakken}`} aria-label="Wat we maken">
+      {toon.map((id, vak) => {
+        const f = fotos.find((x) => x.id === id);
+        if (!f) return null;
+        const extern = !!f.link && /^https?:/.test(f.link);
+        return (
+          <a key={vak} className={`etalage-foto e${vak}`} href={f.link ?? "#binders"} target={extern ? "_blank" : undefined} rel={extern ? "noreferrer" : undefined}
+            aria-label={f.titel ? `${f.titel}${extern ? " (op Instagram)" : ""}` : "Bekijk onze binders"}>
+            <span className="etalage-kader" key={f.id}>
+              <img src={f.src} alt="" loading={vak < 3 ? "eager" : "lazy"} decoding="async" />
+              {f.titel && <span className="etalage-titel">{f.titel}</span>}
+            </span>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Eén vak van de binderpagina: een hoesje dat langs de zijkant opent (zoals in een zip-binder), met een etiket eronder. */
 function Pocket({ plek, titel, tekst, beeld }: { plek: Plek; titel: string; tekst: string; beeld: Stuk | null }) {
   return (
     <a className={`pocket ${plek}`} href={`#${plek}`}>
@@ -700,10 +817,34 @@ function Foto({ kaart, alt, groot = false }: { kaart: FotoKaart; alt: string; gr
   );
 }
 
-function Detail({ g, beurzen, sets, onSluit }: { g: Groep<Stuk>; beurzen: KomendeBeurs[]; sets: SetInfo | null; onSluit: () => void }) {
-  const s = g.eerste;
+/** De extra foto's van een artikel (na de hoofdfoto). */
+async function artikelFotos(id: string, demo: boolean): Promise<string[]> {
+  if (demo) {
+    try {
+      const d = JSON.parse(localStorage.getItem("bindr-demo-v1") || "{}") as { artikelfotos?: { artikel_id: string; foto: string; volgorde: number }[] };
+      return (d.artikelfotos ?? []).filter((f) => f.artikel_id === id).sort((a, b) => a.volgorde - b.volgorde).map((f) => veiligeFoto(f.foto)).filter((x): x is string => !!x);
+    } catch { return []; }
+  }
+  return haal<{ foto: string | null }[]>(`publieke_artikelfotos?select=foto&artikel_id=eq.${encodeURIComponent(id)}&order=volgorde.asc`)
+    .then((r) => r.map((x) => veiligeFoto(x.foto)).filter((x): x is string => !!x)).catch(() => []);
+}
+
+function Detail({ g, beurzen, sets, demo, onSluit }: { g: Groep<Stuk>; beurzen: KomendeBeurs[]; sets: SetInfo | null; demo: boolean; onSluit: () => void }) {
+  const eerste = g.eerste;
   const n = aantalVan(g);
   const [groot, setGroot] = useState(false);
+  // Artikels kunnen meer foto's hebben: duimpjes onder de grote foto.
+  const [extra, setExtra] = useState<string[]>([]);
+  const [gekozen, setGekozen] = useState<string | null>(null);
+  useEffect(() => {
+    setExtra([]); setGekozen(null);
+    if (eerste.bron !== "artikel") return;
+    let weg = false;
+    void artikelFotos(eerste.id, demo).then((f) => { if (!weg) setExtra(f); });
+    return () => { weg = true; };
+  }, [eerste.id, eerste.bron, demo]);
+  const fotos = eerste.bron === "artikel" ? [eerste.foto, ...extra].filter((x): x is string => !!x) : [];
+  const s: Stuk = gekozen ? { ...eerste, foto: gekozen } : eerste;
   const grootRef = useRef(groot);
   grootRef.current = groot;
   // Tikken (niet draaien) op de foto toont ze over het hele scherm.
@@ -739,6 +880,16 @@ function Detail({ g, beurzen, sets, onSluit }: { g: Groep<Stuk>; beurzen: Komend
               <div className={`klant-detail-foto zweeft${s.bron === "kaart" && s.prijs >= 50 && s.soort === "kaart" ? " holo" : ""}`} {...vergroot}>
                 <div className="kantel-vlak" {...kantelVrij}>{beeld()}</div>
               </div>
+              {fotos.length > 1 && (
+                <div className="detail-duimen" role="group" aria-label="Foto's">
+                  {fotos.map((f, i) => (
+                    <button key={i} type="button" className={(gekozen ?? fotos[0]) === f ? "aan" : ""} aria-pressed={(gekozen ?? fotos[0]) === f}
+                      aria-label={`Foto ${i + 1} van ${fotos.length}`} onClick={() => setGekozen(i === 0 ? null : f)}>
+                      <img src={f} alt="" loading="lazy" />
+                    </button>
+                  ))}
+                </div>
+              )}
               <span className="vergroot-hint">Tik op de foto om ze groter te zien</span>
             </div>
             <div className="klant-detail-rechts">
@@ -785,10 +936,10 @@ function Detail({ g, beurzen, sets, onSluit }: { g: Groep<Stuk>; beurzen: Komend
         </div>
       </div>
       {groot && (
-        <div className="foto-groot" role="dialog" aria-modal="true" aria-label={s.naam} onClick={() => setGroot(false)}>
-          <button className="rond-knop foto-groot-sluit" onClick={() => setGroot(false)} aria-label="Sluiten" autoFocus>✕</button>
-          <div className="foto-groot-kaart">{beeld()}</div>
-          <div className="foto-groot-tekst"><strong>{s.naam}</strong>{s.bron === "kaart" && s.soort !== "eigen product" && <span>{[s.set_code, s.nummer].filter(Boolean).join(" ")}</span>}</div>
+        <div className="kaart-groot" role="dialog" aria-modal="true" aria-label={s.naam} onClick={() => setGroot(false)}>
+          <button className="rond-knop kaart-groot-sluit" onClick={() => setGroot(false)} aria-label="Sluiten" autoFocus>✕</button>
+          <div className="kaart-groot-kaart">{beeld()}</div>
+          <div className="kaart-groot-tekst"><strong>{s.naam}</strong>{s.bron === "kaart" && s.soort !== "eigen product" && <span>{[s.set_code, s.nummer].filter(Boolean).join(" ")}</span>}</div>
         </div>
       )}
     </div>
@@ -892,7 +1043,7 @@ const KaartenIcoon = () => <Svg maat={22}><rect x="7.5" y="4" width="11" height=
 const BinderIcoon = () => <Svg maat={22}><rect x="5" y="3.5" width="14" height="17" rx="2.2" /><path d="M8.5 3.5v17" /><path d="M11.5 7h4.5M11.5 7v10M16 7v10M11.5 17h4.5" strokeDasharray="1.6 1.8" /></Svg>;
 const KubusIcoon = () => <Svg maat={22}><path d="M12 3.5 19.5 7.6v8.8L12 20.5l-7.5-4.1V7.6Z" /><path d="M4.5 7.6 12 11.7l7.5-4.1M12 11.7v8.8" /></Svg>;
 const PackIcoon = () => <Svg maat={22}><path d="M6 3.5h12l-.9 1.5.9 1.5v11l-.9 1.5.9 1.5H6l.9-1.5L6 17.5v-11L6.9 5Z" /><path d="M9.5 12h5" /></Svg>;
-const OntwerpIcoon = () => <Svg maat={22}><path d="m14.5 5.5 4 4L9 19H5v-4Z" /><path d="m12.5 7.5 4 4" /></Svg>;
+const OntwerpIcoon = ({ maat = 22 }: { maat?: number }) => <Svg maat={maat}><path d="m14.5 5.5 4 4L9 19H5v-4Z" /><path d="m12.5 7.5 4 4" /></Svg>;
 const LaserIcoon = () => <Svg maat={22}><path d="M9 3.5h6v5H9Z" /><path d="M12 8.5v6" /><path d="M8.5 17.5 12 14.5l3.5 3M6 20.5h12" /></Svg>;
 const StandIcoon = () => <Svg maat={22}><path d="M3.5 9.5 6 4.5h12l2.5 5" /><path d="M3.5 9.5a2.8 2.8 0 0 0 5.67 0 2.8 2.8 0 0 0 5.66 0 2.8 2.8 0 0 0 5.67 0" /><path d="M5 12v8h14v-8" /></Svg>;
 const Sparkel = () => <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2c.6 4.6 2.4 7.4 10 10-7.6 2.6-9.4 5.4-10 10-.6-4.6-2.4-7.4-10-10 7.6-2.6 9.4-5.4 10-10Z" /></svg>;

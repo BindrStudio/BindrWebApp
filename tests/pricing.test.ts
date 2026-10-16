@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { drempelVoor, prijscheck, rondEuro, STANDAARD_INSTELLINGEN, verdeelTotaal, voorstelVoor } from "../src/lib/pricing";
+import { drempelVoor, marktprijs, prijscheck, rondEuro, STANDAARD_INSTELLINGEN, teNakijken, verdeelTotaal, voorstelVoor } from "../src/lib/pricing";
 import type { Exemplaar } from "../src/types";
 import type { Prijsgids } from "../src/lib/prices";
 
@@ -56,4 +56,26 @@ test("prijscheck slaat stockdoos, slotjes en kleine verschillen over", () => {
     ex({ id: "e", hartjesprijs: 15, status: "verkocht" }),    // niet meer in voorraad → nee
   ], gids, i);
   assert.deepEqual(lijst, [{ id: "a", oud: 15, nieuw: 20, richting: "op" }]);
+});
+
+test("marktprijs = de middelste van trend, week en maand", () => {
+  assert.equal(marktprijs({ trend: 20, gem7: 12, gem30: 14, laagste: 9 }), 14);       // trend loopt achter
+  assert.equal(marktprijs({ trend: 10, gem7: 25, gem30: 11, laagste: 9 }), 11);       // één dure verkoop deze week
+  assert.equal(marktprijs({ trend: 20, gem7: null, gem30: 19, laagste: 15 }), 20);    // geen week: de trend
+  assert.equal(marktprijs({ trend: null, gem7: null, gem30: 8, laagste: 5 }), 8);
+  assert.equal(marktprijs({ trend: null, gem7: null, gem30: null, laagste: 5 }), 5);  // enkel de laagste
+  assert.equal(marktprijs({ trend: 0, gem7: null, gem30: null, laagste: null }), null);
+  // Een nieuwe set: de trend hinkt een week achterop, de middelste volgt de markt.
+  // [trend, laagste, gem30, (holo ×3), gem1, gem7]
+  const nieuw: Prijsgids = { datum: "2026-10-15", prijzen: new Map([[2, [42, 18, 27, null, null, null, 26, 25]]]) };
+  const v = voorstelVoor(ex({ cardmarket_id: 2 }), nieuw, STANDAARD_INSTELLINGEN)!;
+  assert.equal(v.referentie, 27);
+  assert.equal(v.voorstel, 27);
+  assert.equal(v.nakijken, true); // 25 tot 42: meer dan 30% uit elkaar
+});
+
+test("nakijken als trend, week en maand ver uit elkaar liggen", () => {
+  assert.equal(teNakijken({ trend: 10, gem7: 11, gem30: 12 }, 0.3), false);
+  assert.equal(teNakijken({ trend: 10, gem7: 14, gem30: 12 }, 0.3), true);
+  assert.equal(teNakijken({ trend: 10, gem7: null, gem30: null }, 0.3), false);
 });

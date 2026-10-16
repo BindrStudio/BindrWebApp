@@ -3,7 +3,7 @@
 // achter het tandwiel rechtsboven.
 import { useMemo, useState } from "react";
 import {
-  actieveBeurs, actieveOmgeving, boekhoudingAan, inkoopThuis, logUit, openArtikelen, openBoekhouding, openHistoriek, openInzichten, openOverzicht, openPrive,
+  actieveBeurs, actieveOmgeving, boekhoudingAan, inkoopThuis, logUit, openAanvragen, openArtikelen, openBoekhouding, openEtalage, openHistoriek, openInzichten, openOverzicht, openPrive,
   synchroniseer, useApp,
 } from "../state";
 import { PinKiezen } from "./Login";
@@ -33,6 +33,7 @@ export function Profiel() {
   const telArtikels = s.artikelen.reduce((n, a) => n + Math.max(0, a.aantal), 0);
   const jaar = new Date().getFullYear();
   const omzet = useMemo(() => dagontvangsten(s.transacties).filter((d) => d.datum.startsWith(`${jaar}-`)).reduce((x, d) => x + d.ontvangsten, 0), [s.transacties, jaar]);
+  const nieuweAanvragen = (s.aanvragen ?? []).filter((a) => a.status === "nieuw").length;
   const verkocht = s.transacties.filter((t) => t.status !== "ongedaan" && (t.soort === "verkoop" || t.soort === "ruil")).length;
 
   return (
@@ -92,6 +93,23 @@ export function Profiel() {
           <span>Voorraadwaarde, beurzen en export</span>
         </button>
       </div>
+
+      <section className="groep">
+        <h2 className="groep-titel">Klantenpagina</h2>
+        <div className="profiel-tegels">
+          <button className="profiel-tegel etalage" onClick={openEtalage}>
+            <Icoon naam="etalage" maat={26} />
+            <strong>Etalage</strong>
+            <span>Foto's van jullie werk die op de startpagina zweven</span>
+          </button>
+          <button className="profiel-tegel aanvragen" onClick={() => openAanvragen()}>
+            <Icoon naam="brief" maat={26} />
+            <strong>Aanvragen</strong>
+            <span>{nieuweAanvragen ? `${nieuweAanvragen} ${nieuweAanvragen === 1 ? "nieuwe aanvraag" : "nieuwe aanvragen"}` : "Eigen binders die klanten vragen"}</span>
+            {nieuweAanvragen > 0 && <span className="tegel-teller">{nieuweAanvragen}</span>}
+          </button>
+        </div>
+      </section>
 
       <section className="groep">
         <h2 className="groep-titel">Account</h2>

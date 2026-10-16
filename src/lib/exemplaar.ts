@@ -42,6 +42,8 @@ export function metTelling(a: Artikel, nieuwAantal: number, reden: string | null
 }
 
 export const inVoorraad = (e: Exemplaar) => e.status === "in voorraad";
+/** Enkel kaarten en slabs krijgen een QR-label; eigen producten (binders, 3D) en artikels nooit. */
+export const krijgtLabel = (e: Pick<Exemplaar, "soort">) => e.soort === "kaart" || e.soort === "slab";
 
 /**
  * Gegevens van de server of een oude kopie gelijktrekken met de huidige app:

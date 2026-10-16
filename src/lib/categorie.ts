@@ -25,6 +25,9 @@ export const PLAATS = {
 } as const;
 
 /** Het type van een artikel; oudere artikelen (zonder details) raden we uit de naam. */
+/** Niet verwijderd: staat in de lijsten (een verwijderd artikel blijft enkel voor de historiek bestaan). */
+export const actiefArtikel = (a: Pick<Artikel, "details">) => !a.details?.verwijderd;
+
 export function artikelType(a: Pick<Artikel, "soort" | "naam" | "details">): ArtikelType {
   const t = a.details?.type;
   if (t) return t;

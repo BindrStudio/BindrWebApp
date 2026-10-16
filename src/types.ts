@@ -64,6 +64,8 @@ export interface ArtikelDetails {
   taal?: string | null;
   /** Met de hand aangepaste aantallen (bijgekocht, kapot, pack geopend): zo klopt de voorraad op een vroegere datum. */
   tellingen?: Telling[];
+  /** Verwijderd (ISO-tijd): niet meer in de lijsten, maar wel in de historiek en de voorraad op een vroegere datum. */
+  verwijderd?: string | null;
 }
 
 /** Eén aanpassing van het aantal buiten de kassa: + bijgekomen, − weg. */
@@ -219,6 +221,42 @@ export interface Aankoopfoto {
   foto: string;          // data-URL (verkleind)
   omgeving_id?: string | null;
   aangemaakt_op?: string;
+}
+
+/** Een extra foto bij een artikel (de eerste blijft `artikel.foto`). */
+export interface Artikelfoto {
+  id: string;
+  artikel_id: string;
+  foto: string;          // data-URL (verkleind)
+  volgorde: number;
+}
+
+/** Een foto van ons werk die op de startpagina van de klanten zweeft. */
+export interface Etalagefoto {
+  id: string;
+  foto: string;          // data-URL (verkleind)
+  titel?: string | null;
+  link?: string | null;  // bv. het bericht op Instagram
+  volgorde: number;
+  omgeving_id?: string | null;
+  aangemaakt_op?: string;
+}
+
+export type AanvraagStatus = "nieuw" | "bekeken" | "beantwoord" | "gesloten";
+
+/** Een aanvraag van een klant voor een eigen binder (formulier op de klantenpagina). */
+export interface Aanvraag {
+  id: string;
+  naam: string;
+  email: string;
+  telefoon?: string | null;
+  grootte?: string | null;
+  kleur?: string | null;
+  idee: string;
+  artwork?: string | null;   // enkel geladen als je de aanvraag opent
+  voorbeeld?: string | null;
+  status: AanvraagStatus;
+  aangemaakt_op: string;
 }
 
 /** Gegevens van de onderneming voor het borderel en de rapporten (per omgeving: Bind'r en Brent apart). */

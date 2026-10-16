@@ -6,8 +6,8 @@
 import { useSyncExternalStore } from "react";
 import { isNetwerkFout, type Alles, type Backend, type PrijsMarkering } from "./store/backend";
 import { DemoBackend } from "./store/demo";
-import { BOEKHOUDING_VANAF, NIEUWSTE, SupabaseBackend } from "./store/supabase";
-import type { Aankoopfoto, Aanwezig, Artikel, ArtikelType, Bedrijf, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Tegenpartij, Transactie } from "./types";
+import { BOEKHOUDING_VANAF, ETALAGE_VANAF, SupabaseBackend } from "./store/supabase";
+import type { Aankoopfoto, Aanvraag, AanvraagStatus, Aanwezig, Artikel, Artikelfoto, Etalagefoto, ArtikelType, Bedrijf, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Tegenpartij, Transactie } from "./types";
 import { bewaarPin, controleerPin, isVergrendeld, leesPin, markeerActief, wisPin, VERGRENDEL_NA_MS } from "./lib/pin";
 import { laadPrijsgids, type Prijsgids } from "./lib/prices";
 import { prijscheck, STANDAARD_INSTELLINGEN, type Instellingen, type TeWijzigen } from "./lib/pricing";
@@ -50,6 +50,8 @@ export type Open =
   | { soort: "inzichten" }
   | { soort: "historiek" }
   | { soort: "prive" }
+  | { soort: "etalage" }
+  | { soort: "aanvragen"; id?: string }
   | { soort: "inkoopThuis" }      // naar de kassa, meteen "Kaart van klant" (inkoop buiten een beurs)
   | null;
 
@@ -72,6 +74,7 @@ export interface State {
   prijscheckOp: string | null;
   instellingen: Instellingen;
   instagram: string;
+  aanvraagSleutel: string | null; // Web3Forms: aanvragen van klanten ook per mail (openbaar bedoeld)
   /** Boekhouding (gedeeld via de database): bedrijfsgegevens en welke dagen al in Dexxter staan, per omgeving. */
   boekhouding: { bedrijven: Record<string, Bedrijf>; ingegeven: Record<string, Record<string, boolean>> };
   toasts: Toast[];
@@ -85,7 +88,8 @@ export interface State {
   omgevingen: Omgeving[];
   omgeving: string | null;  // de omgeving waarin je nu werkt (Bind'r of Brent)
   aanwezig: Aanwezig[];     // wie er de laatste minuten bezig was
-  fotoVersie: number;       // telt op als er aankoopfoto's geladen of toegevoegd werden
+  fotoVersie: number;       // telt op als er foto's (aankoop, artikel, etalage) geladen of toegevoegd werden
+  aanvragen: Aanvraag[] | null; // aanvragen voor een eigen binder (null = nog niet geladen of oud schema)
   gedeeltelijk: boolean;    // offline gestart met de kopie: enkel de voorraad en de laatste maanden historiek
   bijgewerktOp: string | null; // laatste keer dat de app iets van de server haalde
 }
@@ -128,6 +132,7 @@ let state: State = {
   prijscheckOp: null,
   instellingen: leesJson(INSTELLINGEN, STANDAARD_INSTELLINGEN),
   instagram: INSTAGRAM,
+  aanvraagSleutel: null,
   boekhouding: { bedrijven: {}, ingegeven: {} },
   toasts: [],
   online: typeof navigator === "undefined" ? true : navigator.onLine,
@@ -141,6 +146,7 @@ let state: State = {
   omgeving: null,
   aanwezig: [],
   fotoVersie: 0,
+  aanvragen: null,
   gedeeltelijk: false,
   bijgewerktOp: null,
 };
@@ -277,6 +283,8 @@ export function openBoekhouding() { zet({ open: { soort: "boekhouding" } }); }
 export function openInzichten() { zet({ open: { soort: "inzichten" } }); }
 export function openHistoriek() { zet({ open: { soort: "historiek" } }); }
 export function openPrive() { zet({ open: { soort: "prive" } }); }
+export function openEtalage() { zet({ open: { soort: "etalage" } }); }
+export function openAanvragen(id?: string) { zet({ open: { soort: "aanvragen", id } }); }
 /** Kaarten gekocht buiten een beurs (Facebook, rommelmarkt): via de kassa, Van de klant. */
 /** Kopen buiten een beurs (Facebook, rommelmarkt): enkel als er geen beurs loopt, anders klopt de kas niet. */
 export function inkoopThuis() {
@@ -360,6 +368,13 @@ type Op =
   | { soort: "tegenpartij"; id: string; tegenpartij: Tegenpartij | null }
   | { soort: "aankoopfoto"; f: Aankoopfoto }
   | { soort: "aankoopfotoWeg"; id: string }
+  | { soort: "artikelfoto"; f: Artikelfoto }
+  | { soort: "artikelfotoWeg"; id: string }
+  | { soort: "etalage"; f: Etalagefoto }
+  | { soort: "etalageWijzig"; id: string; w: Partial<Pick<Etalagefoto, "titel" | "link" | "volgorde">> }
+  | { soort: "etalageWeg"; id: string }
+  | { soort: "aanvraagStatus"; id: string; status: AanvraagStatus }
+  | { soort: "aanvraagWeg"; id: string }
   | { soort: "instelling"; sleutel: string; waarde: unknown }
   | { soort: "prijzen"; omgeving: string | null; lijst: PrijsMarkering[] }
   | { soort: "omgeving"; omgeving: Omgeving };
@@ -424,6 +439,13 @@ async function voerUit(op: Op) {
     case "tegenpartij": await b.zetTegenpartij(op.id, op.tegenpartij); break;
     case "aankoopfoto": await b.bewaarAankoopfoto(op.f); break;
     case "aankoopfotoWeg": await b.verwijderAankoopfoto(op.id); break;
+    case "artikelfoto": await b.bewaarArtikelfoto(op.f); break;
+    case "artikelfotoWeg": await b.verwijderArtikelfoto(op.id); break;
+    case "etalage": await b.bewaarEtalage(op.f); break;
+    case "etalageWijzig": await b.wijzigEtalage(op.id, op.w); break;
+    case "etalageWeg": await b.verwijderEtalage(op.id); break;
+    case "aanvraagStatus": await b.zetAanvraagStatus(op.id, op.status); break;
+    case "aanvraagWeg": await b.verwijderAanvraag(op.id); break;
   }
 }
 
@@ -668,6 +690,7 @@ async function gebruik(backend: Backend) {
     if (gedeeld) pasGedeeldToe(gedeeld);
     bewaarKopieLater();
     void meldAanwezig();
+    void laadAanvragen();
     if ((backend as { schemaOud?: boolean }).schemaOud) {
       meld("De database is nog niet bijgewerkt voor de kassa. Voer supabase/schema.sql opnieuw uit in Supabase.", "fout", undefined, 15000);
     } else if (backend.soort === "supabase" && ((backend as SupabaseBackend).versie ?? 4) < 4) {
@@ -705,7 +728,10 @@ function leesMandje(omgeving: string | null, omgevingen: Omgeving[]): Mandje {
 
 function pasGedeeldToe(g: Record<string, unknown>) {
   const pr = g.prijsregels as Partial<Instellingen> | undefined;
-  const deel: Partial<State> = { instagram: typeof g.instagram === "string" && g.instagram ? g.instagram : INSTAGRAM };
+  const deel: Partial<State> = {
+    instagram: typeof g.instagram === "string" && g.instagram ? g.instagram : INSTAGRAM,
+    aanvraagSleutel: typeof g.aanvraag_sleutel === "string" && g.aanvraag_sleutel ? g.aanvraag_sleutel : null,
+  };
   const bedrijven: Record<string, Bedrijf> = {};
   const ingegeven: Record<string, Record<string, boolean>> = {};
   for (const [k, v] of Object.entries(g)) {
@@ -762,8 +788,10 @@ export async function logUit() {
   localStorage.removeItem(MODUS);
   zet({
     backend: null, fase: "login", exemplaren: [], artikelen: [], beurzen: [], transacties: [], teWijzigen: new Map(), prijscheckOp: null,
-    open: null, wachtrij: 0, mandje: { regels: [] }, omgevingen: [], omgeving: null, aanwezig: [],
+    open: null, wachtrij: 0, mandje: { regels: [] }, omgevingen: [], omgeving: null, aanwezig: [], aanvragen: null,
   });
+  artikelfotoCache.clear();
+  etalageCache = null;
 }
 
 // ── Samen werken: wijzigingen van de anderen en wie er bezig is ─────────────
@@ -854,6 +882,7 @@ export async function herlaad() {
       zet({ omgevingen, omgeving });
     }
     zet({ ...splits(behoudMarkering(alles)), online: true, gedeeltelijk: false, bijgewerktOp: new Date().toISOString() });
+    void laadAanvragen();
   } catch (e) {
     if (sessieVerlopen()) naarLoginNaVerlopen();
     else if (isNetwerkFout(e)) zet({ online: false }); else fout(e);
@@ -1120,6 +1149,13 @@ export function zetInstagram(naam: string) {
   const schoon = naam.trim().replace(/^@/, "").replace(/^https?:\/\/(www\.)?instagram\.com\//, "").replace(/\/.*$/, "");
   zet({ instagram: schoon });
   inRij({ soort: "instelling", sleutel: "instagram", waarde: schoon });
+}
+
+/** De access key van Web3Forms (of null): nieuwe aanvragen van klanten komen dan ook per mail. */
+export function zetAanvraagSleutel(sleutel: string | null) {
+  zet({ aanvraagSleutel: sleutel || null });
+  // Leeg = geen mail (de kolom waarde mag niet null zijn).
+  inRij({ soort: "instelling", sleutel: "aanvraag_sleutel", waarde: sleutel || "" });
 }
 
 // ── Offline klaarzetten ──────────────────────────────────────────────────────
@@ -1403,13 +1439,21 @@ export function kanNieuweBoekhouding(s: State = state): boolean {
   const v = (b as SupabaseBackend).versie;
   return v == null || v >= BOEKHOUDING_VANAF;
 }
-/** Draait de database een ouder schema dan de app kent? (Uren en link van beurzen en artikels per stuk op de klantenpagina komen met 0.9.) */
+/** Draait de database een schema van vóór 0.9? (Uren en link van beurzen en artikels per stuk op de klantenpagina komen met 0.9.) */
 export function schemaOud(s: State = state): boolean {
   const b = s.backend;
   if (!b || b.soort !== "supabase") return false;
   const v = (b as SupabaseBackend).versie;
-  return v != null && v < NIEUWSTE;
+  return v != null && v < 8;
 }
+/** Kan de database al meer foto's per artikel, de etalage en aanvragen aan (schema 0.10)? */
+export function kanEtalage(s: State = state): boolean {
+  const b = s.backend;
+  if (!b || b.soort !== "supabase") return true;
+  const v = (b as SupabaseBackend).versie;
+  return v == null || v >= ETALAGE_VANAF;
+}
+export const SCHEMA_010 = "Dit kan pas na de update van de database naar 0.10: voer supabase/schema.sql opnieuw uit in Supabase (zie de README).";
 export const SCHEMA_09 = "Wordt pas bewaard na de update van de database: voer supabase/schema.sql opnieuw uit in Supabase (zie de README).";
 export const OUD_SCHEMA = "Dit kan pas na de update van de database: voer supabase/schema.sql opnieuw uit in Supabase (zie de README).";
 
@@ -1487,6 +1531,204 @@ export function verwijderAankoopfoto(f: Aankoopfoto) {
   if (i >= 0) { rij.splice(i, 1); bewaarRij(); } else inRij({ soort: "aankoopfotoWeg", id: f.id });
   fotoCache.set(f.transactie_id, (fotoCache.get(f.transactie_id) ?? []).filter((x) => x.id !== f.id));
   zet({ fotoVersie: state.fotoVersie + 1 });
+}
+
+// ── Meer foto's bij een artikel (schema 0.10): apart geladen, enkel wanneer je het artikel opent ──
+const artikelfotoCache = new Map<string, Artikelfoto[]>(); // per artikel
+const artikelfotoLaden = new Set<string>();
+
+function wachtendeOps<T extends Op["soort"]>(soort: T): Extract<Op, { soort: T }>[] {
+  return rij.map((w) => w.op).filter((op): op is Extract<Op, { soort: T }> => op.soort === soort);
+}
+
+/** De extra foto's van een artikel (zonder de hoofdfoto), met wat nog in de wachtrij staat. */
+export function artikelfotosVan(artikelId: string): Artikelfoto[] {
+  const weg = new Set(wachtendeOps("artikelfotoWeg").map((op) => op.id));
+  const wachtend = wachtendeOps("artikelfoto").map((op) => op.f).filter((f) => f.artikel_id === artikelId);
+  const lijst = new Map((artikelfotoCache.get(artikelId) ?? []).map((f) => [f.id, f]));
+  for (const f of wachtend) lijst.set(f.id, f); // een wachtende wijziging (andere foto) wint
+  return [...lijst.values()].filter((f) => !weg.has(f.id)).sort((a, b) => a.volgorde - b.volgorde);
+}
+
+export async function laadArtikelfotos(ids: string[], opnieuw = false): Promise<void> {
+  const b = state.backend;
+  const nodig = ids.filter((id) => (opnieuw || !artikelfotoCache.has(id)) && !artikelfotoLaden.has(id));
+  if (!b || !nodig.length) return;
+  nodig.forEach((id) => artikelfotoLaden.add(id));
+  try {
+    const fotos = await b.laadArtikelfotos(nodig);
+    for (const id of nodig) artikelfotoCache.set(id, fotos.filter((f) => f.artikel_id === id));
+    zet({ fotoVersie: state.fotoVersie + 1 });
+  } catch {
+    // Geen internet: later opnieuw.
+  } finally {
+    nodig.forEach((id) => artikelfotoLaden.delete(id));
+  }
+}
+
+/** Een foto bij een artikel: de eerste wordt de hoofdfoto (`artikel.foto`), de rest komt erbij. */
+export function voegArtikelfotoToe(artikel: Artikel, foto: string) {
+  if (!artikel.foto) { wijzigArtikel(artikel.id, { foto }); return; }
+  const extra = artikelfotosVan(artikel.id);
+  const f: Artikelfoto = { id: uuid(), artikel_id: artikel.id, foto, volgorde: (extra[extra.length - 1]?.volgorde ?? 0) + 1 };
+  inRij({ soort: "artikelfoto", f });
+  artikelfotoCache.set(artikel.id, [...(artikelfotoCache.get(artikel.id) ?? []), f]);
+  zet({ fotoVersie: state.fotoVersie + 1 });
+}
+
+export function verwijderArtikelfoto(f: Artikelfoto) {
+  // Wat nog niet doorgestuurd is, gaat uit de wachtrij; daarna altijd wissen op de server (een foto die
+  // er nooit kwam wissen, kan geen kwaad).
+  rij = rij.filter((w, j) => j === 0 || !(w.op.soort === "artikelfoto" && w.op.f.id === f.id));
+  inRij({ soort: "artikelfotoWeg", id: f.id });
+  artikelfotoCache.set(f.artikel_id, (artikelfotoCache.get(f.artikel_id) ?? []).filter((x) => x.id !== f.id));
+  zet({ fotoVersie: state.fotoVersie + 1 });
+}
+
+/** Een extra foto wordt de hoofdfoto (en de vorige hoofdfoto schuift naar haar plaats). */
+export function maakHoofdfoto(artikel: Artikel, f: Artikelfoto) {
+  const vorige = artikel.foto;
+  wijzigArtikel(artikel.id, { foto: f.foto });
+  if (!vorige) { verwijderArtikelfoto(f); return; }
+  const nieuw = { ...f, foto: vorige };
+  inRij({ soort: "artikelfoto", f: nieuw });
+  artikelfotoCache.set(artikel.id, (artikelfotoCache.get(artikel.id) ?? []).map((x) => (x.id === f.id ? nieuw : x)));
+  zet({ fotoVersie: state.fotoVersie + 1 });
+}
+
+/** De hoofdfoto weg: de volgende foto (als die er is) wordt de hoofdfoto. */
+export function verwijderHoofdfoto(artikel: Artikel) {
+  const volgende = artikelfotosVan(artikel.id)[0];
+  wijzigArtikel(artikel.id, { foto: volgende?.foto ?? null });
+  if (volgende) verwijderArtikelfoto(volgende);
+}
+
+// ── De etalage op de startpagina van de klanten (schema 0.10) ──
+let etalageCache: Etalagefoto[] | null = null;
+let etalageLaden = false;
+
+type EtalageMeta = Partial<Pick<Etalagefoto, "titel" | "link" | "volgorde">>;
+
+/** De foto's in de etalage, met wat nog in de wachtrij staat (null = nog niet geladen). */
+export function etalageLijst(): Etalagefoto[] | null {
+  if (!etalageCache && !wachtendeOps("etalage").length) return etalageCache;
+  const weg = new Set(wachtendeOps("etalageWeg").map((op) => op.id));
+  const lijst = new Map((etalageCache ?? []).map((f) => [f.id, f]));
+  for (const op of wachtendeOps("etalage")) lijst.set(op.f.id, op.f);
+  for (const op of wachtendeOps("etalageWijzig")) { const f = lijst.get(op.id); if (f) lijst.set(op.id, { ...f, ...op.w }); }
+  return [...lijst.values()].filter((f) => !weg.has(f.id)).sort((a, b) => a.volgorde - b.volgorde || (a.aangemaakt_op ?? "").localeCompare(b.aangemaakt_op ?? ""));
+}
+
+export async function laadEtalage(): Promise<void> {
+  const b = state.backend;
+  if (!b || etalageLaden) return;
+  etalageLaden = true;
+  try {
+    etalageCache = await b.laadEtalage();
+    zet({ fotoVersie: state.fotoVersie + 1 });
+  } catch (e) {
+    if (!isNetwerkFout(e)) fout(e);
+  } finally {
+    etalageLaden = false;
+  }
+}
+
+/** Titel en link nakijken (enkel http(s)); null als de link niet deugt. */
+function schoneMeta(w: EtalageMeta): EtalageMeta | null {
+  const uit: EtalageMeta = { ...w };
+  if ("titel" in w) uit.titel = w.titel?.trim().slice(0, 120) || null;
+  if ("link" in w) {
+    const link = w.link?.trim() ? veiligeLink(w.link) : null;
+    if (w.link?.trim() && !link) { meld("Die link werkt niet: begin met https://", "fout"); return null; }
+    uit.link = link;
+  }
+  return uit;
+}
+
+/** Een nieuwe foto in de etalage (de foto gaat één keer mee naar de server). */
+export function voegEtalagefotoToe(f: Etalagefoto) {
+  const schoon: Etalagefoto = { ...f, ...schoneMeta({ titel: f.titel, link: f.link }), omgeving_id: f.omgeving_id ?? state.omgeving };
+  inRij({ soort: "etalage", f: schoon });
+  etalageCache = [...(etalageCache ?? []).filter((x) => x.id !== f.id), schoon];
+  zet({ fotoVersie: state.fotoVersie + 1 });
+}
+
+/** Titel, link of volgorde aanpassen: enkel die velden gaan naar de server, nooit opnieuw de foto. */
+export function wijzigEtalagefoto(f: Etalagefoto, w: EtalageMeta): boolean {
+  const meta = schoneMeta(w);
+  if (!meta) return false;
+  // Staat de foto zelf nog in de wachtrij (niet de eerste, die misschien al onderweg is)? Dan daar aanpassen.
+  const i = rij.findIndex((x, j) => j > 0 && x.op.soort === "etalage" && x.op.f.id === f.id);
+  if (i > 0) {
+    const op = rij[i].op as Extract<Op, { soort: "etalage" }>;
+    rij[i] = { ...rij[i], op: { ...op, f: { ...op.f, ...meta } } };
+    bewaarRij();
+  } else {
+    inRij({ soort: "etalageWijzig", id: f.id, w: meta });
+  }
+  etalageCache = (etalageCache ?? []).map((x) => (x.id === f.id ? { ...x, ...meta } : x));
+  zet({ fotoVersie: state.fotoVersie + 1 });
+  return true;
+}
+
+export function nieuweEtalagefoto(foto: string): Etalagefoto {
+  const lijst = etalageLijst() ?? [];
+  return { id: uuid(), foto, titel: null, link: null, volgorde: (lijst[lijst.length - 1]?.volgorde ?? 0) + 1, omgeving_id: state.omgeving, aangemaakt_op: new Date().toISOString() };
+}
+
+export function verwijderEtalagefoto(f: Etalagefoto) {
+  rij = rij.filter((w, j) => j === 0 || !((w.op.soort === "etalage" && w.op.f.id === f.id) || (w.op.soort === "etalageWijzig" && w.op.id === f.id)));
+  inRij({ soort: "etalageWeg", id: f.id });
+  etalageCache = (etalageCache ?? []).filter((x) => x.id !== f.id);
+  zet({ fotoVersie: state.fotoVersie + 1 });
+}
+
+/** Een foto een plaats naar voren (−1) of naar achteren (+1) schuiven. */
+export function schuifEtalagefoto(f: Etalagefoto, richting: -1 | 1) {
+  const lijst = etalageLijst() ?? [];
+  const i = lijst.findIndex((x) => x.id === f.id);
+  const j = i + richting;
+  if (i < 0 || j < 0 || j >= lijst.length) return;
+  const nieuw = [...lijst];
+  [nieuw[i], nieuw[j]] = [nieuw[j], nieuw[i]];
+  nieuw.forEach((x, k) => { if (x.volgorde !== k + 1) wijzigEtalagefoto(x, { volgorde: k + 1 }); });
+}
+
+// ── Aanvragen voor een eigen binder (van de klantenpagina) ──
+let aanvragenLaden = false;
+export async function laadAanvragen(): Promise<void> {
+  const b = state.backend;
+  if (!b || aanvragenLaden || !kanEtalage()) return;
+  aanvragenLaden = true;
+  try {
+    const lijst = await b.laadAanvragen();
+    // Wat hier al als bekeken/beantwoord gemarkeerd werd en nog wacht, blijft zo.
+    const wacht = new Map(wachtendeOps("aanvraagStatus").map((op) => [op.id, op.status]));
+    const weg = new Set(wachtendeOps("aanvraagWeg").map((op) => op.id));
+    zet({ aanvragen: lijst.filter((a) => !weg.has(a.id)).map((a) => (wacht.has(a.id) ? { ...a, status: wacht.get(a.id)! } : a)) });
+  } catch {
+    // Geen internet of oud schema: de lijst blijft zoals ze was.
+  } finally {
+    aanvragenLaden = false;
+  }
+}
+
+export function laadAanvraagBeelden(id: string) {
+  return state.backend?.laadAanvraagBeelden(id) ?? Promise.resolve({ artwork: null, voorbeeld: null });
+}
+
+/** Een aanvraag wissen (spam, of afgewerkt): ze staat dan ook niet meer in de database. */
+export function verwijderAanvraag(id: string) {
+  rij = rij.filter((w, j) => j === 0 || !(w.op.soort === "aanvraagStatus" && w.op.id === id));
+  inRij({ soort: "aanvraagWeg", id });
+  zet({ aanvragen: (state.aanvragen ?? []).filter((x) => x.id !== id) });
+}
+
+export function zetAanvraagStatus(id: string, status: AanvraagStatus) {
+  const a = state.aanvragen?.find((x) => x.id === id);
+  if (!a || a.status === status) return;
+  inRij({ soort: "aanvraagStatus", id, status });
+  zet({ aanvragen: (state.aanvragen ?? []).map((x) => (x.id === id ? { ...x, status } : x)) });
 }
 
 /** Het borderel aanvullen: naam, adres, handtekeningen (na het afrekenen of later). */

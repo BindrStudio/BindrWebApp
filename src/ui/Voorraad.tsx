@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { doePrijscheck, huidig, openArtikel, openExemplaar, openLabels, openToevoegen, useApp } from "../state";
+import { doePrijscheck, openArtikel, openExemplaar, openLabels, openToevoegen, useApp } from "../state";
 import type { Artikel, Exemplaar, Opslag } from "../types";
 import { datumKort, euro, zonderAccenten } from "../lib/format";
 import { toonCode } from "../lib/code";
 import { waardeStijgers, type TeWijzigen } from "../lib/pricing";
-import { CATEGORIEEN, PLAATS, artikelOmschrijving, categorieArtikel, categorieExemplaar, type Categorie } from "../lib/categorie";
-import { inVoorraad } from "../lib/exemplaar";
-import { klantUrl } from "../config";
+import { CATEGORIEEN, PLAATS, actiefArtikel, artikelOmschrijving, categorieArtikel, categorieExemplaar, type Categorie } from "../lib/categorie";
+import { inVoorraad, krijgtLabel } from "../lib/exemplaar";
 import { kantel } from "../lib/kantel";
 import { veiligeFoto } from "../lib/eigenfoto";
 
@@ -65,7 +64,7 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
   useEffect(() => { if (filter === "wijzigen" && !teWijzigen.size) setFilter("geen"); }, [filter, teWijzigen]);
 
   const ex = useMemo(() => exemplaren.filter((e) => inVoorraad(e) && e.opslag === opslag), [exemplaren, opslag]);
-  const art = useMemo(() => artikelen.filter((a) => a.opslag === opslag && (a.aantal > 0 || !catalogus)), [artikelen, opslag, catalogus]);
+  const art = useMemo(() => artikelen.filter((a) => a.opslag === opslag && actiefArtikel(a) && (a.aantal > 0 || !catalogus)), [artikelen, opslag, catalogus]);
   const stijgers = useMemo(() => (catalogus ? new Map<string, TeWijzigen>() : waardeStijgers(exemplaren, gids, instellingen)), [catalogus, exemplaren, gids, instellingen]);
   const band = catalogus ? teWijzigen : stijgers;
 
@@ -123,14 +122,14 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
     return items.map((it, i) => ({ it, i })).sort((a, b) => bovenaan(a.it) - bovenaan(b.it) || a.i - b.i).map((x) => x.it);
   }, [ex, art, cat, filter, zoek, teWijzigen, stijgers, band, set, snel, sort, sets]);
 
-  const aantalLabels = exemplaren.filter((e) => inVoorraad(e) && e.label_status === "te printen").length;
-  const nogTePlakken = ex.filter((e) => e.label_status !== "gestickerd").length;
+  const aantalLabels = exemplaren.filter((e) => inVoorraad(e) && krijgtLabel(e) && e.label_status === "te printen").length;
+  const nogTePlakken = ex.filter((e) => krijgtLabel(e) && e.label_status !== "gestickerd").length;
   const zichtbareCats = CATEGORIEEN.filter((c) => telling[c.id]);
   const wisselSnel = (f: Snelfilter) => { const n = new Set(snel); if (n.has(f)) n.delete(f); else n.add(f); setSnel(n); };
   const nieuwAantal = useMemo(() => ex.filter((e) => isNieuw(toonbaar(e))).length, [ex]);
 
   const tegel = (it: Item, i: number) => it.soort === "ex"
-    ? <Tegel key={it.groep.sleutel} ex={it.groep.eerste} aantal={it.groep.items.length} i={i} band={band.get(it.groep.eerste.id)} vault={!catalogus} labelOpen={it.groep.items.some((e) => e.label_status !== "gestickerd")} />
+    ? <Tegel key={it.groep.sleutel} ex={it.groep.eerste} aantal={it.groep.items.length} i={i} band={band.get(it.groep.eerste.id)} vault={!catalogus} labelOpen={it.groep.items.some((e) => krijgtLabel(e) && e.label_status !== "gestickerd")} />
     : <ArtikelTegel key={it.art.id} a={it.art} i={i} />;
 
   return (
@@ -143,7 +142,6 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
           </p>
         </div>
         <div className="kop-knoppen">
-          <a className="rond-knop groot" href={klantUrl(huidig().backend?.soort === "demo")} target="_blank" rel="noreferrer" aria-label="Bekijk als klant" title="Bekijk als klant"><Icoon naam="oog" /></a>
           <button className="rond-knop groot" onClick={openLabels} aria-label="Labels">
             <Icoon naam="printer" />
             {aantalLabels > 0 && <span className="knop-teller">{aantalLabels}</span>}

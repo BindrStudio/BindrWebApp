@@ -1,4 +1,4 @@
--- Bind'r Stock & Beurs App — databaseschema (versie 0.9: beurzen met uren en link, artikels per stuk op de klantenpagina)
+-- Bind'r Stock & Beurs App — databaseschema (versie 0.10: etalage, meer foto's per artikel, aanvragen voor een eigen binder)
 --
 -- Uitvoeren: Supabase-dashboard › SQL Editor › New query › dit hele bestand plakken › Run.
 -- Het script mag gerust een tweede keer lopen; het overschrijft geen gegevens.
@@ -280,6 +280,100 @@ alter table public.beurzen add constraint beurzen_uren_check check (uren is null
 -- Op de klantenpagina: true = altijd, false = nooit, leeg = zoals vroeger (in de catalogus, of een binder).
 alter table public.artikelen add column if not exists zichtbaar boolean;
 
+-- ── Versie 0.10: etalage, meer foto's per artikel, aanvragen voor een eigen binder ──
+-- Etalage: foto's van ons werk die op de startpagina van de klanten zweven (zoals op Instagram).
+create table if not exists public.etalage (
+  id            uuid primary key,                  -- gemaakt op de gsm (veilig opnieuw te versturen)
+  foto          text not null,
+  titel         text,
+  link          text,                              -- bv. het bericht op Instagram (enkel http/https)
+  volgorde      integer not null default 0,
+  omgeving_id   uuid references public.omgevingen (id) default public.standaard_omgeving(),
+  aangemaakt_door uuid default auth.uid(),
+  aangemaakt_op timestamptz not null default now()
+);
+alter table public.etalage drop constraint if exists etalage_foto_check;
+alter table public.etalage add constraint etalage_foto_check
+  check (length(foto) <= 700000 and foto ~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$') not valid;
+alter table public.etalage drop constraint if exists etalage_tekst_check;
+alter table public.etalage add constraint etalage_tekst_check
+  check ((titel is null or length(titel) <= 120) and (link is null or (link ~* '^https?://[^[:space:]<>"]+$' and length(link) <= 500))) not valid;
+
+-- Meer foto's bij een artikel (de eerste blijft artikelen.foto).
+create table if not exists public.artikelfotos (
+  id            uuid primary key,
+  artikel_id    uuid not null references public.artikelen (id) on delete cascade,
+  foto          text not null,
+  volgorde      integer not null default 0,
+  aangemaakt_op timestamptz not null default now()
+);
+alter table public.artikelfotos drop constraint if exists artikelfotos_foto_check;
+alter table public.artikelfotos add constraint artikelfotos_foto_check
+  check (length(foto) <= 600000 and foto ~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$') not valid;
+create index if not exists artikelfotos_artikel_idx on public.artikelfotos (artikel_id, volgorde);
+
+-- Aanvragen van klanten voor een eigen binder (het formulier op de klantenpagina). Klanten kunnen
+-- enkel een aanvraag toevoegen, nooit lezen; beheerders zien ze in de app (Profiel › Aanvragen).
+create table if not exists public.aanvragen (
+  id            uuid primary key default gen_random_uuid(),
+  naam          text not null,
+  email         text not null,
+  telefoon      text,
+  grootte       text,
+  kleur         text,
+  idee          text not null,
+  artwork       text,                              -- hun ontwerp (omgezet naar een afbeelding)
+  voorbeeld     text,                              -- hoe het er op de binder uitzag
+  status        text not null default 'nieuw' check (status in ('nieuw', 'bekeken', 'beantwoord', 'gesloten')),
+  omgeving_id   uuid references public.omgevingen (id) default public.standaard_omgeving(),
+  aangemaakt_op timestamptz not null default now()
+);
+alter table public.aanvragen drop constraint if exists aanvragen_velden_check;
+alter table public.aanvragen add constraint aanvragen_velden_check check (
+  length(trim(naam)) between 1 and 120
+  and length(email) <= 200 and email ~* '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'
+  and (telefoon is null or length(telefoon) <= 40)
+  and (grootte is null or length(grootte) <= 40) and (kleur is null or length(kleur) <= 40)
+  and length(trim(idee)) between 1 and 4000
+  and (artwork is null or (length(artwork) <= 450000 and artwork ~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$'))
+  and (voorbeeld is null or (length(voorbeeld) <= 250000 and voorbeeld ~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$'))
+) not valid;
+create index if not exists aanvragen_tijd_idx on public.aanvragen (aangemaakt_op desc);
+
+-- Tegen spam en een volle database: hoogstens 20 aanvragen per uur en 60 per dag in totaal, 3 per e-mailadres
+-- per dag. Afbeeldingen bewaren we van hoogstens 10 aanvragen per dag en zolang er minder dan 40 open aanvragen
+-- met afbeeldingen zijn (daarna enkel de tekst): zo blijven de afbeeldingen samen onder ~30 MB. Het slot zorgt
+-- dat veel aanvragen tegelijk elkaar zien (anders tellen ze allemaal enkel wat al bewaard was).
+create or replace function public.aanvraag_rem()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform pg_advisory_xact_lock(hashtext('bindr-aanvragen'));
+  if (select count(*) from public.aanvragen where aangemaakt_op > now() - interval '1 hour') >= 20
+     or (select count(*) from public.aanvragen where aangemaakt_op > now() - interval '1 day') >= 60 then
+    raise exception 'Te veel aanvragen op korte tijd. Probeer het straks opnieuw.';
+  end if;
+  if (select count(*) from public.aanvragen where lower(email) = lower(new.email) and aangemaakt_op > now() - interval '1 day') >= 3 then
+    raise exception 'Je stuurde vandaag al drie aanvragen. We antwoorden zo snel mogelijk.';
+  end if;
+  if (new.artwork is not null or new.voorbeeld is not null) and (
+       (select count(*) from public.aanvragen where aangemaakt_op > now() - interval '1 day' and (artwork is not null or voorbeeld is not null)) >= 10
+       or (select count(*) from public.aanvragen where status in ('nieuw', 'bekeken') and (artwork is not null or voorbeeld is not null)) >= 40) then
+    new.artwork := null;
+    new.voorbeeld := null;
+  end if;
+  new.status := 'nieuw';
+  new.aangemaakt_op := now();
+  return new;
+end;
+$$;
+drop trigger if exists aanvragen_rem on public.aanvragen;
+create trigger aanvragen_rem before insert on public.aanvragen
+  for each row execute function public.aanvraag_rem();
+
 -- ── Triggers: gewijzigd_op bijhouden en elke wijziging loggen ────────────────
 -- Ook bij een nieuwe rij zet de server zelf gewijzigd_op: zo ziet de 30-secondensynchronisatie van de
 -- andere gsm's ook kaarten die offline werden toegevoegd (met een oudere tijd van de gsm).
@@ -468,15 +562,40 @@ drop policy if exists "beheerders alles" on public.aankoopfotos;
 create policy "beheerders alles" on public.aankoopfotos
   for all to authenticated using (public.is_beheerder()) with check (public.is_beheerder());
 
+alter table public.etalage enable row level security;
+drop policy if exists "beheerders alles" on public.etalage;
+create policy "beheerders alles" on public.etalage
+  for all to authenticated using (public.is_beheerder()) with check (public.is_beheerder());
+
+alter table public.artikelfotos enable row level security;
+drop policy if exists "beheerders alles" on public.artikelfotos;
+create policy "beheerders alles" on public.artikelfotos
+  for all to authenticated using (public.is_beheerder()) with check (public.is_beheerder());
+
+-- Aanvragen: iedereen mag er één toevoegen (enkel deze kolommen), enkel beheerders lezen en beheren.
+alter table public.aanvragen enable row level security;
+drop policy if exists "beheerders alles" on public.aanvragen;
+create policy "beheerders alles" on public.aanvragen
+  for all to authenticated using (public.is_beheerder()) with check (public.is_beheerder());
+drop policy if exists "iedereen indienen" on public.aanvragen;
+create policy "iedereen indienen" on public.aanvragen
+  for insert to anon, authenticated with check (status = 'nieuw');
+
 -- ── Rechten voor de app (REST-API) ───────────────────────────────────────────
 -- Nieuwere Supabase-projecten geven nieuwe tabellen niet altijd automatisch vrij
 -- aan de API. Daarom expliciet: ingelogde gebruikers mogen de tabellen aanspreken
 -- (de rijbeveiliging hierboven beslist wat ze echt zien), de publieke sleutel niets.
 grant usage on schema public to anon, authenticated;
-grant select, insert, update, delete on public.exemplaren, public.artikelen, public.instellingen, public.beurzen, public.transacties, public.omgevingen, public.aanwezig, public.aankoopfotos to authenticated;
+grant select, insert, update, delete on public.exemplaren, public.artikelen, public.instellingen, public.beurzen, public.transacties, public.omgevingen, public.aanwezig, public.aankoopfotos,
+  public.etalage, public.artikelfotos, public.aanvragen to authenticated;
 grant select on public.beheerders, public.logboek to authenticated;
 grant execute on function public.is_beheerder(), public.standaard_omgeving() to authenticated;
-revoke all on public.beheerders, public.exemplaren, public.artikelen, public.instellingen, public.logboek, public.beurzen, public.transacties, public.omgevingen, public.aanwezig, public.aankoopfotos from anon;
+revoke all on public.beheerders, public.exemplaren, public.artikelen, public.instellingen, public.logboek, public.beurzen, public.transacties, public.omgevingen, public.aanwezig, public.aankoopfotos,
+  public.etalage, public.artikelfotos from anon;
+-- Een aanvraag indienen (Ontwerp je binder): enkel toevoegen, met deze kolommen; de omgeving komt van standaard_omgeving().
+revoke all on public.aanvragen from anon;
+grant insert (naam, email, telefoon, grootte, kleur, idee, artwork, voorbeeld) on public.aanvragen to anon;
+grant execute on function public.standaard_omgeving() to anon;
 
 -- ── Kassa: transacties boeken, ongedaan maken en conflicten oplossen ─────────
 -- Dezelfde regels als src/lib/kassa.ts (pasToe, maakOngedaan, losConflictOp).
@@ -831,12 +950,12 @@ revoke all on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid)
 grant execute on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid),
   public.los_conflict_op(uuid, uuid, uuid), public.aanvaard_conflict(uuid, text), public.markeer_prijzen(uuid, jsonb) to authenticated;
 
--- Welke versie van dit schema draait er? De app vraagt het na het inloggen (0.8 = 8, 0.9 = 9).
+-- Welke versie van dit schema draait er? De app vraagt het na het inloggen (0.8 = 8, 0.9 = 9, 0.10 = 10).
 create or replace function public.schema_versie()
 returns integer
 language sql
 stable
-as $$ select 9 $$;
+as $$ select 10 $$;
 revoke all on function public.schema_versie() from public, anon;
 grant execute on function public.schema_versie() to authenticated;
 
@@ -854,7 +973,7 @@ create view public.publieke_vitrine as
          foto  -- eigen foto (enkel als er nergens een foto van de kaart is); de klantenpagina laadt ze apart
     from public.exemplaren
    where opslag = 'vitrine' and status = 'in voorraad' and hartjesprijs is not null and nieuw_hartje is null
-     and label_status = 'gestickerd'
+     and (label_status = 'gestickerd' or soort = 'eigen product')  -- eigen producten krijgen geen label
      and omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten);
 
 -- Artikels op de klantenpagina: wat je per stuk aanzet (zichtbaar), en anders zoals vroeger: wat in de
@@ -871,11 +990,28 @@ create view public.publieke_artikelen as
      and coalesce(zichtbaar, opslag = 'vitrine' or details->>'type' = 'binder')
      and omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten);
 
--- Instellingen die de klantenpagina nodig heeft (bv. de Instagram-naam).
+-- Meer foto's van de artikels die klanten zien (dezelfde regel als publieke_artikelen).
+drop view if exists public.publieke_artikelfotos;
+create view public.publieke_artikelfotos as
+  select f.id, f.artikel_id, f.foto, f.volgorde
+    from public.artikelfotos f
+    join public.artikelen a on a.id = f.artikel_id
+   where a.aantal > 0 and a.prijs is not null
+     and coalesce(a.zichtbaar, a.opslag = 'vitrine' or a.details->>'type' = 'binder')
+     and a.omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten);
+
+-- De etalage op de startpagina.
+drop view if exists public.publieke_etalage;
+create view public.publieke_etalage as
+  select id, foto, titel, link, volgorde
+    from public.etalage
+   where omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten);
+
+-- Instellingen die de klantenpagina nodig heeft (de Instagram-naam, de sleutel om aanvragen te mailen).
 create or replace view public.publieke_instellingen as
   select sleutel, waarde
     from public.instellingen
-   where sleutel in ('instagram', 'catalogus_tekst');
+   where sleutel in ('instagram', 'catalogus_tekst', 'aanvraag_sleutel');
 
 -- Komende beurzen ("kom langs op onze stand"), met uren en de website van de beurs.
 drop view if exists public.publieke_beurzen;
@@ -889,8 +1025,10 @@ create view public.publieke_beurzen as
 -- Enkel lezen. Supabase geeft nieuwe weergaven standaard alle rechten aan anon én authenticated;
 -- een eenvoudige weergave is aanpasbaar en loopt met de rechten van de eigenaar (zonder RLS),
 -- dus zonder deze revoke kon elke ingelogde gebruiker via de weergave de voorraad wijzigen.
-revoke all on public.publieke_vitrine, public.publieke_artikelen, public.publieke_instellingen, public.publieke_beurzen from public, anon, authenticated;
-grant select on public.publieke_vitrine, public.publieke_artikelen, public.publieke_instellingen, public.publieke_beurzen to anon, authenticated;
+revoke all on public.publieke_vitrine, public.publieke_artikelen, public.publieke_instellingen, public.publieke_beurzen,
+  public.publieke_artikelfotos, public.publieke_etalage from public, anon, authenticated;
+grant select on public.publieke_vitrine, public.publieke_artikelen, public.publieke_instellingen, public.publieke_beurzen,
+  public.publieke_artikelfotos, public.publieke_etalage to anon, authenticated;
 
 -- ── Eenmalig (0.9): de 30th Celebration Classic Collection op het gedrukte nummer ──
 -- TCGdex nummert die 30 kaarten 001–030; gedrukt staat het nummer van de oude set (Charizard 4/102).

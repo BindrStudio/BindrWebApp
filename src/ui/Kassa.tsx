@@ -18,7 +18,7 @@ import { Badges, Hartje, Icoon, KaartFoto, Kiezer, Leeg, Segment, Sheet, Veld } 
 import { MandjeActie } from "./MandjeActie";
 import { Scanner, type FotoResultaat } from "./Scan";
 import { KiesKaart } from "./Toevoegen";
-import { BeursAfsluiten, BeursFormulier, BeursStart, geplandeBeurzen } from "./Beurs";
+import { BeursAfsluiten, BeursStart, geplandeBeurzen } from "./Beurs";
 import { BeursDashboard, BeurzenEnTransacties } from "./Historiek";
 import { GradedVelden, SoldLinks } from "./Graded";
 import { BewijsKnop, BewijsSheet, KanaalVeld, TegenpartijVelden, VendorSchakel } from "./Boekhouding";
@@ -29,7 +29,7 @@ import { cardmarketKentTaal, cardmarketLink, gradedZoektekst, NIET_OP_CARDMARKET
 import { afrondKeuzes, exactBod, heeftEigenPct, marktwaarde, PCT_MAX, PCT_MIN, procentVan, samenPct, type BodInstelling } from "../lib/bod";
 import { GELUKT, kies, MANDJE_LEEG } from "../lib/grapjes";
 
-type Paneel = null | "scan" | "zoek" | "artikel" | "klantkaart" | "afrekenen" | "start" | "plan" | "afsluiten" | "transacties" | "kas";
+type Paneel = null | "scan" | "zoek" | "artikel" | "klantkaart" | "afrekenen" | "start" | "afsluiten" | "transacties" | "kas";
 
 export function Kassa() {
   const s = useApp();
@@ -66,7 +66,7 @@ export function Kassa() {
         </div>
       </header>
 
-      <BeursBalk onStart={() => setPaneel("start")} onPlan={() => setPaneel("plan")} onAfsluiten={() => setPaneel("afsluiten")} />
+      <BeursBalk onStart={() => setPaneel("start")} onAfsluiten={() => setPaneel("afsluiten")} />
 
       {klaar ? (
         <Gelukt t={klaar.t} wisselgeld={klaar.wisselgeld} onVolgende={() => setKlaar(null)} />
@@ -131,7 +131,6 @@ export function Kassa() {
       {paneel === "klantkaart" && <KlantKaart onSluit={naKlantKaarten} />}
       {paneel === "afrekenen" && <Afrekenen onSluit={sluit} onKlaar={(t, w) => { sluit(); setKlaar({ t, wisselgeld: w }); }} />}
       {paneel === "start" && <BeursStart onSluit={sluit} />}
-      {paneel === "plan" && <BeursFormulier onSluit={sluit} />}
       {paneel === "afsluiten" && beurs && <BeursAfsluiten beurs={beurs} onSluit={sluit} />}
       {paneel === "transacties" && <BeurzenEnTransacties onSluit={sluit} />}
       {paneel === "kas" && beurs && <KasSheet onSluit={sluit} />}
@@ -139,7 +138,7 @@ export function Kassa() {
   );
 }
 
-function BeursBalk({ onStart, onPlan, onAfsluiten }: { onStart: () => void; onPlan: () => void; onAfsluiten: () => void }) {
+function BeursBalk({ onStart, onAfsluiten }: { onStart: () => void; onAfsluiten: () => void }) {
   const s = useApp();
   const beurs = actieveBeurs(s);
   const cijfers = useMemo(() => (beurs ? beursCijfers(beurs, s.transacties.filter((t) => t.beurs_id === beurs.id)) : null), [beurs, s.transacties]);
@@ -157,8 +156,7 @@ function BeursBalk({ onStart, onPlan, onAfsluiten }: { onStart: () => void; onPl
           <strong>Geen beurs bezig</strong>
           {volgende
             ? <span className="beurs-volgende">{isVandaag ? "Vandaag" : "Volgende"}: {volgende.naam} · {datumKort(volgende.datum)}</span>
-            : <span className="zacht klein">Start een beurs om de cashkoffer en SumUp bij te houden.</span>}
-          <button className="tekstknop klein" onClick={onPlan}>Beurs plannen</button>
+            : <span className="zacht klein">Start een beurs om de cashkoffer en SumUp bij te houden. Plannen doe je in Profiel › Beurzen.</span>}
         </div>
         <button className="knop klein" onClick={onStart}>{isVandaag ? "Starten" : "Beurs starten"}</button>
       </div>
@@ -712,7 +710,7 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar, onRegel, bezet = [] }: {
     // Prijs 0: het bod (percentage × marktwaarde, afgerond) verdeelt straks over alle kaarten.
     const bron = !(markt != null && markt > 0) ? null
       : v.graded ? "laatste verkopen (zelf opgezocht)"
-        : !aangeraakt && voorstel != null ? `Cardmarket trend${v.conditie !== "NM" ? `, ${v.conditie}` : ""}` : "eigen schatting";
+        : !aangeraakt && voorstel != null ? `Cardmarket marktprijs${v.conditie !== "NM" ? `, ${v.conditie}` : ""}` : "eigen schatting";
     (onRegel ?? inMandje)({ ...regelIn(nieuw, 0, markt != null && markt > 0 ? markt : null), referentie_bron: bron });
     onKlaar();
   };
@@ -769,7 +767,7 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar, onRegel, bezet = [] }: {
         ) : (
           <>
             <span className="zacht klein">
-              {nm ? <>Cardmarket trend <strong>{euro(nm.referentie)}</strong> (NM){voorstel != null && v.conditie !== "NM" ? <> · {v.conditie}: <strong>{euro(voorstel)}</strong></> : null}</> : "Geen prijs in de prijsgids voor deze kaart."}
+              {nm ? <>Marktprijs <strong>{euro(nm.referentie)}</strong> (NM){voorstel != null && v.conditie !== "NM" ? <> · {v.conditie}: <strong>{euro(voorstel)}</strong></> : null}</> : "Geen prijs in de prijsgids voor deze kaart."}
             </span>
             {kaart?.cardmarket
               ? <a className="knop zacht klein" href={cardmarketLink(kaart.cardmarket, v.taal)} target="_blank" rel="noreferrer"><Icoon naam="link" maat={14} /> Zelf kijken op Cardmarket</a>

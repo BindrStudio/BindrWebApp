@@ -9,7 +9,7 @@ export interface Drempel {
 export interface Instellingen {
   drempels: Drempel[];
   conditiefactoren: Record<string, number>;
-  nakijkenAfwijking: number; // trend en 30-dagengemiddelde verschillen meer dan dit deel
+  nakijkenAfwijking: number; // trend, 7- en 30-dagengemiddelde liggen meer dan dit deel uit elkaar
   automatischPrinten: boolean;
   labelMaat: string; // id uit LABELMATEN
   labelDonkerte?: number;     // 1–5 zoals in de Niimbot-app (standaard 3), enkel op dit toestel
@@ -46,9 +46,10 @@ export function rondEuro(x: number): number {
 
 export interface Voorstel {
   voorstel: number;
-  referentie: number;
+  referentie: number;   // de marktprijs in NM (zie marktprijs)
   trend: number | null;
   laagste: number | null;
+  gem7: number | null;
   gem30: number | null;
   factor: number;
   nakijken: boolean;
@@ -64,6 +65,34 @@ export function prijsVoor(regel: PrijsRegel | undefined, holo: boolean) {
   return { trend: trend ?? null, laagste: laagste ?? null, gem30: gem30 ?? null, gem1: gem1 ?? null, gem7: gem7 ?? null, holo: false };
 }
 
+/**
+ * De marktprijs van een kaart in NM: de middelste van trend, gemiddelde van 7 dagen en van 30 dagen.
+ * Ontbreekt er een van de drie (bv. geen verkoop deze week), dan zoals vroeger: de trend, anders het
+ * gemiddelde van 30 of 7 dagen, anders de laagste prijs.
+ *
+ * Waarom de middelste: één cijfer alleen laat zich meetrekken. De trend reageert traag op een nieuwe set
+ * en springt bij weinig verkopen; het weekgemiddelde springt bij één dure verkoop; het maandgemiddelde
+ * hinkt achterop. De middelste van de drie negeert de uitschieter. Vergeleken met wat de kaarten in
+ * oktober 2026 echt te koop stonden in de EU (de laagste NM-prijs bij TCGHeart, 812 kaarten van € 2 of
+ * meer) zat de trend alleen voor 61% binnen 15%, de middelste van de drie voor 66%; bij de nieuwe set
+ * 30th Celebration 25% tegenover 82% (zie README, Prijzen).
+ */
+export function marktprijs(p: { trend: number | null; gem7?: number | null; gem30: number | null; laagste: number | null }): number | null {
+  const ok = (x: number | null | undefined): x is number => x != null && x > 0;
+  const gem7 = p.gem7 ?? null;
+  if (ok(p.trend) && ok(gem7) && ok(p.gem30)) return [p.trend, gem7, p.gem30].sort((a, b) => a - b)[1];
+  for (const x of [p.trend, p.gem30, gem7, p.laagste]) if (ok(x)) return x;
+  return null;
+}
+
+/** Liggen trend, 7- en 30-dagengemiddelde zo ver uit elkaar dat de beheerder beter zelf kijkt? */
+export function teNakijken(p: { trend: number | null; gem7?: number | null; gem30: number | null }, afwijking: number): boolean {
+  const w = [p.trend, p.gem7 ?? null, p.gem30].filter((x): x is number => x != null && x > 0);
+  if (w.length < 2) return false;
+  const laag = Math.min(...w), hoog = Math.max(...w);
+  return (hoog - laag) / laag > afwijking;
+}
+
 /** Het prijsvoorstel van de app voor één exemplaar, of null als de beheerder zelf moet prijzen. */
 export function voorstelVoor(ex: Exemplaar, gids: Prijsgids | null, inst: Instellingen): Voorstel | null {
   if (!gids || ex.soort !== "kaart" || !ex.cardmarket_id) return null;
@@ -71,13 +100,11 @@ export function voorstelVoor(ex: Exemplaar, gids: Prijsgids | null, inst: Instel
   const holo = ex.variant === "reverse holo" || ex.variant === "holo";
   const p = prijsVoor(gids.prijzen.get(ex.cardmarket_id), holo);
   if (!p) return null;
-  const referentie = p.trend ?? p.gem30 ?? p.laagste;
+  const referentie = marktprijs(p);
   if (referentie == null) return null;
   const factor = inst.conditiefactoren[ex.conditie || "NM"] ?? 1;
-  const nakijken =
-    p.trend != null && p.gem30 != null && Math.min(p.trend, p.gem30) > 0 &&
-    Math.abs(p.trend - p.gem30) / Math.min(p.trend, p.gem30) > inst.nakijkenAfwijking;
-  return { voorstel: rondEuro(referentie * factor), referentie, trend: p.trend, laagste: p.laagste, gem30: p.gem30, factor, nakijken, holo: p.holo };
+  const nakijken = teNakijken(p, inst.nakijkenAfwijking);
+  return { voorstel: rondEuro(referentie * factor), referentie, trend: p.trend, laagste: p.laagste, gem7: p.gem7, gem30: p.gem30, factor, nakijken, holo: p.holo };
 }
 
 export function drempelVoor(hartje: number, inst: Instellingen): number {

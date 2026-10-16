@@ -169,7 +169,7 @@ export function schattingUitVerkopen(verkopen: { datum: string; prijs: number }[
 
 /**
  * De marktwaarde van een kaart die al in de app staat (om ze uit privé in te brengen): de
- * Cardmarket-trend met de conditie, bij een slab de zelf opgezochte verkopen, anders onze verkoopprijs.
+ * Cardmarket-marktprijs (zie marktprijs) met de conditie, bij een slab de zelf opgezochte verkopen, anders onze verkoopprijs.
  */
 export function marktwaardeVan(e: Exemplaar, gids: Prijsgids | null, inst: Instellingen): { waarde: number; bron: string } | null {
   if (e.soort === "slab" && e.verkopen?.length) {
@@ -177,7 +177,7 @@ export function marktwaardeVan(e: Exemplaar, gids: Prijsgids | null, inst: Inste
     if (s) return { waarde: s, bron: "laatste verkopen (zelf opgezocht)" };
   }
   const v = voorstelVoor(e, gids, inst);
-  if (v) return { waarde: Math.round(v.referentie * v.factor * 100) / 100, bron: `Cardmarket trend${e.conditie && e.conditie !== "NM" ? `, ${e.conditie}` : ""}` };
+  if (v) return { waarde: Math.round(v.referentie * v.factor * 100) / 100, bron: `Cardmarket marktprijs${e.conditie && e.conditie !== "NM" ? `, ${e.conditie}` : ""}` };
   const eigen = e.opslag === "vitrine" ? e.hartjesprijs ?? e.verkoopprijs : e.verkoopprijs ?? e.hartjesprijs;
   if (eigen != null && eigen > 0) return { waarde: eigen, bron: "onze verkoopprijs" };
   return null;

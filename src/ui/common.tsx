@@ -58,6 +58,10 @@ const PADEN: Record<string, ReactNode> = {
   boek: <><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15Z" /><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3M9 7.5h6M9 11h4" /></>,
   kalender: <><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" /><path d="M3.5 10h17M8 3v4M16 3v4" /></>,
   pin: <><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11Z" /><circle cx="12" cy="10" r="2.4" /></>,
+  ster: <path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.5Z" />,
+  brief: <><rect x="3" y="5.5" width="18" height="13" rx="2.5" /><path d="m3.8 7 8.2 6 8.2-6" /></>,
+  penseel: <><path d="M14.5 4.5 19.5 9.5 10 19H5v-5l9.5-9.5Z" /><path d="m12.5 6.5 5 5" /></>,
+  etalage: <><rect x="3.5" y="4" width="11" height="13" rx="2" transform="rotate(-6 9 10.5)" /><rect x="10" y="7" width="10.5" height="13" rx="2" transform="rotate(6 15 13.5)" /></>,
 };
 
 export function Icoon({ naam, maat = 22, className }: { naam: keyof typeof PADEN | string; maat?: number; className?: string }) {
@@ -122,7 +126,7 @@ export function Sheet({ titel, onSluit, children, vol = false, actie }: { titel?
  * Escape om te sluiten. Ligt boven de sheet: Escape sluit eerst dit.
  */
 export function FotoGroot({ src, kaart, alt, onderschrift, onSluit }: { src: string | null; kaart?: FotoKaart; alt: string; onderschrift?: ReactNode; onSluit: () => void }) {
-  const id = useRef(`foto-groot-${++sheetNr}`);
+  const id = useRef(`kaart-groot-${++sheetNr}`);
   const knop = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const mijn = id.current;
@@ -137,10 +141,10 @@ export function FotoGroot({ src, kaart, alt, onderschrift, onSluit }: { src: str
     return () => window.removeEventListener("keydown", esc);
   }, [onSluit]);
   return createPortal(
-    <div className="foto-groot" role="dialog" aria-modal="true" aria-label={alt} onClick={onSluit}>
-      <button ref={knop} className="rond-knop foto-groot-sluit" onClick={onSluit} aria-label="Sluiten"><Icoon naam="kruis" maat={20} /></button>
-      <div className="foto-groot-kaart"><KaartFoto src={src} kaart={kaart} groot alt={alt} /></div>
-      {onderschrift && <div className="foto-groot-tekst">{onderschrift}</div>}
+    <div className="kaart-groot" role="dialog" aria-modal="true" aria-label={alt} onClick={onSluit}>
+      <button ref={knop} className="rond-knop kaart-groot-sluit" onClick={onSluit} aria-label="Sluiten"><Icoon naam="kruis" maat={20} /></button>
+      <div className="kaart-groot-kaart"><KaartFoto src={src} kaart={kaart} groot alt={alt} /></div>
+      {onderschrift && <div className="kaart-groot-tekst">{onderschrift}</div>}
     </div>,
     document.body,
   );

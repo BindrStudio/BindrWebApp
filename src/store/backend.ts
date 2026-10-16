@@ -1,4 +1,4 @@
-import type { Aankoopfoto, Aanwezig, Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
+import type { Aankoopfoto, Aanvraag, AanvraagStatus, Aanwezig, Artikel, Artikelfoto, Etalagefoto, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
 
 export interface Beheerder {
   user_id: string;
@@ -52,6 +52,21 @@ export interface Backend {
   laadAankoopfotos(transactieIds: string[]): Promise<Aankoopfoto[]>;
   bewaarAankoopfoto(f: Aankoopfoto): Promise<void>;
   verwijderAankoopfoto(id: string): Promise<void>;
+  /** Meer foto's bij een artikel (schema 0.10). */
+  laadArtikelfotos(artikelIds: string[]): Promise<Artikelfoto[]>;
+  bewaarArtikelfoto(f: Artikelfoto): Promise<void>;
+  verwijderArtikelfoto(id: string): Promise<void>;
+  /** De etalage op de startpagina van de klanten (schema 0.10). */
+  laadEtalage(): Promise<Etalagefoto[]>;
+  bewaarEtalage(f: Etalagefoto): Promise<void>;
+  wijzigEtalage(id: string, w: Partial<Pick<Etalagefoto, "titel" | "link" | "volgorde">>): Promise<void>;
+  verwijderEtalage(id: string): Promise<void>;
+  /** Aanvragen voor een eigen binder: de lijst zonder afbeeldingen, de afbeeldingen apart. */
+  laadAanvragen(): Promise<Aanvraag[]>;
+  laadAanvraagBeelden(id: string): Promise<Pick<Aanvraag, "artwork" | "voorbeeld">>;
+  zetAanvraagStatus(id: string, status: AanvraagStatus): Promise<void>;
+  /** Een aanvraag wissen (spam, of na het afwerken met de afbeeldingen erin). */
+  verwijderAanvraag(id: string): Promise<void>;
 
   /** Het wachtwoord (de pincode) van de ingelogde beheerder wijzigen. */
   wijzigPincode(pin: string): Promise<void>;

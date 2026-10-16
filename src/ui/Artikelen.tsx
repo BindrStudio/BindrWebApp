@@ -1,18 +1,20 @@
 // Artikels: alles wat per aantal gaat en geen eigen label krijgt. Onze binders (hoofdproduct),
 // sealed (met de prijs van Cardmarket), 3D-prints en andere. Te vinden in Meer › Artikels.
-import { useEffect, useMemo, useState } from "react";
-import { inMandje, meld, naarTab, openArtikel, openArtikelen, schemaOud, SCHEMA_09, sluit, useApp, voegArtikelToe, wijzigArtikel } from "../state";
-import type { Artikel, ArtikelDetails, ArtikelType, Techniek } from "../types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  artikelfotosVan, huidig, inMandje, kanEtalage, laadArtikelfotos, maakHoofdfoto, meld, naarTab, openArtikel, openArtikelen, schemaOud, SCHEMA_09, SCHEMA_010, sluit, useApp,
+  verwijderArtikelfoto, verwijderHoofdfoto, voegArtikelfotoToe, voegArtikelToe, wijzigArtikel,
+} from "../state";
+import type { Artikel, ArtikelDetails, Artikelfoto, ArtikelType, Techniek } from "../types";
 export { artikelOmschrijving };
 import { euro, getal, zonderAccenten } from "../lib/format";
 import { regelArtikelUit } from "../lib/kassa";
-import { ARTIKEL_TYPES, artikelOmschrijving, artikelType, PLAATS, soortVoorType, TECHNIEKEN } from "../lib/categorie";
+import { actiefArtikel, ARTIKEL_TYPES, artikelOmschrijving, artikelType, PLAATS, soortVoorType, TECHNIEKEN } from "../lib/categorie";
 import { cardmarketSealedLink } from "../lib/markt";
 import { laadSealed, zoekSealed, type SealedProduct } from "../lib/sealed";
-import { veiligeFoto } from "../lib/eigenfoto";
+import { veiligeFoto, verkleinFoto } from "../lib/eigenfoto";
 import { artikelZichtbaar } from "../lib/weergave";
-import { Icoon, Kiezer, Sheet, Veld } from "./common";
-import { FotoKiezer } from "./FotoKiezer";
+import { FotoGroot, Icoon, Kiezer, Sheet, Veld } from "./common";
 
 const ICOON: Record<ArtikelType, string> = { binder: "binder", sealed: "doos", "3d-print": "print3d", andere: "tag" };
 const GROOTTES = ["4-pocket", "9-pocket", "12-pocket", "16-pocket"];
@@ -29,7 +31,8 @@ function Beeld({ a, groot = false }: { a: Pick<Artikel, "foto" | "soort" | "naam
 // ── De lijst ─────────────────────────────────────────────────────────────────
 
 export function Artikelen({ type: start }: { type?: ArtikelType }) {
-  const { artikelen } = useApp();
+  const { artikelen: alle } = useApp();
+  const artikelen = useMemo(() => alle.filter(actiefArtikel), [alle]);
   const [type, setType] = useState<ArtikelType>(start ?? "binder");
   const [zoek, setZoek] = useState("");
   const telling = useMemo(() => {
@@ -146,6 +149,7 @@ interface Formulier {
   opslag: Artikel["opslag"];
   opmerking: string;
   foto: string | null;
+  extra: string[];             // meer foto's (enkel bij een nieuw artikel; daarna meteen bewaard)
   details: ArtikelDetails;
   cardmarket_id: number | null;
   zichtbaar: boolean | null;   // op de klantenpagina (leeg: zoals standaard)
@@ -166,6 +170,7 @@ export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | n
     opslag: a?.opslag ?? "vitrine",
     opmerking: a?.opmerking ?? "",
     foto: a?.foto ?? null,
+    extra: [],
     details: { ...(a ? {} : type === "binder" ? vorigeBinder : {}), ...(a?.details ?? {}), type },
     cardmarket_id: a?.cardmarket_id ?? null,
     zichtbaar: a?.zichtbaar ?? null,
@@ -187,11 +192,16 @@ export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | n
     };
     if (type === "binder") Object.assign(vorigeBinder, { merk: d.merk, grootte: d.grootte, toploader: d.toploader, techniek: d.techniek });
     if (a) {
-      // Enkel wat veranderde: het aantal (dat een andere gsm intussen kan verkocht hebben) en een
-      // ongewijzigde foto gaan niet opnieuw mee.
+      // Enkel wat veranderde: het aantal (dat een andere gsm intussen kan verkocht hebben) gaat niet mee,
+      // en de foto's ook niet (die gaan meteen door in ArtikelFotos; zo zet Bewaar nooit een oude foto terug).
+      delete w.foto;
       const veranderd = Object.fromEntries(Object.entries(w).filter(([k, x]) => JSON.stringify(x ?? null) !== JSON.stringify((a as unknown as Record<string, unknown>)[k] ?? null)));
       if (Object.keys(veranderd).length) wijzigArtikel(a.id, veranderd, "Artikel bewaard");
-    } else { voegArtikelToe({ ...w, naam, aantal: Math.max(0, v.aantal) }); meld(`${naam} toegevoegd`); }
+    } else {
+      const nieuw = voegArtikelToe({ ...w, naam, aantal: Math.max(0, v.aantal) });
+      for (const f of v.extra) voegArtikelfotoToe(nieuw, f);
+      meld(`${naam} toegevoegd`);
+    }
     terug();
   };
   const marge = getal(v.prijs) != null && getal(v.aankoopprijs) != null ? getal(v.prijs)! - getal(v.aankoopprijs)! : null;
@@ -206,7 +216,7 @@ export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | n
     <Sheet titel={a ? a.naam : type === "binder" ? "Nieuwe binder" : type === "sealed" ? "Nieuw sealed product" : type === "3d-print" ? "Nieuwe 3D-print" : "Nieuw artikel"} onSluit={terug}>
       {a && (
         <div className="artikel-kop">
-          <Beeld a={{ ...a, foto: v.foto }} groot />
+          <Beeld a={a} groot />
           <div className="artikel-kop-tekst">
             {artikelOmschrijving(a) && <p className="zacht">{artikelOmschrijving(a)}</p>}
             <div className="groot-getal"><span>{a.aantal}</span> op voorraad</div>
@@ -226,7 +236,8 @@ export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | n
       )}
 
       <div className="blok formulier">
-        <FotoKiezer foto={v.foto} onFoto={(foto) => setV((x) => ({ ...x, foto }))} />
+        <ArtikelFotos a={a ?? null} foto={a ? a.foto ?? null : v.foto} extra={v.extra}
+          onFoto={(foto) => setV((x) => ({ ...x, foto }))} onExtra={(extra) => setV((x) => ({ ...x, extra }))} />
 
         {type === "sealed" && (
           zoekSealed
@@ -299,10 +310,134 @@ export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | n
           );
         })()}
         <Veld label="Opmerking"><input value={v.opmerking} onChange={(e) => setV({ ...v, opmerking: e.target.value })} /></Veld>
+        {a && <Verwijderen a={a} onWeg={terug} />}
         <div className="sheet-actie">
           <button className="knop groot" disabled={type === "binder" && !a && !d.artwork?.trim() && !v.naam.trim()} onClick={bewaar}>{a ? "Bewaar" : "Toevoegen"}</button>
         </div>
       </div>
     </Sheet>
+  );
+}
+
+const MAX_FOTOS = 8;
+
+/**
+ * De foto's van een artikel: de eerste is de hoofdfoto (in de lijst, de kassa en op de klantenpagina),
+ * de rest zien klanten in het detail. Bij een bestaand artikel gaat elke wijziging meteen door; bij een
+ * nieuw artikel bij "Toevoegen".
+ */
+function ArtikelFotos({ a, foto, extra, onFoto, onExtra }: {
+  a: Artikel | null; foto: string | null; extra: string[]; onFoto: (f: string | null) => void; onExtra: (l: string[]) => void;
+}) {
+  const app = useApp();
+  const invoer = useRef<HTMLInputElement>(null);
+  const [bezig, setBezig] = useState(false);
+  const [groot, setGroot] = useState<string | null>(null);
+  const kan = kanEtalage(app);
+  // Bij elke keer openen opnieuw ophalen: een andere gsm kan er intussen foto's bij gezet hebben.
+  useEffect(() => { if (a && kan) void laadArtikelfotos([a.id], true); }, [a?.id, kan]); // eslint-disable-line react-hooks/exhaustive-deps
+  const bewaard: Artikelfoto[] = a ? artikelfotosVan(a.id) : [];
+  const meer: { f: string; weg: () => void; hoofd?: () => void }[] = a
+    ? bewaard.map((x) => ({ f: x.foto, weg: () => verwijderArtikelfoto(x), hoofd: () => { maakHoofdfoto(a, x); onFoto(x.foto); } }))
+    : extra.map((f, i) => ({ f, weg: () => onExtra(extra.filter((_, j) => j !== i)), hoofd: () => { onExtra(foto ? extra.map((x, j) => (j === i ? foto : x)) : extra.filter((_, j) => j !== i)); onFoto(f); } }));
+  const totaal = (foto ? 1 : 0) + meer.length;
+
+  const voegToe = async (lijst: FileList | null) => {
+    if (!lijst?.length) return;
+    setBezig(true);
+    try {
+      let hoofd = foto;
+      const nieuw: string[] = [];
+      for (const f of Array.from(lijst).slice(0, MAX_FOTOS - totaal)) {
+        const klein = await verkleinFoto(f, 900);
+        if (!hoofd) { hoofd = klein; onFoto(klein); if (a) wijzigArtikel(a.id, { foto: klein }); continue; }
+        if (!kan) { hoofd = klein; onFoto(klein); if (a) wijzigArtikel(a.id, { foto: klein }); continue; } // oud schema: enkel één foto
+        if (a) voegArtikelfotoToe({ ...a, foto: hoofd }, klein); else nieuw.push(klein);
+      }
+      if (nieuw.length) onExtra([...extra, ...nieuw]);
+    } catch (e) {
+      meld(e instanceof Error ? e.message : String(e), "fout");
+    } finally {
+      setBezig(false);
+    }
+  };
+  const hoofdWeg = () => {
+    if (a) { const volgende = bewaard[0]?.foto ?? null; verwijderHoofdfoto(a); onFoto(volgende); return; }
+    onFoto(extra[0] ?? null);
+    onExtra(extra.slice(1));
+  };
+  const fv = veiligeFoto(foto);
+
+  return (
+    <div className="artikel-fotos">
+      <div className="artikel-fotos-rij">
+        {fv ? (
+          <span className="artikel-duim hoofd">
+            <button type="button" onClick={() => setGroot(fv)} aria-label="Hoofdfoto groot bekijken"><img src={fv} alt="" /></button>
+            <em>Hoofdfoto</em>
+            <button type="button" className="foto-weg" onClick={hoofdWeg} aria-label="Hoofdfoto weg"><Icoon naam="kruis" maat={12} /></button>
+          </span>
+        ) : null}
+        {meer.map((m, i) => {
+          const f = veiligeFoto(m.f);
+          return f && (
+            <span key={i} className="artikel-duim">
+              <button type="button" onClick={() => setGroot(f)} aria-label={`Foto ${i + 2} groot bekijken`}><img src={f} alt="" /></button>
+              {m.hoofd && <button type="button" className="artikel-duim-ster" onClick={m.hoofd} aria-label={`Foto ${i + 2} als hoofdfoto`} title="Maak hoofdfoto"><Icoon naam="ster" maat={13} /></button>}
+              <button type="button" className="foto-weg" onClick={m.weg} aria-label={`Foto ${i + 2} weg`}><Icoon naam="kruis" maat={12} /></button>
+            </span>
+          );
+        })}
+        {totaal < MAX_FOTOS && (kan || !fv) && (
+          <button type="button" className="artikel-duim nieuw" disabled={bezig} onClick={() => invoer.current?.click()}>
+            <Icoon naam="camera" maat={22} />
+            <span>{bezig ? "Bezig…" : fv ? "Foto erbij" : "Foto nemen of kiezen"}</span>
+          </button>
+        )}
+      </div>
+      {!kan && fv && <p className="zacht klein">Meer foto's per artikel: {SCHEMA_010.charAt(0).toLowerCase() + SCHEMA_010.slice(1)}</p>}
+      {kan && totaal > 1 && <p className="zacht klein">Klanten zien alle foto's in het detail. Tik op de ster om een foto de hoofdfoto te maken.</p>}
+      <input ref={invoer} type="file" accept="image/*" multiple={kan} hidden onChange={(e) => { void voegToe(e.target.files); e.target.value = ""; }} />
+      {groot && (
+        <button type="button" className="foto-groot" onClick={() => setGroot(null)} aria-label="Sluiten">
+          <img src={groot} alt="Foto van het artikel" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Een artikel verwijderen: weg uit de lijsten en de klantenpagina, maar de historiek en de voorraad op een vroegere datum blijven kloppen. */
+function Verwijderen({ a, onWeg }: { a: Artikel; onWeg: () => void }) {
+  const [zeker, setZeker] = useState(false);
+  const vraag = useRef<HTMLDivElement>(null);
+  // De vraag kan onder de knop "Bewaar" vallen: schuif ze in beeld.
+  useEffect(() => { if (zeker) vraag.current?.scrollIntoView({ block: "center", behavior: "smooth" }); }, [zeker]);
+  const weg = () => {
+    const vorige = { aantal: a.aantal, zichtbaar: a.zichtbaar ?? null };
+    wijzigArtikel(a.id, { aantal: 0, zichtbaar: false, details: { ...(a.details ?? {}), verwijderd: new Date().toISOString() } }, undefined, "verwijderd");
+    meld(`${a.naam} verwijderd`, "ok", {
+      label: "Ongedaan",
+      doe: () => {
+        const nu = huidig().artikelen.find((x) => x.id === a.id);
+        wijzigArtikel(a.id, { aantal: vorige.aantal, zichtbaar: vorige.zichtbaar, details: { ...(nu?.details ?? a.details ?? {}), verwijderd: null } }, `${a.naam} staat er weer`, "terug na verwijderen");
+      },
+    }, 8000);
+    onWeg();
+  };
+  return (
+    <div className="verwijder-blok">
+      {!zeker ? (
+        <button type="button" className="tekstknop klein rood" onClick={() => setZeker(true)}><Icoon naam="kruis" maat={14} /> {artikelType(a) === "binder" ? "Binder" : "Artikel"} verwijderen</button>
+      ) : (
+        <div className="verwijder-vraag" ref={vraag}>
+          <p>{a.naam} verwijderen?{a.aantal > 0 ? ` Er ${a.aantal === 1 ? "ligt nog 1 stuk" : `liggen nog ${a.aantal} stuks`} op voorraad: die tellen dan niet meer mee.` : ""} Verkopen van vroeger blijven in de historiek.</p>
+          <div className="knoppenrij">
+            <button type="button" className="knop zacht klein" onClick={() => setZeker(false)}>Toch niet</button>
+            <button type="button" className="knop klein rood" onClick={weg}>Verwijderen</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

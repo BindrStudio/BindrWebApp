@@ -1,7 +1,7 @@
 // Demomodus: alles blijft op dit toestel (localStorage). Handig om de app uit te
 // proberen met de testset, zonder account en zonder de echte voorraad te raken.
 // De kassa gebruikt dezelfde rekenkern als de offline wachtrij (src/lib/kassa.ts).
-import type { Aankoopfoto, Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
+import type { Aankoopfoto, Aanvraag, AanvraagStatus, Artikel, Artikelfoto, Etalagefoto, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
 import { Fout, type Alles, type Backend, type PrijsMarkering } from "./backend";
 import { metVitrineSinds, schoonArtikel, schoonExemplaar, standaardArtikel, standaardExemplaar } from "../lib/exemplaar";
 import { aanvaardConflict, losConflictOp, maakOngedaan, pasToe } from "../lib/kassa";
@@ -12,6 +12,9 @@ interface Opslag extends Alles {
   instellingen: Record<string, unknown>;
   omgevingen: Omgeving[];
   aankoopfotos?: Aankoopfoto[];
+  artikelfotos?: Artikelfoto[];
+  etalage?: Etalagefoto[];
+  aanvragen?: Aanvraag[]; // ook wat de klantenpagina in de demo instuurt
 }
 
 // In de demo bestaan dezelfde twee omgevingen als in de echte database.
@@ -45,6 +48,12 @@ export class DemoBackend implements Backend {
   }
 
   private bewaar() {
+    try {
+      // Aanvragen die de klantenpagina intussen instuurde (in een ander tabblad) niet overschrijven.
+      const daar = (JSON.parse(localStorage.getItem(SLEUTEL) || "null") as Opslag | null)?.aanvragen ?? [];
+      const hier = new Map((this.data.aanvragen ?? []).map((a) => [a.id, a]));
+      if (daar.length || hier.size) this.data.aanvragen = [...daar.filter((a) => !hier.has(a.id)), ...hier.values()];
+    } catch { /* geen geldige opslag: gewoon overschrijven */ }
     try {
       localStorage.setItem(SLEUTEL, JSON.stringify(this.data));
     } catch {
@@ -206,6 +215,68 @@ export class DemoBackend implements Backend {
 
   async verwijderAankoopfoto(id: string) {
     this.data.aankoopfotos = (this.data.aankoopfotos ?? []).filter((x) => x.id !== id);
+    this.bewaar();
+  }
+
+  async laadArtikelfotos(ids: string[]) {
+    const set = new Set(ids);
+    return (this.data.artikelfotos ?? []).filter((f) => set.has(f.artikel_id)).sort((a, b) => a.volgorde - b.volgorde);
+  }
+
+  async bewaarArtikelfoto(f: Artikelfoto) {
+    this.data.artikelfotos = [...(this.data.artikelfotos ?? []).filter((x) => x.id !== f.id), f];
+    this.bewaar();
+  }
+
+  async verwijderArtikelfoto(id: string) {
+    this.data.artikelfotos = (this.data.artikelfotos ?? []).filter((x) => x.id !== id);
+    this.bewaar();
+  }
+
+  async laadEtalage() {
+    return [...(this.data.etalage ?? [])].sort((a, b) => a.volgorde - b.volgorde);
+  }
+
+  async bewaarEtalage(f: Etalagefoto) {
+    this.data.etalage = [...(this.data.etalage ?? []).filter((x) => x.id !== f.id), f];
+    this.bewaar();
+  }
+
+  async wijzigEtalage(id: string, w: Partial<Pick<Etalagefoto, "titel" | "link" | "volgorde">>) {
+    this.data.etalage = (this.data.etalage ?? []).map((x) => (x.id === id ? { ...x, ...w } : x));
+    this.bewaar();
+  }
+
+  async verwijderEtalage(id: string) {
+    this.data.etalage = (this.data.etalage ?? []).filter((x) => x.id !== id);
+    this.bewaar();
+  }
+
+  async laadAanvragen() {
+    // De klantenpagina schrijft in dezelfde opslag: opnieuw lezen.
+    try { this.data.aanvragen = (JSON.parse(localStorage.getItem(SLEUTEL) || "null") as Opslag | null)?.aanvragen ?? this.data.aanvragen; } catch { /* laat staan */ }
+    return [...(this.data.aanvragen ?? [])]
+      .map(({ artwork: _a, voorbeeld: _v, ...rest }) => rest as Aanvraag)
+      .sort((a, b) => b.aangemaakt_op.localeCompare(a.aangemaakt_op));
+  }
+
+  async laadAanvraagBeelden(id: string) {
+    const a = (this.data.aanvragen ?? []).find((x) => x.id === id);
+    return { artwork: a?.artwork ?? null, voorbeeld: a?.voorbeeld ?? null };
+  }
+
+  async verwijderAanvraag(id: string) {
+    this.data.aanvragen = (this.data.aanvragen ?? []).filter((a) => a.id !== id);
+    // Ook uit de opslag (bewaar() voegt aanvragen van de klantenpagina anders weer toe).
+    try {
+      const d = JSON.parse(localStorage.getItem(SLEUTEL) || "null") as Opslag | null;
+      if (d) { d.aanvragen = (d.aanvragen ?? []).filter((a) => a.id !== id); localStorage.setItem(SLEUTEL, JSON.stringify(d)); }
+    } catch { /* */ }
+    this.bewaar();
+  }
+
+  async zetAanvraagStatus(id: string, status: AanvraagStatus) {
+    this.data.aanvragen = (this.data.aanvragen ?? []).map((a) => (a.id === id ? { ...a, status } : a));
     this.bewaar();
   }
 

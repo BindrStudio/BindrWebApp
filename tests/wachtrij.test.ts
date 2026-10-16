@@ -156,3 +156,64 @@ test("startvoorraad: kaarten die al in de app staan uit privé inbrengen, ongeda
   assert.equal(k.exemplaren.filter((e) => e.code.startsWith("AAAA")).length, 3);
   assert.equal(st.kopieVan({ exemplaren: [], artikelen: [], beurzen: [], transacties: op.transacties }, Date.now() + 200 * 86400000).transacties.length, 0, "na 120 dagen niet meer in de kopie");
 });
+
+test("meer foto's per artikel, de etalage en aanvragen: meteen op de gsm, later (ook na offline) op de server", async () => {
+  const { server, proxy, status } = nepServer();
+  const leeg = async () => { for (let i = 0; i < 200 && st.huidig().wachtrij; i++) await wacht(20); await wacht(30); assert.equal(st.huidig().wachtrij, 0, "alles doorgestuurd"); };
+  const [F1, F2, F3] = ["AAAA", "BBBB", "CCCC"].map((x) => `data:image/jpeg;base64,${x}`);
+  await server.voegArtikelenToe([{ naam: "Binder Fototest", soort: "eigen product", aantal: 2, prijs: 45, details: { type: "binder" } }]);
+  await st.__testGebruik(proxy);
+  const id = st.huidig().artikelen.find((x) => x.naam === "Binder Fototest")!.id;
+  const nu = () => st.huidig().artikelen.find((x) => x.id === id)!;
+  assert.equal(st.kanEtalage(), true);
+
+  status.offline = true;
+  st.voegArtikelfotoToe(nu(), F1); // de eerste wordt de hoofdfoto
+  assert.equal(nu().foto, F1);
+  st.voegArtikelfotoToe(nu(), F2);
+  st.voegArtikelfotoToe(nu(), F3);
+  assert.deepEqual(st.artikelfotosVan(id).map((f) => f.foto), [F2, F3]);
+  st.maakHoofdfoto(nu(), st.artikelfotosVan(id)[1]); // F3 wordt de hoofdfoto, F1 komt op haar plaats
+  assert.equal(nu().foto, F3);
+  assert.deepEqual(st.artikelfotosVan(id).map((f) => f.foto), [F2, F1]);
+  st.verwijderArtikelfoto(st.artikelfotosVan(id)[0]);
+  assert.deepEqual(st.artikelfotosVan(id).map((f) => f.foto), [F1]);
+
+  st.voegEtalagefotoToe(st.nieuweEtalagefoto(F2));
+  st.voegEtalagefotoToe(st.nieuweEtalagefoto(F3));
+  const e = st.etalageLijst()![0];
+  assert.equal(st.wijzigEtalagefoto(e, { link: "javascript:alert(1)" }), false, "enkel gewone links");
+  assert.equal(st.wijzigEtalagefoto(e, { titel: "  Gengar op zwart ", link: "www.instagram.com/p/abc" }), true);
+  st.schuifEtalagefoto(e, 1);
+  assert.deepEqual(st.etalageLijst()!.map((x) => x.foto), [F3, F2]);
+
+  await wacht(50);
+  assert.ok(st.huidig().wachtrij >= 7, "alles wacht op internet");
+  status.offline = false;
+  assert.equal(await st.spoel(), true);
+  await leeg();
+  assert.equal((await server.laadAlles()).artikelen.find((x) => x.id === id)!.foto, F3);
+  assert.deepEqual((await server.laadArtikelfotos([id])).map((f) => f.foto), [F1], "de server heeft dezelfde extra foto's");
+  const etalage = await server.laadEtalage();
+  assert.deepEqual(etalage.map((x) => [x.foto, x.titel, x.link]), [[F3, null, null], [F2, "Gengar op zwart", "https://www.instagram.com/p/abc"]]);
+  // Online: een titel aanpassen stuurt de foto niet opnieuw mee.
+  st.wijzigEtalagefoto(st.etalageLijst()![0], { titel: "Pikachu" });
+  await leeg();
+  assert.equal((await server.laadEtalage())[0].titel, "Pikachu");
+
+  // Een aanvraag van de klantenpagina (in de demo: dezelfde opslag)
+  const d = JSON.parse(localStorage.getItem("bindr-demo-v1") || "{}");
+  d.aanvragen = [{ id: "aanvraag-1", naam: "Lotte", email: "lotte@voorbeeld.be", idee: "Mijn logo", status: "nieuw", aangemaakt_op: new Date().toISOString(), artwork: F1 }];
+  localStorage.setItem("bindr-demo-v1", JSON.stringify(d));
+  await st.laadAanvragen();
+  assert.equal(st.huidig().aanvragen?.length, 1);
+  assert.equal(st.huidig().aanvragen![0].artwork, undefined, "de lijst zonder afbeeldingen");
+  assert.equal((await st.laadAanvraagBeelden("aanvraag-1")).artwork, F1);
+  st.zetAanvraagStatus("aanvraag-1", "beantwoord");
+  await leeg();
+  assert.equal((await server.laadAanvragen())[0].status, "beantwoord");
+  st.verwijderAanvraag("aanvraag-1");
+  assert.equal(st.huidig().aanvragen?.length, 0);
+  await leeg();
+  assert.equal((await server.laadAanvragen()).length, 0, "ook weg op de server");
+});
