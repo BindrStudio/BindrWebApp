@@ -29,6 +29,12 @@ function fouten(page) {
   page.on("dialog", (d) => d.accept());
   const foto = (naam) => page.screenshot({ path: path.join(SHOTS, `${naam}.png`) });
   const wacht = (ms = 300) => page.waitForTimeout(ms);
+  // Tot iets klopt (op een tragere computer, zoals in GitHub Actions, komt het soms wat later).
+  const wachtTot = async (klopt, wat, ms = 10000) => {
+    const eind = Date.now() + ms;
+    while (Date.now() < eind) { if (await klopt()) return; await wacht(150); }
+    assert.fail(wat);
+  };
   const tab = (naam) => page.locator(".tabbalk button").filter({ hasText: naam }).click();
   const sheet = () => page.locator(".sheet").last();
   const geenHorizontaleScroll = async (waar, p = page) => {
@@ -352,7 +358,7 @@ function fouten(page) {
     await sheet().locator(".markt-idee").waitFor();
     const cm = await sheet().locator(".markt-idee a").first().getAttribute("href");
     assert.match(cm, /idProduct=\d+&language=1&minCondition=2&sellerCountry=2,23/, "Cardmarket-link met NM, Engels, BE en NL");
-    assert.ok(Number((await sheet().getByLabel("Marktwaarde").inputValue()).replace(",", ".")) > 0, "marktwaarde voorgesteld");
+    await wachtTot(async () => Number((await sheet().getByLabel("Marktwaarde").inputValue()).replace(",", ".")) > 0, "marktwaarde voorgesteld");
     await sheet().getByRole("button", { name: /^Toevoegen/ }).click();
     await wacht(200);
   }
