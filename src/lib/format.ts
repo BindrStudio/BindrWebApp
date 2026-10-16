@@ -13,9 +13,10 @@ export function dagVan(iso: string): string {
   return `${v("year")}-${v("month")}-${v("day")}`;
 }
 
+/** De dag van vandaag in Brussel, zoals `dagVan`: ook op een toestel (of een testserver) dat op een andere
+ *  tijdzone staat, is het rond middernacht anders twee verschillende dagen (voorraad op een datum leeg). */
 export function vandaag(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return dagVan(new Date().toISOString());
 }
 
 const maanden = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
