@@ -97,12 +97,20 @@ async function doorloop(ctx, page, motor, naam, opties) {
   const nooitTeBreed = async (waar, keer = 1) => {
     for (let i = 0; i < keer; i++) {
       if (i) await page.waitForTimeout(400);
-      const r = await page.evaluate(() => ({
-        teVeel: document.scrollingElement.scrollWidth - document.documentElement.clientWidth,
-        wie: [...document.querySelectorAll("body *")].filter((el) => el.getBoundingClientRect().right > document.documentElement.clientWidth + 1 && getComputedStyle(el).position !== "fixed")
-          .slice(0, 4).map((el) => `${el.tagName.toLowerCase()}.${[...el.classList].join(".")}`),
-      }));
-      assert.ok(r.teVeel <= 1, `${waar}: ${r.teVeel}px te breed (${r.wie.join(", ")})`);
+      const r = await page.evaluate(() => {
+        const w = document.documentElement.clientWidth;
+        // Wat steekt uit, en zit niet in iets dat zelf scrolt of afknipt? (dat is de boosdoener)
+        const geknipt = (el) => {
+          for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+            if (/(auto|scroll|hidden|clip)/.test(getComputedStyle(a).overflowX)) return true;
+          }
+          return false;
+        };
+        const wie = [...document.querySelectorAll("body *")].filter((el) => el.getBoundingClientRect().right > w + 1 && getComputedStyle(el).position !== "fixed" && !geknipt(el))
+          .slice(0, 4).map((el) => `${el.tagName.toLowerCase()}.${[...el.classList].join(".")} (${Math.round(el.getBoundingClientRect().right)})`);
+        return { teVeel: document.scrollingElement.scrollWidth - w, wie, w, iw: innerWidth };
+      });
+      assert.ok(r.teVeel <= 1, `${waar}: ${r.teVeel}px te breed bij ${r.w}px (innerWidth ${r.iw}): ${r.wie.join(", ") || "niets buiten een scrollvak"}`);
     }
   };
   const tabbalk = (tab) => page.locator(".tabbalk button").filter({ hasText: tab }).click();
