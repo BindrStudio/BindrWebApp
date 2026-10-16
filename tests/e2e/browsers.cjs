@@ -90,7 +90,12 @@ async function profiel(browser, motor, naam, opties) {
 
 async function doorloop(ctx, page, motor, naam, opties) {
   const fouten = [];
-  page.on("pageerror", (e) => fouten.push(`${page.url().replace(BASIS, "/")}: ${e.message} ${String(e.stack || "").split("\n").slice(1, 3).join(" ").trim()}`));
+  page.on("pageerror", (e) => {
+    // WebKit meldt een fetch die afgebroken wordt omdat de test naar een andere pagina gaat als
+    // "… due to access control checks". De app vangt die op; voor de test is het geen fout.
+    if (/due to access control checks/.test(e.message) && e.message.includes(new URL(BASIS).host)) return;
+    fouten.push(`${page.url().replace(BASIS, "/")}: ${e.message} ${String(e.stack || "").split("\n").slice(1, 3).join(" ").trim()}`);
+  });
   page.on("dialog", (d) => d.accept());
   const breedte = opties.viewport.width;
   const foto = (n) => page.screenshot({ path: path.join(SHOTS, `${motor}-${naam}-${n}.png`) });
@@ -159,6 +164,7 @@ async function doorloop(ctx, page, motor, naam, opties) {
   await page.keyboard.press("Escape");
 
   // De klantenpagina.
+  await page.waitForLoadState("networkidle").catch(() => undefined);
   await page.goto(BASIS + "?demo=1");
   await page.locator(".zipbinder").waitFor();
   await page.locator(".etalage-foto").first().waitFor();
