@@ -147,7 +147,11 @@ async function doorloop(ctx, page, motor, naam, opties) {
   await page.goto(BASIS + "beheer.html");
   await page.getByRole("button", { name: "Uitproberen zonder account" }).click();
   await page.locator(".tabbalk").waitFor();
-  await page.getByRole("button", { name: "Instellingen" }).click();
+  // Het tandwiel nog eens als de demo bij de eerste klik nog aan het opstarten was (het scherm bleef dicht).
+  for (let poging = 0; ; poging++) {
+    await page.getByRole("button", { name: "Instellingen" }).click();
+    try { await page.getByRole("button", { name: "Testset inladen" }).waitFor({ timeout: 5000 }); break; } catch (e) { if (poging) throw e; }
+  }
   await page.getByRole("button", { name: "Testset inladen" }).click();
   await page.locator(".sheet").getByText(/Exemplaren/).waitFor();
   await page.waitForTimeout(1500);
