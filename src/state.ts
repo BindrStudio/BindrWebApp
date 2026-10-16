@@ -11,21 +11,21 @@ import type { Aankoopfoto, Aanwezig, Artikel, ArtikelType, Bedrijf, Beurs, Exemp
 import { bewaarPin, controleerPin, isVergrendeld, leesPin, markeerActief, wisPin, VERGRENDEL_NA_MS } from "./lib/pin";
 import { laadPrijsgids, type Prijsgids } from "./lib/prices";
 import { prijscheck, STANDAARD_INSTELLINGEN, type Instellingen, type TeWijzigen } from "./lib/pricing";
-import { euro, vandaag } from "./lib/format";
+import { dagVan, euro, vandaag } from "./lib/format";
 import { HARTJES_OK, kies } from "./lib/grapjes";
 import { laadTestset } from "./lib/testset";
 import { printLabels, printRandtest, printerNaam, verbindPrinter, ontkoppelPrinter, type Afstelling } from "./lib/printer";
 import { laadCatalogus } from "./lib/catalog";
 import { laadOcr } from "./lib/ocr";
 import { uuid } from "./lib/uuid";
-import { inVoorraad, metVitrineSinds, schoonArtikel, schoonExemplaar, standaardArtikel, standaardExemplaar } from "./lib/exemplaar";
+import { inVoorraad, metTelling, metVitrineSinds, schoonArtikel, schoonExemplaar, standaardArtikel, standaardExemplaar } from "./lib/exemplaar";
 import {
   aanvaardConflict, losConflictOp, maakOngedaan, nieuweKasbeweging, nieuwePrive, nieuweRetour, nieuweTransactie, pasToe, pasTotaalAan, stand,
   type Betaling,
 } from "./lib/kassa";
 import { toonCode } from "./lib/code";
 import { bodVanExact, exactBod, marktwaarde, pasBodToe, PCT_MAX, PCT_MIN, type BodInstelling } from "./lib/bod";
-import { INSTAGRAM } from "./config";
+import { APP_VERSIE, INSTAGRAM } from "./config";
 
 export interface Toast {
   id: number;
@@ -86,6 +86,7 @@ export interface State {
   omgeving: string | null;  // de omgeving waarin je nu werkt (Bind'r of Brent)
   aanwezig: Aanwezig[];     // wie er de laatste minuten bezig was
   fotoVersie: number;       // telt op als er aankoopfoto's geladen of toegevoegd werden
+  gedeeltelijk: boolean;    // offline gestart met de kopie: enkel de voorraad en de laatste maanden historiek
 }
 
 const MODUS = "bindr-modus";
@@ -139,6 +140,7 @@ let state: State = {
   omgeving: null,
   aanwezig: [],
   fotoVersie: 0,
+  gedeeltelijk: false,
 };
 
 /** Welke hartjes moeten wisselen: wat de laatste prijscheck markeerde (gedeeld via de database). */
@@ -285,15 +287,45 @@ function bewaarKopieLater() {
   if (!b || b.soort !== "supabase" || state.fase !== "klaar") return;
   if (kopieTimer) clearTimeout(kopieTimer);
   kopieTimer = setTimeout(() => {
-    // Zonder foto's (die zijn groot en komen terug van de server): zo blijft er plaats voor de wachtrij.
-    const alles = alleRijen();
-    schrijf(kopieSleutel(b), {
-      op: new Date().toISOString(), ...alles,
-      artikelen: alles.artikelen.map(({ foto: _f, ...a }) => a),
-      exemplaren: alles.exemplaren.map((e) => (e.foto ? { ...e, foto: undefined } : e)),
-      omgevingen: state.omgevingen, omgeving: state.omgeving, serverTijd,
-    });
+    try {
+      localStorage.setItem(kopieSleutel(b), JSON.stringify(kopieVan(alleRijen())));
+    } catch {
+      // Te groot of vol: liever geen kopie dan een oude (die zou verkochte kaarten als voorraad tonen).
+      try { localStorage.removeItem(kopieSleutel(b)); } catch { /* */ }
+    }
   }, 800);
+}
+
+/**
+ * Een back-up van alles (alle omgevingen): voorraad, artikels, beurzen, transacties en de gedeelde
+ * instellingen. Supabase gratis maakt zelf geen back-ups. Foto's bij aankopen zitten niet in dit bestand:
+ * die staan in de dagstaten (pdf).
+ */
+export function backup() {
+  const alles = alleRijen();
+  return {
+    soort: "bindr-backup", versie: 1, op: new Date().toISOString(), appVersie: APP_VERSIE,
+    omgevingen: state.omgevingen, instagram: state.instagram, boekhouding: state.boekhouding,
+    prijsregels: (({ drempels, conditiefactoren, nakijkenAfwijking, inkoopPct, ruilPct }) => ({ drempels, conditiefactoren, nakijkenAfwijking, inkoopPct, ruilPct }))(state.instellingen),
+    aantallen: { exemplaren: alles.exemplaren.length, artikelen: alles.artikelen.length, beurzen: alles.beurzen.length, transacties: alles.transacties.length },
+    ...alles,
+  };
+}
+
+/** Wat een kopie bijhoudt: de voorraad en wat de laatste maanden gebeurde (genoeg voor een beurs zonder internet). */
+export const KOPIE_DAGEN = 120;
+export function kopieVan(alles: Alles, nu = Date.now()) {
+  const grens = nu - KOPIE_DAGEN * 86400000;
+  const recent = (iso?: string | null) => !!iso && Date.parse(iso) >= grens;
+  // Zonder foto's (die zijn groot en komen terug van de server): zo blijft er plaats voor de wachtrij.
+  return {
+    op: new Date(nu).toISOString(), gedeeltelijk: true,
+    beurzen: alles.beurzen,
+    artikelen: alles.artikelen.map(({ foto: _f, ...a }) => a),
+    exemplaren: alles.exemplaren.filter((e) => inVoorraad(e) || recent(e.gewijzigd_op) || recent(e.afgeboekt_op)).map((e) => (e.foto ? { ...e, foto: undefined } : e)),
+    transacties: alles.transacties.filter((t) => recent(t.tijd)),
+    omgevingen: state.omgevingen, omgeving: state.omgeving, serverTijd,
+  };
 }
 function leesKopie(b: Backend) {
   try {
@@ -620,7 +652,7 @@ async function gebruik(backend: Backend) {
     ]);
     serverTijd = laatsteTijd(alles);
     laatsteVolledig = Date.now();
-    zet({ ...splits(alles), gids, beheerders: Object.fromEntries(beheerders.map((b) => [b.user_id, b.naam])), fase: "klaar" });
+    zet({ ...splits(alles), gids, beheerders: Object.fromEntries(beheerders.map((b) => [b.user_id, b.naam])), fase: "klaar", gedeeltelijk: false });
     // Loopt er een beurs? Dan opent de app op de kassa (tenzij een ander tabblad gevraagd werd).
     if (typeof location !== "undefined" && !location.hash && state.beurzen.some((b) => b.status === "actief")) zet({ tab: "kassa" });
     // Mislukt het laden van de gedeelde instellingen, dan niets overschrijven (anders wist de volgende wijziging alles).
@@ -645,9 +677,9 @@ async function gebruik(backend: Backend) {
           exemplaren: kopie.exemplaren.map(schoonExemplaar), artikelen: (kopie.artikelen ?? []).map(schoonArtikel),
           beurzen: kopie.beurzen ?? [], transacties: kopie.transacties ?? [],
         }),
-        gids, fase: "klaar", online: false,
+        gids, fase: "klaar", online: false, gedeeltelijk: !!kopie.gedeeltelijk,
       });
-      meld("Geen verbinding: je werkt met de voorraad op dit toestel. Wijzigingen gaan door zodra er internet is.", "info", undefined, 7000);
+      meld("Geen verbinding: je werkt met de voorraad op dit toestel (en de laatste maanden historiek). Wijzigingen gaan door zodra er internet is.", "info", undefined, 7000);
       return;
     }
     fout(e);
@@ -747,11 +779,15 @@ function behoudMarkering(alles: Alles): Alles {
   return { ...alles, exemplaren: alles.exemplaren.map((e) => (lokaal.has(e.id) && e.nieuw_hartje == null ? { ...e, nieuw_hartje: lokaal.get(e.id) } : e)) };
 }
 
-/** Haalt enkel op wat sinds de vorige keer veranderde; om de 5 minuten alles (ook wat verdween). */
+/**
+ * Haalt enkel op wat sinds de vorige keer veranderde; om het half uur alles (ook wat verdween). Alles
+ * ophalen kost het meeste dataverkeer (na een paar jaar enkele MB per keer), dus niet vaker dan nodig.
+ */
+const VOLLEDIG_OM = 30 * 60000;
 async function haalWijzigingen() {
   const b = state.backend;
   if (!b || rij.length) return;
-  if (!serverTijd || Date.now() - laatsteVolledig > 5 * 60000) return herlaad();
+  if (!serverTijd || Date.now() - laatsteVolledig > VOLLEDIG_OM) return herlaad();
   try {
     // Een minuut overlap: een wijziging die net vóór de vorige keer begon maar later klaar was, valt er zo niet tussenuit.
     const sinds = new Date(Date.parse(serverTijd) - 60000).toISOString();
@@ -807,7 +843,7 @@ export async function herlaad() {
       const omgeving = omgevingen.some((o) => o.id === state.omgeving) ? state.omgeving : omgevingen[0].id;
       zet({ omgevingen, omgeving });
     }
-    zet({ ...splits(behoudMarkering(alles)), online: true });
+    zet({ ...splits(behoudMarkering(alles)), online: true, gedeeltelijk: false });
   } catch (e) {
     if (sessieVerlopen()) naarLoginNaVerlopen();
     else if (isNetwerkFout(e)) zet({ online: false }); else fout(e);
@@ -876,7 +912,19 @@ export function voegArtikelToe(r: NieuwArtikel): Artikel {
   inRij({ soort: "artikelenNieuw", rijen: [a] });
   return a;
 }
-export function wijzigArtikel(id: string, w: Partial<Artikel>, melding?: string) {
+export function wijzigArtikel(id: string, w: Partial<Artikel>, melding?: string, reden: string | null = null) {
+  const oud = state.artikelen.find((x) => x.id === id);
+  // Nieuwe details (een formulier dat al open stond) mogen geen tellingen wissen: samenvoegen.
+  if (oud && w.details && (oud.details?.tellingen?.length || w.details.tellingen?.length)) {
+    const alle = [...(oud.details?.tellingen ?? []), ...(w.details.tellingen ?? [])];
+    const uniek = alle.filter((x, i) => alle.findIndex((y) => y.op === x.op && y.delta === x.delta) === i).sort((a, b) => a.op.localeCompare(b.op));
+    w = { ...w, details: { ...w.details, tellingen: uniek } };
+  }
+  // Een ander aantal buiten de kassa: het verschil komt in de tellingen (voor de voorraad op 31 december).
+  if (oud && w.aantal != null && w.aantal !== oud.aantal) {
+    const t = metTelling({ ...oud, details: w.details ?? oud.details }, w.aantal, reden);
+    w = { ...w, ...t };
+  }
   zet({ artikelen: state.artikelen.map((x) => (x.id === id ? { ...x, ...w } : x)) });
   inRij({ soort: "artikelWijzig", id, wijziging: w });
   if (melding) meld(melding);
@@ -1299,6 +1347,11 @@ export function ongedaanMaken(id: string) {
   meld("Ongedaan gemaakt");
 }
 
+/** Mag deze transactie nog ongedaan gemaakt worden? Enkel dezelfde dag: een vorige dag staat misschien al in Dexxter. */
+export function magOngedaan(t: Transactie, nu = new Date().toISOString()): boolean {
+  return t.status !== "ongedaan" && dagVan(t.tijd) === dagVan(nu);
+}
+
 /** Retour of een deal terugdraaien: onze stukken komen terug (terugIn), hun stukken gaan terug (terugUit). */
 export function retour(terugIn: Regel[], terug: number, terugUit: Regel[] = [], perBank = false) {
   const beurs = actieveBeurs();
@@ -1327,6 +1380,19 @@ export function kasbeweging(b: { cash: number; sumup?: number }, omschrijving: s
 }
 
 /** Kaarten tussen privé en de zaak (Profiel › Privé). */
+/**
+ * Kaarten die al in de app staan (zelf toegevoegd, bv. de eigen verzameling bij de start) uit privé
+ * inbrengen: één bewijs PB-…, en elke kaart krijgt haar inbrengwaarde als aankoopprijs.
+ */
+export function inbrengBestaand(regels: Regel[], fotos: string[] = []): Transactie {
+  if (state.gedeeltelijk) throw new Error("Zonder internet kent de app enkel de laatste maanden: breng kaarten in als je weer online bent.");
+  // Eén transactie: de app en de database zetten zelf de aankoopprijs op elke kaart (en nooit twee keer).
+  const t = boek(nieuwePrive(regels, [], actieveBeurs()?.id ?? null));
+  for (const f of fotos) voegAankoopfotoToe(t.id, f);
+  if (t.status === "conflict") meld(`${t.conflicten.length === 1 ? "Eén kaart kon" : `${t.conflicten.length} kaarten konden`} niet: al gekocht, ingebracht of niet meer in voorraad.`, "fout", { label: "Bekijk", doe: () => openTransactie(t.id) }, 8000);
+  return t;
+}
+
 export function prive(binnen: Regel[], weg: Regel[], fotos: string[] = []): Transactie {
   const beurs = actieveBeurs();
   const t = boek(nieuwePrive(binnen, weg, beurs?.id ?? null));

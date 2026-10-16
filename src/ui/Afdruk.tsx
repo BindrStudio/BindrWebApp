@@ -28,6 +28,16 @@ export function drukAf(inhoud: ReactNode, titel?: string) {
 }
 
 /** Een CSV-bestand bewaren (met BOM, zodat Excel de accenten goed leest). */
+/** Een bestand downloaden (bv. de back-up als JSON). */
+export function bewaarBestand(naam: string, tekst: string, type = "application/json") {
+  const url = URL.createObjectURL(new Blob([tekst], { type }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = naam;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
 export function bewaarCsv(naam: string, tekst: string) {
   const url = URL.createObjectURL(new Blob(["﻿" + tekst], { type: "text/csv;charset=utf-8" }));
   const a = document.createElement("a");

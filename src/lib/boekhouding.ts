@@ -3,7 +3,9 @@
 // dagrapporten, het borderel, de jaaromzet tegenover de vrijstellingsgrens en de voorraad
 // op een datum. Bronnen en de punten om met een boekhouder na te kijken: zie de README.
 import type { Artikel, Exemplaar, Regel, Tegenpartij, Transactie } from "../types";
-import { rond2 } from "./kassa";
+import { rond2, verwervingen } from "./kassa";
+
+export { verwervingen };
 import { dagVan } from "./format";
 
 const som = (xs: number[]) => rond2(xs.reduce((a, b) => a + b, 0));
@@ -40,7 +42,7 @@ const inConflict = (t: Transactie, r: Regel) => t.soort === "prive" && !!r.exemp
 export function boeking(t: Transactie): Boeking {
   if (t.status === "ongedaan" || t.soort === "kas") return NUL;
   const uit = som(t.regels.filter((r) => r.richting === "uit" && !inConflict(t, r)).map((r) => r.prijs));
-  const binnen = som(t.regels.filter((r) => r.richting === "in").map((r) => r.prijs));
+  const binnen = som(t.regels.filter((r) => r.richting === "in" && !inConflict(t, r)).map((r) => r.prijs));
   const geld = { cash: t.cash, sumup: t.sumup, bank: t.bank ?? 0, inbreng: 0, onttrekking: 0 };
   if (t.soort === "prive") return { ...NUL, inbreng: binnen, onttrekking: uit };
   if (t.soort === "retour") {
@@ -132,6 +134,16 @@ export function dagontvangsten(transacties: Transactie[]): Dag[] {
       transacties: d.transacties.sort((a, b) => a.tijd.localeCompare(b.tijd)),
     };
   }).sort((a, b) => b.datum.localeCompare(a.datum));
+}
+
+/** De kosten van één dag voor Dexxter (uitgaven › aankoop van handelsgoederen): per soort één lijn. */
+export function kostenLijnen(d: Dag, waar?: string): DexxterLijn[] {
+  const w = waar ? ` (${waar})` : "";
+  return [
+    d.aankopenGeld ? { omschrijving: `Aankoop kaarten van particulieren${w}`, bedrag: d.aankopenGeld } : null,
+    d.aankopenRuil ? { omschrijving: `Inkoop via ruil${w}`, bedrag: d.aankopenRuil } : null,
+    d.inbreng ? { omschrijving: "Inbreng kaarten uit privé (betaald met privémiddelen)", bedrag: d.inbreng } : null,
+  ].filter(Boolean) as DexxterLijn[];
 }
 
 /** Wat je in Dexxter ingeeft voor één dag: elke lijn is één inschrijving bij de dagontvangsten. */
@@ -240,7 +252,7 @@ export function borderelLijnen(regels: Regel[], richting: "in" | "uit"): Bordere
     const omschrijving = n
       ? [n.set_naam, [n.set_code, n.nummer].filter(Boolean).join(" "), n.taal, n.soort === "slab" ? [n.grader, n.grade, n.cert ? `cert ${n.cert}` : null].filter(Boolean).join(" ") : n.conditie, n.variant !== "normaal" ? n.variant : null]
         .filter(Boolean).join(" · ")
-      : r.aantal && r.aantal > 1 ? `${r.aantal} stuks` : "";
+      : r.omschrijving ?? (r.aantal && r.aantal > 1 ? `${r.aantal} stuks` : "");
     const markt = richting === "in" ? r.referentie ?? null : r.hartjesprijs ?? null;
     return {
       naam: r.naam, code: r.code ?? null, omschrijving, markt, bron: richting === "in" ? r.referentie_bron ?? null : "onze prijs",
@@ -262,9 +274,19 @@ export interface VoorraadLijn {
   borderel: string | null;
   waarde: number;          // aankoopwaarde (kostprijs) van de hele lijn
   zonderWaarde: boolean;   // geen aankoopprijs gekend
+  zonderAankoop: boolean;  // een kaart die zelf werd toegevoegd, zonder aankoop of inbreng in de app
 }
 
-export interface Inventaris { datum: string; lijnen: VoorraadLijn[]; totaal: number; zonderWaarde: number }
+export interface Inventaris {
+  datum: string; lijnen: VoorraadLijn[]; totaal: number; zonderWaarde: number;
+  /** Zelf toegevoegde kaarten zonder aankoop of inbreng in de app: gekocht met een factuur buiten de app, of nog in te brengen. */
+  zonderAankoop: { aantal: number; waarde: number };
+}
+
+/** Het aantal van een artikel op het einde van `datum`, zonder de kassa: wat er met de hand bij of af ging na die dag, teruggedraaid. */
+function tellingenNa(a: Artikel, datum: string): number {
+  return (a.details?.tellingen ?? []).filter((x) => dagVan(x.op) > datum).reduce((s, x) => s + x.delta, 0);
+}
 
 /**
  * Wat er op het einde van `datum` in voorraad was, aan aankoopwaarde. Vertrekt van nu en draait
@@ -277,8 +299,7 @@ export function voorraadOp(datum: string, exemplaren: Exemplaar[], artikelen: Ar
     .sort((a, b) => a.tijd.localeCompare(b.tijd));
   // Per exemplaar: de eerste transactie na de datum zegt hoe het er op die datum bij lag.
   const eerste = new Map<string, "was-in" | "was-uit">();
-  const aangemaaktDoor = new Map<string, Transactie>();
-  for (const t of transacties) for (const r of t.regels) if (r.richting === "in" && r.nieuw?.id && t.status !== "ongedaan") aangemaaktDoor.set(r.nieuw.id, t);
+  const aangemaaktDoor = verwervingen(transacties);
   for (const t of na) {
     for (const r of t.regels) {
       const id = r.exemplaar_id ?? null;
@@ -289,7 +310,9 @@ export function voorraadOp(datum: string, exemplaren: Exemplaar[], artikelen: Ar
   }
   const lijnen: VoorraadLijn[] = [];
   for (const e of exemplaren) {
-    if (dagVan(e.aangemaakt_op) > datum) continue; // nog niet in de voorraad
+    const t = aangemaaktDoor.get(e.id);
+    // Nog niet in de zaak: aangemaakt na de datum, of pas na de datum uit privé ingebracht.
+    if (dagVan(t?.tijd ?? e.aangemaakt_op) > datum) continue;
     const toen = eerste.get(e.id);
     // Uit de voorraad gehaald zonder transactie: afgeboekt_op (oudere gegevens: het laatste moment dat het wijzigde).
     const weg = e.afgeboekt_op ?? (e.transactie_id ? null : e.gewijzigd_op);
@@ -297,12 +320,11 @@ export function voorraadOp(datum: string, exemplaren: Exemplaar[], artikelen: Ar
       : e.status === "in voorraad" ? true
         : !!weg && dagVan(weg) > datum;
     if (!inVoorraad) continue;
-    const t = aangemaaktDoor.get(e.id);
     lijnen.push({
       id: e.id, code: e.code, soort: e.soort,
       omschrijving: [e.naam, [e.set_code, e.nummer].filter(Boolean).join(" "), e.taal, e.soort === "slab" ? [e.grader, e.grade].filter(Boolean).join(" ") : e.conditie].filter(Boolean).join(" · "),
-      aantal: 1, aankoopdatum: e.aankoopdatum, herkomst: t ? (t.soort === "ruil" ? "ruil" : t.soort === "prive" ? "uit privé" : "aankoop") : e.aankoopbron || "eigen invoer",
-      borderel: t ? bewijsNummer(t) : null, waarde: rond2(e.aankoopprijs ?? 0), zonderWaarde: e.aankoopprijs == null,
+      aantal: 1, aankoopdatum: t ? dagVan(t.tijd) : e.aankoopdatum, herkomst: t ? (t.soort === "ruil" ? "ruil" : t.soort === "prive" ? "uit privé" : "aankoop") : e.aankoopbron || "zelf toegevoegd",
+      borderel: t ? bewijsNummer(t) : null, waarde: rond2(e.aankoopprijs ?? 0), zonderWaarde: e.aankoopprijs == null, zonderAankoop: !t && e.soort !== "eigen product",
     });
   }
   // Artikels: het aantal van nu, min wat er na de datum binnenkwam, plus wat er na de datum uitging.
@@ -317,16 +339,22 @@ export function voorraadOp(datum: string, exemplaren: Exemplaar[], artikelen: Ar
     }
   }
   for (const a of artikelen) {
-    const aantal = Math.max(0, a.aantal + (verschil.get(a.id) ?? 0));
+    if (a.aangemaakt_op && dagVan(a.aangemaakt_op) > datum) continue; // bestond toen nog niet
+    // Ook wat er na de datum met de hand bij of af ging (bijgekocht, kapot, pack geopend) draaien we terug.
+    const aantal = Math.max(0, a.aantal + (verschil.get(a.id) ?? 0) - tellingenNa(a, datum));
     if (!aantal) continue;
     lijnen.push({
       id: a.id, code: null, omschrijving: a.naam, soort: a.details?.type ?? a.soort, aantal, aankoopdatum: null,
       herkomst: a.soort === "eigen product" ? "eigen productie" : "aankoop", borderel: null,
-      waarde: rond2((a.aankoopprijs ?? 0) * aantal), zonderWaarde: a.aankoopprijs == null,
+      waarde: rond2((a.aankoopprijs ?? 0) * aantal), zonderWaarde: a.aankoopprijs == null, zonderAankoop: false,
     });
   }
   lijnen.sort((x, y) => x.omschrijving.localeCompare(y.omschrijving));
-  return { datum, lijnen, totaal: som(lijnen.map((l) => l.waarde)), zonderWaarde: lijnen.filter((l) => l.zonderWaarde).length };
+  const zonder = lijnen.filter((l) => l.zonderAankoop);
+  return {
+    datum, lijnen, totaal: som(lijnen.map((l) => l.waarde)), zonderWaarde: lijnen.filter((l) => l.zonderWaarde).length,
+    zonderAankoop: { aantal: zonder.length, waarde: som(zonder.map((l) => l.waarde)) },
+  };
 }
 
 // ── CSV ──────────────────────────────────────────────────────────────────────

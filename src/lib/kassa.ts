@@ -11,6 +11,26 @@ import { dagVan } from "./format";
 export interface Voorraad {
   exemplaren: Exemplaar[];
   artikelen: Artikel[];
+  /** De transacties tot nu (als ze er zijn): om een kaart niet twee keer in te brengen. */
+  transacties?: Transactie[];
+}
+
+/**
+ * Hoe elk exemplaar in de zaak kwam: de transactie die het binnenbracht (inkoop, ruil, of uit privé,
+ * ook een kaart die al in de app stond en later werd ingebracht). Wat ongedaan is of een conflict gaf, telt niet.
+ */
+export function verwervingen(transacties: Transactie[]): Map<string, Transactie> {
+  const m = new Map<string, Transactie>();
+  for (const t of transacties) {
+    if (t.status === "ongedaan" || t.soort === "retour") continue;
+    for (const r of t.regels) {
+      if (r.richting !== "in") continue;
+      const id = r.nieuw?.id ?? (t.soort === "prive" ? r.exemplaar_id : null);
+      if (!id || m.has(id) || t.conflicten.some((c) => c.exemplaar_id === id)) continue;
+      m.set(id, t);
+    }
+  }
+  return m;
 }
 
 export const rond2 = (x: number) => Math.round(x * 100) / 100;
@@ -75,6 +95,19 @@ export function regelArtikelUit(a: Artikel, aantal = 1, prijs?: number): Regel {
 /** Een kaart van de klant komt binnen (ruil of inkoop) als nieuw exemplaar. */
 export function regelIn(nieuw: NieuwExemplaar & { id: string }, prijs: number, referentie?: number | null): Regel {
   return { richting: "in", nieuw, naam: nieuw.naam, code: nieuw.code, prijs: rond2(prijs), referentie: referentie ?? null };
+}
+
+/**
+ * Een kaart die al in de app staat (zelf toegevoegd) uit privé inbrengen: dezelfde kaart, nu met haar
+ * inbrengwaarde als aankoopprijs. De regel bewaart de vorige waarden om ongedaan maken terug te zetten.
+ */
+export function regelInbreng(e: Exemplaar, prijs: number, referentie: number | null, bron: string | null, pct: number | null): Regel {
+  // (pasToe en boek_transactie zetten de aankoopprijs; ongedaan maken zet de vorige waarden terug.)
+  return {
+    richting: "in", exemplaar_id: e.id, naam: e.naam, code: e.code, prijs: rond2(prijs), referentie, referentie_bron: bron, pct,
+    omschrijving: [[e.set_code, e.nummer].filter(Boolean).join(" "), e.taal, e.soort === "slab" ? [e.grader, e.grade].filter(Boolean).join(" ") : e.conditie].filter(Boolean).join(" · ") || null,
+    vorige_aankoopprijs: e.aankoopprijs ?? null, vorige_aankoopbron: e.aankoopbron ?? null, vorige_aankoopdatum: e.aankoopdatum ?? null,
+  };
 }
 
 /** Artikelen komen binnen (bv. drie booster packs van de klant). */
@@ -188,6 +221,7 @@ export function pasToe(v: Voorraad, t: Transactie): { voorraad: Voorraad; transa
   const artikelen = new Map(v.artikelen.map((a) => [a.id, a]));
   const conflicten: Conflict[] = [];
   const nieuweVolgorde: Exemplaar[] = [];
+  let verworven: Set<string> | null = null; // pas berekend als het nodig is (inbreng van een kaart die er al was)
 
   for (const r of t.regels) {
     if (t.soort === "kas") continue;
@@ -255,6 +289,19 @@ export function pasToe(v: Voorraad, t: Transactie): { voorraad: Voorraad; transa
         }, t.tijd);
         exemplaren.set(e.id, e);
         nieuweVolgorde.push(e);
+      } else if (t.soort === "prive" && r.exemplaar_id) {
+        // Een kaart die al in de app stond, uit privé ingebracht: ze krijgt haar inbrengwaarde als aankoopprijs.
+        // Zoals de server: nooit twee keer, en enkel als ze nog in voorraad ligt.
+        verworven ??= new Set(verwervingen(v.transacties ?? []).keys());
+        const e = exemplaren.get(r.exemplaar_id);
+        if (!e) conflicten.push({ exemplaar_id: r.exemplaar_id, reden: "onbekend exemplaar" });
+        else if (!inVoorraad(e)) conflicten.push({ exemplaar_id: e.id, reden: `al ${e.status}` });
+        else if (t.omgeving_id && e.omgeving_id && e.omgeving_id !== t.omgeving_id) conflicten.push({ exemplaar_id: e.id, reden: "van een andere omgeving" });
+        else if (verworven.has(e.id)) conflicten.push({ exemplaar_id: e.id, reden: "al gekocht of ingebracht" });
+        else {
+          exemplaren.set(e.id, { ...e, aankoopprijs: r.prijs, aankoopbron: "privé", aankoopdatum: datumVan(t.tijd), gewijzigd_op: t.tijd });
+          verworven.add(e.id);
+        }
       } else if (r.artikel_id) {
         const a = artikelen.get(r.artikel_id);
         if (a) artikelen.set(a.id, { ...a, aantal: a.aantal + (r.aantal ?? 1) });
@@ -317,6 +364,10 @@ export function maakOngedaan(v: Voorraad, t: Transactie): { voorraad: Voorraad; 
       // Zoals de server: enkel weg als het nog in voorraad ligt (anders werd het intussen verkocht).
       const e = exemplaren.get(r.nieuw.id);
       if (!e || inVoorraad(e)) weg.add(r.nieuw.id);
+    } else if (t.soort === "prive" && r.exemplaar_id) {
+      // Ingebracht terwijl ze al in de app stond: de vorige aankoopgegevens terug.
+      const e = exemplaren.get(r.exemplaar_id);
+      if (e && !inConflict.has(e.id)) exemplaren.set(e.id, { ...e, aankoopprijs: r.vorige_aankoopprijs ?? null, aankoopbron: r.vorige_aankoopbron ?? null, aankoopdatum: r.vorige_aankoopdatum ?? null });
     } else if (r.artikel_id) {
       const a = artikelen.get(r.artikel_id);
       if (a) artikelen.set(a.id, { ...a, aantal: Math.max(0, a.aantal - (r.aantal ?? 1)) });

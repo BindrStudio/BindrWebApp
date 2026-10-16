@@ -643,6 +643,21 @@ function fouten(page) {
   stap("privé ⇄ Bind'r: een kaart uit de eigen verzameling inbrengen en een kaart meenemen");
   await tab("Profiel");
   await page.locator(".profiel-tegel", { hasText: "Privé" }).click();
+  // Startvoorraad: kaarten die al in de app staan (de testset werd zelf toegevoegd) in één keer inbrengen.
+  await sheet().getByRole("button", { name: /^Al in de app/ }).waitFor();
+  await sheet().getByRole("button", { name: "Niets kiezen" }).click();
+  await sheet().locator(".inbreng-lijst li > button").nth(0).click();
+  await sheet().locator(".inbreng-lijst li > button").nth(1).click();
+  await sheet().getByRole("button", { name: /^2 inbrengen in Bind'r/ }).waitFor();
+  assert.match(await sheet().locator(".inbreng-lijst").innerText(), /markt €\s?\d/);
+  await wacht(300);
+  await foto("35a-startvoorraad");
+  await geenHorizontaleScroll("startvoorraad");
+  await sheet().getByRole("button", { name: /^2 inbrengen in Bind'r/ }).click();
+  await sheet().getByRole("heading", { name: "Ingebracht uit privé" }).waitFor();
+  assert.match(await sheet().locator(".gelukt .borderel-knop").innerText(), /PB-\d{4}-/);
+  await sheet().getByRole("button", { name: "Nog iets" }).click();
+  await sheet().getByRole("button", { name: "Nieuwe kaart" }).click();
   await sheet().getByRole("button", { name: "Kaart toevoegen" }).click();
   await sheet().getByRole("button", { name: "Handmatig", exact: true }).click();
   await sheet().getByRole("button", { name: "Handmatig invullen" }).click();
@@ -668,7 +683,12 @@ function fouten(page) {
   await page.locator(".profiel-tegel", { hasText: "Boekhouding" }).click();
   await sheet().getByRole("button", { name: "Aankoop", exact: true }).click();
   assert.ok(await sheet().locator(".boek-dag").count() >= 2, "aankopen van vandaag en gisteren");
-  assert.match(await sheet().locator(".boek-dag").first().innerText(), /uit privé €\s?70/);
+  assert.match(await sheet().locator(".boek-dag").first().innerText(), /uit privé/);
+  // Voorraad: wat zelf werd toegevoegd zonder aankoop in de app, staat apart met een knop om in te brengen.
+  await sheet().getByRole("button", { name: "Voorraad", exact: true }).click();
+  await sheet().getByText(/zelf toegevoegd, zonder aankoop in de app/).waitFor();
+  await wacht(300);
+  await foto("35b-zonder-aankoop");
   await page.keyboard.press("Escape"); await wacht(200);
 
   // ── Klantenpagina ──────────────────────────────────────────────────────────

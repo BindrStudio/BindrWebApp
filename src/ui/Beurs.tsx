@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  actieveBeurs, bewaarBeurs, conflictAanvaarden, conflictOplossen, huidig, kanNieuweBoekhouding, meld, ongedaanMaken, openBeurs, openExemplaar,
+  actieveBeurs, bewaarBeurs, conflictAanvaarden, conflictOplossen, huidig, kanNieuweBoekhouding, magOngedaan, meld, ongedaanMaken, openBeurs, openExemplaar,
   openTransactie, planBeurs, retour, schrapBeurs, sluit, sluitBeurs, startBeurs, useApp,
 } from "../state";
 import type { Beurs, Regel, Stand, Transactie } from "../types";
@@ -309,7 +309,8 @@ export function TransactieSheet({ id }: { id: string }) {
               </>
             );
           })()}
-          {!retourKeuze && !retours.length && <button className="knop zacht rood" onClick={() => { if (confirm("Deze transactie ongedaan maken? De voorraad en de kas gaan terug.")) ongedaanMaken(t.id); }}>Ongedaan maken</button>}
+          {!retourKeuze && !retours.length && magOngedaan(t) && <button className="knop zacht rood" onClick={() => { if (confirm("Deze transactie ongedaan maken? De voorraad en de kas gaan terug.")) ongedaanMaken(t.id); }}>Ongedaan maken</button>}
+          {!retourKeuze && !magOngedaan(t) && <p className="zacht klein">Ongedaan maken kan enkel dezelfde dag: een vorige dag staat misschien al in Dexxter. {t.soort === "kas" ? "Boek vandaag een kasbeweging in de andere richting." : t.soort === "prive" ? "Draai het vandaag om met Privé ⇄ Bind'r." : "Draai het terug met een retour; die komt op vandaag."}</p>}
         </div>
       )}
     </Sheet>

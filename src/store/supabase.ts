@@ -6,8 +6,8 @@ import { schoonArtikel, schoonExemplaar } from "../lib/exemplaar";
 
 const SESSIE_SLEUTEL = "bindr-sessie-v1";
 const VERSIE_SLEUTEL = "bindr-schema-v1";
-/** De versie van het schema die alles van de app kan (supabase/schema.sql van 0.7). */
-export const NIEUWSTE = 6;
+/** De versie van het schema die alles van de app kan (supabase/schema.sql van 0.8). */
+export const NIEUWSTE = 7;
 const PAGINA = 1000;
 // Kolommen die pas bestaan na de update van het schema (omgevingen, prijscheck, beurslocatie).
 // Zolang de database ouder is, sturen we ze niet mee: anders weigert de server de hele wijziging.
@@ -180,8 +180,8 @@ export class SupabaseBackend implements Backend {
   /** True als de database nog het schema van fase 1 heeft (geen beurzen en transacties). */
   schemaOud = false;
 
-  /** 6 = aankoopfoto's en privé (0.7), 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
-  versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v >= 2 && v <= 6 ? v : null; })();
+  /** 7 = inbreng van kaarten die al in de app staan (0.8), 6 = aankoopfoto's en privé (0.7), 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
+  versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v >= 2 && v <= 7 ? v : null; })();
 
   private async zekerVersie() {
     if (this.versie == null) await this.laadOmgevingen().catch(() => undefined);
@@ -212,12 +212,13 @@ export class SupabaseBackend implements Backend {
         if (e instanceof Fout && (e.status === 400 || e.status === 404)) return false; // onbekende kolom of tabel
         throw e;
       });
-      const [v4, v5, v6] = await Promise.all([
+      const [v4, v5, v6, v7] = await Promise.all([
         bestaat("artikelen?select=id&limit=1&details=not.is.null&foto=is.null"),
         bestaat("transacties?select=id&limit=1&tegenpartij=is.null").then((ok) => ok && bestaat("exemplaren?select=id&limit=1&foto=is.null")),
         bestaat("aankoopfotos?select=id&limit=1"),
+        bestaat("rpc/schema_versie"),
       ]);
-      this.zetVersie(v4 && v5 && v6 ? 6 : v4 && v5 ? 5 : v4 ? 4 : 3);
+      this.zetVersie(v4 && v5 && v6 ? (v7 ? 7 : 6) : v4 && v5 ? 5 : v4 ? 4 : 3);
       return o;
     } catch (e) {
       if (e instanceof Fout && e.status === 404) {
@@ -253,7 +254,7 @@ export class SupabaseBackend implements Backend {
 
   private artikelKolommen() {
     return (this.versie ?? 0) >= 4
-      ? "id,naam,soort,aantal,prijs,opslag,opmerking,omgeving_id,aankoopprijs,details,cardmarket_id,gewijzigd_op"
+      ? "id,naam,soort,aantal,prijs,opslag,opmerking,omgeving_id,aankoopprijs,details,cardmarket_id,aangemaakt_op,gewijzigd_op"
       : "*";
   }
 
@@ -383,7 +384,12 @@ export class SupabaseBackend implements Backend {
     await this.zekerVersie();
     wijziging = this.schoon(wijziging, "exemplaren");
     if (!ids.length || !Object.keys(wijziging).length) return [];
-    return this.vraag<Exemplaar[]>("PATCH", `exemplaren?id=in.(${ids.join(",")})`, wijziging, { Prefer: "return=representation" });
+    // Per 80: honderden id's in één adres worden te lang voor de server.
+    const uit: Exemplaar[] = [];
+    for (let i = 0; i < ids.length; i += 80) {
+      uit.push(...await this.vraag<Exemplaar[]>("PATCH", `exemplaren?id=in.(${ids.slice(i, i + 80).join(",")})`, wijziging, { Prefer: "return=representation" }));
+    }
+    return uit;
   }
 
   async voegArtikelenToe(rijen: NieuwArtikel[]) {

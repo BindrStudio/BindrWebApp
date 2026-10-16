@@ -1378,3 +1378,8 @@ a.knop { text-decoration: none; }
 .doc-bewijs h2 { font-size: 11pt; }
 .doc-fotos { display: flex; flex-wrap: wrap; gap: 6pt; }
 .doc-fotos img { width: 58mm; max-height: 58mm; object-fit: contain; border: 1px solid #ccc; }
+
+/* 0.7.2: kaarten die al in de app staan uit privé inbrengen. */
+.inbreng-lijst li { display: grid; gap: 6px; }
+.inbreng-lijst .res-tekst { display: grid; gap: 1px; min-width: 0; }
+.inbreng-markt { margin: 0 12px 8px 64px; width: calc(100% - 76px); padding: 8px 10px; border-radius: 10px; border: 1.5px solid var(--lijn); background: var(--wit); font: inherit; }

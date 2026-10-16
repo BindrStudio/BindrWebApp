@@ -62,6 +62,15 @@ export interface ArtikelDetails {
   product?: string | null;     // booster, display, ETB …
   set?: string | null;
   taal?: string | null;
+  /** Met de hand aangepaste aantallen (bijgekocht, kapot, pack geopend): zo klopt de voorraad op een vroegere datum. */
+  tellingen?: Telling[];
+}
+
+/** Eén aanpassing van het aantal buiten de kassa: + bijgekomen, − weg. */
+export interface Telling {
+  op: string;          // ISO-tijd
+  delta: number;       // het verschil in stuks
+  reden?: string | null;
 }
 
 export interface Artikel {
@@ -77,6 +86,7 @@ export interface Artikel {
   foto?: string | null;          // eigen foto (verkleind, als data-URL)
   details?: ArtikelDetails | null;
   cardmarket_id?: number | null; // voor sealed: het product op Cardmarket
+  aangemaakt_op?: string | null;
   gewijzigd_op?: string | null;
 }
 
@@ -166,6 +176,10 @@ export interface Regel {
   vorige_afgeboekt_op?: string | null;  // retour: wanneer het de voorraad verliet (om een retour ongedaan te maken)
   vorige_transactie_id?: string | null; // retour: de transactie waarmee het de voorraad verliet
   van?: string | null;           // retour: uit welke transactie deze regel komt
+  omschrijving?: string | null;  // in, bestaand exemplaar: set, nummer, conditie (voor het bewijs)
+  vorige_aankoopprijs?: number | null; // privé in, bestaand exemplaar: om ongedaan maken terug te zetten
+  vorige_aankoopbron?: string | null;
+  vorige_aankoopdatum?: string | null;
   // Bij een retour: "in" = ons stuk komt terug, "uit" = we geven hun stuk terug (een ruil of inkoop terugdraaien).
 }
 

@@ -1,4 +1,4 @@
--- Bind'r Stock & Beurs App — databaseschema (versie 0.7: aankoopbewijs met foto's, privé)
+-- Bind'r Stock & Beurs App — databaseschema (versie 0.8: kaarten die al in de app staan uit privé inbrengen)
 --
 -- Uitvoeren: Supabase-dashboard › SQL Editor › New query › dit hele bestand plakken › Run.
 -- Het script mag gerust een tweede keer lopen; het overschrijft geen gegevens.
@@ -484,6 +484,7 @@ declare
   n          integer;
   nieuw      jsonb;
   conflicten jsonb := '[]'::jsonb;
+  verworven  text[];  -- kaarten die al gekocht of ingebracht zijn (pas berekend als het nodig is)
   v_soort    text := t->>'soort';
   tid        uuid := (t->>'id')::uuid;
   v_tijd     timestamptz := coalesce((t->>'tijd')::timestamptz, now());
@@ -586,6 +587,34 @@ begin
         insert into public.exemplaren
           select * from jsonb_populate_record(null::public.exemplaren, nieuw)
           on conflict (id) do nothing;
+      elsif v_soort = 'prive' and r->>'exemplaar_id' is not null then
+        -- 0.8: een kaart die al in de app stond, uit privé ingebracht. Ze krijgt haar inbrengwaarde als
+        -- aankoopprijs; nooit twee keer, en enkel als ze nog in voorraad ligt (zoals pasToe in kassa.ts).
+        if verworven is null then
+          verworven := array(
+            select coalesce(x->'nieuw'->>'id', x->>'exemplaar_id')
+              from public.transacties t2, jsonb_array_elements(t2.regels) x
+             where t2.status <> 'ongedaan' and t2.soort <> 'retour' and x->>'richting' = 'in'
+               and (jsonb_typeof(x->'nieuw') = 'object' or (t2.soort = 'prive' and x->>'exemplaar_id' is not null))
+               and not exists (select 1 from jsonb_array_elements(t2.conflicten) c
+                                where c->>'exemplaar_id' = coalesce(x->'nieuw'->>'id', x->>'exemplaar_id')));
+        end if;
+        select * into e from public.exemplaren where id = (r->>'exemplaar_id')::uuid for update;
+        if not found then
+          conflicten := conflicten || jsonb_build_object('exemplaar_id', r->>'exemplaar_id', 'reden', 'onbekend exemplaar');
+        elsif e.status <> 'in voorraad' then
+          conflicten := conflicten || jsonb_build_object('exemplaar_id', r->>'exemplaar_id', 'reden', 'al ' || e.status);
+        elsif e.omgeving_id <> v_omgeving then
+          conflicten := conflicten || jsonb_build_object('exemplaar_id', r->>'exemplaar_id', 'reden', 'van een andere omgeving');
+        elsif e.id::text = any (verworven) then
+          conflicten := conflicten || jsonb_build_object('exemplaar_id', r->>'exemplaar_id', 'reden', 'al gekocht of ingebracht');
+        else
+          update public.exemplaren
+             set aankoopprijs = (r->>'prijs')::numeric, aankoopbron = 'privé',
+                 aankoopdatum = (v_tijd at time zone 'Europe/Brussels')::date
+           where id = e.id;
+          verworven := verworven || e.id::text;
+        end if;
       elsif r->>'artikel_id' is not null then
         update public.artikelen set aantal = aantal + n where id = (r->>'artikel_id')::uuid;
         if not found then
@@ -658,6 +687,15 @@ begin
     else
       if jsonb_typeof(r->'nieuw') = 'object' then
         delete from public.exemplaren where id = (r->'nieuw'->>'id')::uuid and status = 'in voorraad';
+      elsif t.soort = 'prive' and r->>'exemplaar_id' is not null then
+        -- Ingebracht terwijl ze al in de app stond: de vorige aankoopgegevens terug.
+        if not (r->>'exemplaar_id' = any (in_conflict)) then
+          update public.exemplaren
+             set aankoopprijs = nullif(r->>'vorige_aankoopprijs', '')::numeric,
+                 aankoopbron = r->>'vorige_aankoopbron',
+                 aankoopdatum = nullif(r->>'vorige_aankoopdatum', '')::date
+           where id = (r->>'exemplaar_id')::uuid;
+        end if;
       elsif r->>'artikel_id' is not null then
         update public.artikelen set aantal = greatest(0, aantal - n) where id = (r->>'artikel_id')::uuid;
       end if;
@@ -781,6 +819,15 @@ revoke all on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid)
   public.los_conflict_op(uuid, uuid, uuid), public.aanvaard_conflict(uuid, text), public.markeer_prijzen(uuid, jsonb) from public, anon;
 grant execute on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid),
   public.los_conflict_op(uuid, uuid, uuid), public.aanvaard_conflict(uuid, text), public.markeer_prijzen(uuid, jsonb) to authenticated;
+
+-- Welke versie van dit schema draait er? De app vraagt het na het inloggen (0.8 = 8).
+create or replace function public.schema_versie()
+returns integer
+language sql
+stable
+as $$ select 8 $$;
+revoke all on function public.schema_versie() from public, anon;
+grant execute on function public.schema_versie() to authenticated;
 
 -- ── Publieke catalogus (de klantenpagina) ────────────────────────────────────
 -- Weergaven met de rechten van de eigenaar: ze tonen enkel deze kolommen en enkel wat

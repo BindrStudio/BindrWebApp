@@ -95,3 +95,64 @@ test("offline verkopen en wijzigen, later doorsturen; conflict bij dubbele verko
   await proxy.boekTransactie(op.transacties.find((t) => t.id === dubbel.id)!);
   assert.equal((await server.laadAlles()).transacties.length, op.transacties.length);
 });
+
+test("startvoorraad: kaarten die al in de app staan uit privé inbrengen, ongedaan maken, en artikels met de hand bijtellen", async () => {
+  const { regelInbreng } = await import("../src/lib/kassa");
+  const { boeking, dagVan, voorraadOp } = await import("../src/lib/boekhouding");
+  const { standaardExemplaar } = await import("../src/lib/exemplaar");
+  const { server, proxy } = nepServer();
+  const leeg = async () => { for (let i = 0; i < 200 && st.huidig().wachtrij; i++) await wacht(20); await wacht(30); assert.equal(st.huidig().wachtrij, 0, "alles doorgestuurd"); };
+  const gisteren = new Date(Date.now() - 86400000).toISOString();
+  await server.voegExemplarenToe(["AAAA01", "AAAA02", "AAAA03"].map((code) => standaardExemplaar({ code, naam: `Eigen ${code}`, aankoopbron: "eigen collectie", hartjesprijs: 10, opslag: "vitrine" }, gisteren)));
+  await server.voegArtikelenToe([{ naam: "Binder", soort: "eigen product", aantal: 4, prijs: 45, aankoopprijs: 18 }]);
+  await st.__testGebruik(proxy);
+  assert.equal(st.huidig().wachtrij, 0);
+
+  // Gisteren stonden ze al in de app, maar nog niet in de boeken: de voorraad van gisteren telt ze aan € 0.
+  const regels = st.huidig().exemplaren.filter((e) => e.code.startsWith("AAAA")).map((e) => regelInbreng(e, 7, 10, "onze verkoopprijs", 70));
+  const t = st.inbrengBestaand(regels);
+  await leeg();
+  let op = await server.laadAlles();
+  assert.deepEqual(op.exemplaren.filter((e) => e.code.startsWith("AAAA")).map((e) => [e.aankoopprijs, e.aankoopbron]), [[7, "privé"], [7, "privé"], [7, "privé"]]);
+  const geboekt = op.transacties.find((x) => x.id === t.id)!;
+  assert.equal(boeking(geboekt).inbreng, 21);
+  const vandaagStr = dagVan(new Date().toISOString());
+  const gisterenStr = dagVan(gisteren);
+  const eigen = op.exemplaren.filter((e) => e.code.startsWith("AAAA"));
+  assert.equal(voorraadOp(gisterenStr, eigen, [], op.transacties).lijnen.length, 0, "vóór de inbreng nog niet in de zaak");
+  assert.equal(voorraadOp(vandaagStr, eigen, [], op.transacties).totaal, 21);
+  assert.equal(st.magOngedaan(geboekt), true, "vandaag mag het nog");
+  // Nog eens inbrengen (bv. op een tweede gsm): een conflict, geen tweede kost.
+  const nogEens = st.inbrengBestaand([regelInbreng(st.huidig().exemplaren.find((e) => e.code === "AAAA01")!, 9, 10, null, 90)]);
+  assert.equal(nogEens.status, "conflict");
+  await leeg();
+  op = await server.laadAlles();
+  assert.equal(op.transacties.find((x) => x.id === nogEens.id)!.status, "conflict", "ook op de server");
+  assert.equal(op.exemplaren.find((e) => e.code === "AAAA01")!.aankoopprijs, 7);
+  assert.equal(st.magOngedaan(geboekt, new Date(Date.now() + 2 * 86400000).toISOString()), false, "een andere dag niet meer");
+
+  // Ongedaan: de vorige aankoopgegevens komen terug.
+  st.ongedaanMaken(t.id);
+  await leeg();
+  op = await server.laadAlles();
+  assert.deepEqual(op.exemplaren.filter((e) => e.code.startsWith("AAAA")).map((e) => [e.aankoopprijs, e.aankoopbron]), [[null, "eigen collectie"], [null, "eigen collectie"], [null, "eigen collectie"]]);
+  assert.equal(op.transacties.find((x) => x.id === t.id)!.status, "ongedaan");
+
+  // Artikels: met de hand bijtellen komt in de tellingen; een formulier dat al open stond wist ze niet.
+  const binder = st.huidig().artikelen.find((a) => a.naam === "Binder")!;
+  const oudFormulier = { ...(binder.details ?? {}), type: "binder" as const };
+  st.wijzigArtikel(binder.id, { aantal: 9 }, undefined, "bijgekocht");
+  st.wijzigArtikel(binder.id, { naam: "Binder Gengar", details: oudFormulier });
+  await leeg();
+  const a = (await server.laadAlles()).artikelen.find((x) => x.id === binder.id)!;
+  assert.equal(a.aantal, 9);
+  assert.deepEqual(a.details?.tellingen?.map((x) => [x.delta, x.reden]), [[5, "bijgekocht"]]);
+  assert.equal(a.details?.type, "binder");
+  // Op gisteren lagen er 4 (de 5 kwamen er vandaag bij).
+  assert.equal(voorraadOp(gisterenStr, [], [{ ...a, aangemaakt_op: gisteren }], []).totaal, 72);
+
+  // De kopie voor offline: de voorraad en wat recent gebeurde.
+  const k = st.kopieVan({ exemplaren: op.exemplaren, artikelen: [a], beurzen: [], transacties: op.transacties });
+  assert.equal(k.exemplaren.filter((e) => e.code.startsWith("AAAA")).length, 3);
+  assert.equal(st.kopieVan({ exemplaren: [], artikelen: [], beurzen: [], transacties: op.transacties }, Date.now() + 200 * 86400000).transacties.length, 0, "na 120 dagen niet meer in de kopie");
+});

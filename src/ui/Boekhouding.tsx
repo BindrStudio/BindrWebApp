@@ -3,11 +3,11 @@
 // de omzet tegenover de grens van de btw-vrijstelling en de voorraad op een datum.
 // De rekenregels staan in lib/boekhouding.ts; de punten om met een boekhouder na te kijken in de README.
 import { useMemo, useState, type ReactNode } from "react";
-import { bedrijfVan, fotosVan, huidig, kanNieuweBoekhouding, laadFotos, meld, OUD_SCHEMA, useApp, zetBedrijf, zetIngegeven, zetTegenpartij } from "../state";
+import { bedrijfVan, fotosVan, huidig, kanNieuweBoekhouding, laadFotos, meld, openPrive, OUD_SCHEMA, useApp, zetBedrijf, zetIngegeven, zetTegenpartij } from "../state";
 import type { Bedrijf, Beurs, Tegenpartij, Transactie } from "../types";
 import {
   BEWIJS_GROOT, bewijsAdvies, bewijsNummer, borderelLijnen, csv, dagontvangsten, dagVan, dexxterLijnen, EIGEN_LIJN, heeftBewijs,
-  jaaromzet, voorraadOp, type Dag, type Inventaris,
+  jaaromzet, kostenLijnen, voorraadOp, type Dag, type Inventaris,
 } from "../lib/boekhouding";
 import { beursCijfers, CASH_GRENS, rond2 } from "../lib/kassa";
 import { datumKort, euro, vandaag } from "../lib/format";
@@ -59,6 +59,7 @@ export function Boekhouding({ onSluit }: { onSluit: () => void }) {
 
   return (
     <Sheet titel="Boekhouding" onSluit={onSluit} vol>
+      {s.gedeeltelijk && <p className="nakijken klein">Zonder internet: de app kent nu enkel de laatste maanden. De cijfers en de voorraad kloppen pas weer als je online bent.</p>}
       {!bedrijfOk(bedrijf) && (
         <button className="melding-kaart neer boek-gegevens" onClick={() => setGegevens(true)}>
           <Icoon naam="waarschuwing" />
@@ -285,14 +286,7 @@ function KasRapport({ beurs }: { beurs: Beurs }) {
 // ── Eén dag: aankopen ────────────────────────────────────────────────────────
 
 /** De kosten van een dag voor Dexxter: elk een uitgave, met de dagstaat als bijlage. */
-export function kostenLijnen(d: Dag, waar?: string): { omschrijving: string; bedrag: number }[] {
-  const w = waar ? ` (${waar})` : "";
-  return [
-    d.aankopenGeld ? { omschrijving: `Aankoop kaarten van particulieren${w}`, bedrag: d.aankopenGeld } : null,
-    d.aankopenRuil ? { omschrijving: `Inkoop via ruil${w}`, bedrag: d.aankopenRuil } : null,
-    d.inbreng ? { omschrijving: "Inbreng kaarten uit privé (betaald met privémiddelen)", bedrag: d.inbreng } : null,
-  ].filter(Boolean) as { omschrijving: string; bedrag: number }[];
-}
+export { kostenLijnen };
 
 function AankoopDagSheet({ dag, onSluit, onBewijs }: { dag: Dag; onSluit: () => void; onBewijs: (id: string) => void }) {
   const s = useApp();
@@ -581,6 +575,12 @@ function VoorraadOpDatum({ jaar, bedrijf }: { jaar: number; bedrijf: Bedrijf }) 
         <span className="zacht klein">kaarten {euro(som(kaarten))} · artikels {euro(som(artikels))}</span>
       </div>
       {inv.zonderWaarde > 0 && <p className="nakijken klein">{inv.zonderWaarde} {inv.zonderWaarde === 1 ? "lijn heeft" : "lijnen hebben"} geen aankoop- of kostprijs (tellen als € 0). Lege binders en ander materiaal om te verkopen horen ook in de voorraad: vul vóór 31/12 de kostprijs in bij de artikels.</p>}
+      {inv.zonderAankoop.aantal > 0 && (
+        <div className="nakijken klein">
+          <p>{inv.zonderAankoop.aantal} {inv.zonderAankoop.aantal === 1 ? "kaart werd" : "kaarten werden"} zelf toegevoegd, zonder aankoop in de app ({euro(inv.zonderAankoop.waarde)}). Gekocht met een factuur (Cardmarket, winkel)? Dan is dat in orde. Uit je eigen verzameling? Breng ze in, anders staat hun kost nergens.</p>
+          {kanNieuweBoekhouding() && <button className="knop zacht klein" onClick={openPrive}>Privé ⇄ Bind'r › Al in de app</button>}
+        </div>
+      )}
       <ul className="lijst voorraad-lijst">
         {(alles ? inv.lijnen : inv.lijnen.slice(0, 40)).map((l) => (
           <li key={l.id} className="voorraad-lijn">
@@ -590,7 +590,7 @@ function VoorraadOpDatum({ jaar, bedrijf }: { jaar: number; bedrijf: Bedrijf }) 
         ))}
       </ul>
       {!alles && inv.lijnen.length > 40 && <button className="knop zacht breed" onClick={() => setAlles(true)}>Toon alles ({inv.lijnen.length})</button>}
-      <p className="zacht klein">Artikels: het aantal volgt uit de kassa. Pas je een aantal met de hand aan, dan telt de app dat als altijd zo geweest.</p>
+      <p className="zacht klein">Artikels: het aantal volgt uit de kassa en uit wat je met de hand bij- of aftelde (de app onthoudt wanneer). Kaarten die je pas later uit privé inbracht, tellen vanaf die dag.</p>
       <div className="knoppenrij">
         <button className="knop" onClick={() => drukAf(<InventarisDocument inv={inv} bedrijf={bedrijf} />, `Voorraad ${datum}`)}><Icoon naam="printer" maat={18} /> Inventaris (pdf)</button>
         <button className="knop zacht" onClick={() => bewaarCsv(`bindr-voorraad-${datum}.csv`, inventarisCsv(inv))}>CSV</button>
@@ -624,6 +624,14 @@ function Uitleg() {
         <li>Een ruil telt als verkoop van onze kaarten (dagontvangst, aan de afgesproken prijs, met wat de klant bijbetaalt) én aankoop van hun kaarten (kost). De winst is dezelfde als wanneer je enkel het verschil boekt.</li>
         <li>Waarom niet enkel het verschil? Voor de btw is een ruil een levering aan de normale waarde: die telt mee voor de grens van € 25.000. Enkel het verschil boeken toont te weinig omzet. De teller bovenaan telt de ruilwaarde mee.</li>
       </ul>
+      <h3>Starten met je eigen verzameling</h3>
+      <ol>
+        <li>Zet de kaarten gewoon in de app (scannen, zoeken), zonder aankoopprijs: die ken je toch niet meer.</li>
+        <li>Open <em>Profiel › Privé ⇄ Bind'r › Al in de app</em>. Kies wat uit je verzameling komt; laat weg wat je met een factuur kocht (Cardmarket, winkel).</li>
+        <li>De app neemt de marktwaarde (Cardmarket-trend met de conditie, of je verkoopprijs) × je inkooppercentage. Neem een screenshot van de prijsgids als foto.</li>
+        <li>Eén bewijs PB-… met alle kaarten. In Dexxter: één aankoop "van jezelf als particulier" aan dat bedrag (zoals Dexxter het voor spullen van vóór de start uitlegt). Wat op 31/12 nog niet verkocht is, gaat naar de voorraad: zo wordt enkel wat je verkocht een kost.</li>
+        <li>Kaarten van iemand anders (een vriend, een medebeheerder) zijn geen inbreng maar een aankoop bij een particulier: via de kassa, met bewijs.</li>
+      </ol>
       <h3>Privé en Bind'r</h3>
       <ul>
         <li>In <em>Profiel › Privé</em> breng je kaarten uit je eigen verzameling in, of neem je kaarten mee naar privé. Er gaat geen geld over en weer.</li>
@@ -638,7 +646,9 @@ function Uitleg() {
       <h3>Regels die de app volgt</h3>
       <ul>
         <li>Een stuk boven {euro(EIGEN_LIJN, true)} krijgt een eigen lijn in de dagontvangsten.</li>
-        <li>Verbeteren gebeurt met een nieuwe boeking (retour of ongedaan), nooit door iets te wissen. Elke wijziging staat in het logboek.</li>
+        <li>Verbeteren gebeurt met een nieuwe boeking, nooit door iets te wissen. Ongedaan maken kan enkel dezelfde dag; daarna een retour (op de dag dat het gebeurt), zodat een dag die al in Dexxter staat niet meer verandert. Elke wijziging staat in het logboek.</li>
+        <li>De aankoopprijs van een ingekochte, geruilde of ingebrachte kaart staat vast: zo staat ze op het bewijs en in Dexxter.</li>
+        <li>Een kaart voor je eigen verzameling gaat via <em>Naar privé</em>, niet via "uit voorraad" (dat is enkel voor kwijt of beschadigd).</li>
         <li>Geld in of uit de koffer (wisselgeld, een andere stand) is geen omzet.</li>
         <li>Artikels (binders, sealed, 3D-prints) tellen als omzet; hun kosten geef je apart in Dexxter in (bv. de factuur van de binders).</li>
         <li>Alles 10 jaar bewaren, ook de foto's.</li>
@@ -648,6 +658,7 @@ function Uitleg() {
         <li>Is een aankoopbewijs zonder handtekening (lijst, marktwaarde en foto) voldoende voor jouw situatie?</li>
         <li>Aan welke waarde breng je kaarten uit je privéverzameling in, en hoe boek je "naar privé" in Dexxter?</li>
         <li>Met drie: één onderneming of elk apart? Dat bepaalt wie aangifte doet en voor wie de grens van € 25.000 geldt.</li>
+        <li>De eigen verzameling inbrengen als aankoop van jezelf (zoals Dexxter het uitlegt) of anders? Er circuleert ook een andere lezing (privégoederen kunnen niet "verkocht" worden aan je eigen eenmanszaak): laat dit zeker bevestigen.</li>
         <li>Moet je ook dagen zonder verkoop (€ 0) ingeven in Dexxter?</li>
       </ul>
       <p className="zacht klein">Dit is geen boekhoudkundig of fiscaal advies. De app maakt de cijfers en documenten; je boekhouder beslist hoe ze geboekt worden.</p>

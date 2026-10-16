@@ -25,8 +25,20 @@ export function metVitrineSinds(oud: Exemplaar, nieuw: Exemplaar, nu = new Date(
   return nieuw;
 }
 
-export function standaardArtikel(r: NieuwArtikel): Artikel {
-  return { id: uuid(), soort: "sealed", aantal: 0, prijs: null, opslag: "vitrine", opmerking: null, ...r } as Artikel;
+export function standaardArtikel(r: NieuwArtikel, nu = new Date().toISOString()): Artikel {
+  return { id: uuid(), soort: "sealed", aantal: 0, prijs: null, opslag: "vitrine", opmerking: null, aangemaakt_op: nu, ...r } as Artikel;
+}
+
+/**
+ * Het aantal van een artikel met de hand aanpassen (bijgekocht, kapot, pack geopend): het verschil komt
+ * in `details.tellingen`, zodat de voorraad op een vroegere datum (31 december) blijft kloppen.
+ */
+export function metTelling(a: Artikel, nieuwAantal: number, reden: string | null = null, op = new Date().toISOString()): Pick<Artikel, "aantal" | "details"> {
+  const aantal = Math.max(0, Math.round(nieuwAantal));
+  const delta = aantal - a.aantal;
+  const details = a.details ?? {};
+  if (!delta) return { aantal, details };
+  return { aantal, details: { ...details, tellingen: [...(details.tellingen ?? []), { op, delta, reden }] } };
 }
 
 export const inVoorraad = (e: Exemplaar) => e.status === "in voorraad";

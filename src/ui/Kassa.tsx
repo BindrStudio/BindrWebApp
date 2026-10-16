@@ -795,7 +795,7 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar, onRegel, bezet = [] }: {
 // ── Afrekenen ────────────────────────────────────────────────────────────────
 
 function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Transactie, wisselgeld: number | null) => void }) {
-  const { mandje, instellingen } = useApp();
+  const { mandje, instellingen, transacties } = useApp();
   const regels = mandje.regels;
   const n = netto(regels);
   const teVeelCash = Math.abs(n) > CASH_GRENS;
@@ -831,6 +831,10 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
     betaling = c != null && c >= 0 && c <= n ? { cash: Math.round(c * 100) / 100, sumup: Math.round((n - c) * 100) / 100 } : null;
   }
   const cashTeHoog = !!betaling && Math.abs(betaling.cash) > CASH_GRENS;
+  // Meer cash uitbetalen dan er in de koffer zit? Dan komt er eigen geld bij: dat boek je best eerst als kas.
+  const beurs = actieveBeurs();
+  const inKoffer = beurs ? beursCijfers(beurs, transacties.filter((t) => t.beurs_id === beurs.id)).kasVerwacht : null;
+  const kofferTeKort = !!betaling && betaling.cash < 0 && inKoffer != null && -betaling.cash > inKoffer + 0.001;
   const g = getal(gegeven);
   const cashTeOntvangen = betaling && betaling.cash > 0 ? betaling.cash : 0;
   const wisselgeld = cashTeOntvangen && g != null && g >= cashTeOntvangen ? Math.round((g - cashTeOntvangen) * 100) / 100 : null;
@@ -901,6 +905,7 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
         </>
       )}
       {n === 0 && <p className="zacht">Er gaat geen geld over en weer.</p>}
+      {kofferTeKort && <p className="nakijken klein">Volgens de app zit er nog {euro(inKoffer!)} in de cashkoffer. Leg je er eigen geld bij? Boek dat eerst bij Kas › Geld erbij, anders klopt de kas straks niet.</p>}
       {cashTeHoog && <p className="nakijken">Cash kan hoogstens {euro(CASH_GRENS, true)} zijn (wettelijke grens). {n > 0 ? "Laat de rest met SumUp of een overschrijving betalen." : "Betaal met een overschrijving."}</p>}
 
       {koopt && !nieuw && <p className="zacht klein">Foto's en het aankoopbewijs kunnen pas na de update van de database. Neem tot dan een foto met je gsm.</p>}

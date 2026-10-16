@@ -2,14 +2,15 @@
 // (artikels, historiek, inzichten, boekhouding, je account) staat in Profiel.
 import { useState, type ReactNode } from "react";
 import {
-  importeerTestset, offlineKlaarzetten, openLabels, sluit, useApp, vernieuwPrijsgids, wisDemo, zetInstagram, zetInstellingen, zetZichtbaarVoorKlanten,
+  backup, importeerTestset, meld, offlineKlaarzetten, openLabels, sluit, useApp, vernieuwPrijsgids, wisDemo, zetInstagram, zetInstellingen, zetZichtbaarVoorKlanten,
 } from "../state";
 import { APP_VERSIE, klantUrl } from "../config";
-import { datumKort, euro, getal } from "../lib/format";
+import { datumKort, euro, getal, vandaag } from "../lib/format";
 import { STANDAARD_INSTELLINGEN, type Drempel } from "../lib/pricing";
 import { PCT_MAX, PCT_MIN } from "../lib/bod";
 import { Icoon, QrBeeld, Sheet } from "./common";
 import { BedrijfVelden } from "./Boekhouding";
+import { bewaarBestand } from "./Afdruk";
 
 const PCTS = Array.from({ length: (PCT_MAX - PCT_MIN) / 5 + 1 }, (_, i) => PCT_MIN + i * 5);
 
@@ -44,6 +45,15 @@ export function Instellingen() {
         </Groep>
 
         <Offline />
+
+        <Groep titel="Back-up">
+          <p className="groep-uitleg">De gratis Supabase maakt zelf geen back-ups. Download dit bestand elke maand en bewaar het samen met de pdf's van de boekhouding: die moet je 10 jaar bijhouden. De foto's van aankopen staan in de dagstaten (pdf).</p>
+          <button className="rij-knop" onClick={() => {
+            const b = backup();
+            bewaarBestand(`bindr-backup-${vandaag()}.json`, JSON.stringify(b));
+            meld(`Back-up gedownload: ${b.aantallen.exemplaren} exemplaren, ${b.aantallen.transacties} transacties`);
+          }}><Icoon naam="doos" maat={18} /> Back-up downloaden</button>
+        </Groep>
 
         <Groep titel="Testen">
           <p className="groep-uitleg">

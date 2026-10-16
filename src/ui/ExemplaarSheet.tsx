@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { bevestigLabel, kanNieuweBoekhouding, OUD_SCHEMA, openExemplaar, openToevoegen, print, sluit, useApp, wijzig, zetHartje } from "../state";
+import { bevestigLabel, kanNieuweBoekhouding, meld, OUD_SCHEMA, openExemplaar, openToevoegen, print, prive, sluit, useApp, wijzig, zetHartje } from "../state";
 import type { Exemplaar } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
 import { dagenGeleden, datumKort, euro, getal } from "../lib/format";
@@ -18,6 +18,8 @@ import { VerkopenBlok } from "./Graded";
 import { gradedZoektekst } from "../lib/markt";
 import { FotoKiezer } from "./FotoKiezer";
 import { BewijsSheet, waarGekocht } from "./Boekhouding";
+import { verwervingen } from "../lib/boekhouding";
+import { regelUit } from "../lib/kassa";
 import { bewijsNummer, heeftBewijs } from "../lib/boekhouding";
 
 export function ExemplaarSheet({ id }: { id: string }) {
@@ -143,8 +145,8 @@ function EigenFoto({ ex, geen }: { ex: Exemplaar; geen: boolean }) {
 function Herkomst({ ex }: { ex: Exemplaar }) {
   const { transacties, beurzen } = useApp();
   const [bewijs, setBewijs] = useState(false);
-  const t = transacties.find((x) => x.status !== "ongedaan" && x.regels.some((r) => r.richting === "in" && r.nieuw?.id === ex.id));
-  const r = t?.regels.find((x) => x.nieuw?.id === ex.id);
+  const t = useMemo(() => verwervingen(transacties).get(ex.id), [transacties, ex.id]);
+  const r = t?.regels.find((x) => x.richting === "in" && (x.nieuw?.id === ex.id || x.exemplaar_id === ex.id));
   const soort = t ? (t.soort === "ruil" ? "Geruild" : t.soort === "prive" ? "Uit privé ingebracht" : "Ingekocht") : null;
   return (
     <section className="blok herkomst">
@@ -324,6 +326,10 @@ function LabelBlok({ ex, printer }: { ex: Exemplaar; printer: string | null }) {
 }
 
 function Bewerk({ ex }: { ex: Exemplaar }) {
+  const { transacties, gedeeltelijk } = useApp();
+  // Ingekocht, geruild of ingebracht: de aankoopprijs is wat er op het bewijs staat (en in Dexxter).
+  // Zonder internet kent de app enkel de laatste maanden: dan liever niets aanpassen.
+  const via = useMemo(() => verwervingen(transacties).get(ex.id), [transacties, ex.id]) ?? (gedeeltelijk ? true : undefined);
   const [v, setV] = useState({
     naam: ex.naam, conditie: ex.conditie || "NM", taal: ex.taal, variant: ex.variant,
     aankoopprijs: ex.aankoopprijs?.toString() ?? "", aankoopbron: ex.aankoopbron ?? "",
@@ -333,7 +339,7 @@ function Bewerk({ ex }: { ex: Exemplaar }) {
   const bewaar = () => {
     void wijzig(ex.id, {
       naam: v.naam.trim() || ex.naam, conditie: v.conditie, taal: v.taal, variant: v.variant,
-      aankoopprijs: getal(v.aankoopprijs), aankoopbron: v.aankoopbron.trim() || null, opmerking: v.opmerking.trim() || null,
+      ...(via ? {} : { aankoopprijs: getal(v.aankoopprijs), aankoopbron: v.aankoopbron.trim() || null }), opmerking: v.opmerking.trim() || null,
       ...(ex.opslag === "stockdoos" ? { verkoopprijs: getal(v.verkoopprijs) } : {}),
     }, "Wijzigingen bewaard", true);
   };
@@ -349,8 +355,14 @@ function Bewerk({ ex }: { ex: Exemplaar }) {
       </Veld>
       <Veld label="Variant"><Kiezer waarde={v.variant} opties={VARIANTEN} onKies={(c) => setV({ ...v, variant: c })} /></Veld>
       {ex.opslag === "stockdoos" && <Veld label="Waarde / verkoopprijs (€)"><input inputMode="decimal" value={v.verkoopprijs} onChange={(e) => setV({ ...v, verkoopprijs: e.target.value })} /></Veld>}
-      <Veld label="Aankoopprijs (€)"><input inputMode="decimal" value={v.aankoopprijs} onChange={(e) => setV({ ...v, aankoopprijs: e.target.value })} /></Veld>
-      <Veld label="Aankoopbron"><input value={v.aankoopbron} onChange={(e) => setV({ ...v, aankoopbron: e.target.value })} placeholder="beurs, particulier, ruil…" /></Veld>
+      {via ? (
+        <p className="zacht klein">Aankoopprijs {euro(ex.aankoopprijs)}: zo staat ze op het bewijs (en in Dexxter), dus die pas je hier niet aan.</p>
+      ) : (
+        <>
+          <Veld label="Aankoopprijs (€)"><input inputMode="decimal" value={v.aankoopprijs} onChange={(e) => setV({ ...v, aankoopprijs: e.target.value })} /></Veld>
+          <Veld label="Aankoopbron"><input value={v.aankoopbron} onChange={(e) => setV({ ...v, aankoopbron: e.target.value })} placeholder="Cardmarket, winkel, pack opening…" /></Veld>
+        </>
+      )}
       <Veld label="Opmerking"><textarea rows={2} value={v.opmerking} onChange={(e) => setV({ ...v, opmerking: e.target.value })} /></Veld>
       <button className="knop" onClick={bewaar}>Bewaar</button>
     </section>
@@ -359,13 +371,19 @@ function Bewerk({ ex }: { ex: Exemplaar }) {
 
 function UitVoorraad({ ex }: { ex: Exemplaar }) {
   const [open, setOpen] = useState(false);
+  const kan = kanNieuweBoekhouding(useApp());
   if (ex.status !== "in voorraad") return null;
   if (!open) return <button className="knop zacht rood" onClick={() => setOpen(true)}><Icoon naam="uit" maat={18} /> Uit voorraad</button>;
+  const weg = (reden: string) => { void wijzig(ex.id, { status: "weg", afgeboekt_op: new Date().toISOString(), opmerking: [ex.opmerking, reden].filter(Boolean).join(" · ") }, "Uit de voorraad gehaald", true); sluit(); };
   return (
     <div className="uit-keuze">
-      <p className="zacht">Verkopen en ruilen gaan via de kassa (In het mandje). Hier haal je een kaart uit de voorraad zonder verkoop: kwijt, beschadigd of voor de eigen collectie.</p>
+      <p className="zacht">Verkopen en ruilen gaan via de kassa. Hier haal je een kaart uit de voorraad zonder verkoop. Voor je eigen verzameling: kies <strong>Naar privé</strong> (dan klopt de boekhouding).</p>
       <div className="knoppenrij">
-        <button className="knop zacht rood" onClick={() => { void wijzig(ex.id, { status: "weg", afgeboekt_op: new Date().toISOString() }, "Uit de voorraad gehaald", true); sluit(); }}>Uit voorraad halen</button>
+        <button className="knop zacht" disabled={!kan} onClick={() => {
+          try { prive([], [regelUit(ex, ex.aankoopprijs ?? 0)]); meld("Naar privé, aan de aankoopprijs"); sluit(); } catch (e) { meld(e instanceof Error ? e.message : String(e), "fout"); }
+        }}>Naar privé</button>
+        <button className="knop zacht rood" onClick={() => weg("kwijt")}>Kwijt</button>
+        <button className="knop zacht rood" onClick={() => weg("beschadigd")}>Beschadigd</button>
         <button className="tekstknop" onClick={() => setOpen(false)}>Annuleer</button>
       </div>
     </div>

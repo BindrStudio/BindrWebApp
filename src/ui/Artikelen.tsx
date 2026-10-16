@@ -194,7 +194,7 @@ export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | n
   const zetAantal = (delta: number) => {
     if (!a) return;
     const aantal = Math.max(0, a.aantal + delta);
-    wijzigArtikel(a.id, { aantal }, `Nog ${aantal} op voorraad`);
+    wijzigArtikel(a.id, { aantal }, `Nog ${aantal} op voorraad`, delta > 0 ? "bijgeteld" : "afgeteld");
   };
 
   return (
@@ -210,6 +210,7 @@ export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | n
               <button className="knop zacht klein" onClick={() => zetAantal(-1)} disabled={!a.aantal} aria-label="Eén minder op voorraad">−1</button>
               <button className="knop zacht klein" onClick={() => zetAantal(1)} aria-label="Eén meer op voorraad">+1</button>
             </div>
+            <p className="zacht klein">Bijgekocht of kapot: tel hier bij of af. De app onthoudt wanneer, zodat de voorraad op 31/12 klopt.</p>
           </div>
           {a.aantal > 0 && (
             <button className="knop groot artikel-mandje" onClick={() => { inMandje(regelArtikelUit(a)); meld(`${a.naam} in het mandje`, "ok", { label: "Naar kassa", doe: () => naarTab("kassa") }); sluit(); }}>

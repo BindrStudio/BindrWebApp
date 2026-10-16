@@ -3,7 +3,8 @@
 // aanbiedingen in België en Nederland. Enkel de publieke prijsgids, geen scraping.
 import { KAART, kies, SET } from "./grapjes";
 import type { Prijsgids } from "./prices";
-import { prijsVoor } from "./pricing";
+import { prijsVoor, voorstelVoor, type Instellingen } from "./pricing";
+import type { Exemplaar } from "../types";
 
 export type Richting = "hard-op" | "op" | "stabiel" | "neer" | "hard-neer";
 
@@ -164,4 +165,20 @@ export function schattingUitVerkopen(verkopen: { datum: string; prijs: number }[
   const m = gewogen.length / 2;
   const med = gewogen.length % 2 ? gewogen[Math.floor(m)] : (gewogen[m - 1] + gewogen[m]) / 2;
   return Math.round(med * 100) / 100;
+}
+
+/**
+ * De marktwaarde van een kaart die al in de app staat (om ze uit privé in te brengen): de
+ * Cardmarket-trend met de conditie, bij een slab de zelf opgezochte verkopen, anders onze verkoopprijs.
+ */
+export function marktwaardeVan(e: Exemplaar, gids: Prijsgids | null, inst: Instellingen): { waarde: number; bron: string } | null {
+  if (e.soort === "slab" && e.verkopen?.length) {
+    const s = schattingUitVerkopen(e.verkopen);
+    if (s) return { waarde: s, bron: "laatste verkopen (zelf opgezocht)" };
+  }
+  const v = voorstelVoor(e, gids, inst);
+  if (v) return { waarde: Math.round(v.referentie * v.factor * 100) / 100, bron: `Cardmarket trend${e.conditie && e.conditie !== "NM" ? `, ${e.conditie}` : ""}` };
+  const eigen = e.opslag === "vitrine" ? e.hartjesprijs ?? e.verkoopprijs : e.verkoopprijs ?? e.hartjesprijs;
+  if (eigen != null && eigen > 0) return { waarde: eigen, bron: "onze verkoopprijs" };
+  return null;
 }
