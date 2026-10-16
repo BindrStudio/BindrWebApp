@@ -2,7 +2,7 @@
 // en Firefox, op gsm, tablet (Galaxy Tab S8 rechtop en liggend) en computer:
 // - de klantenpagina: start (met de etalage), de catalogi, een kaart openen, Ontwerp je binder (proef op de
 //   binder tekenen en een aanvraag versturen), privacy en voorwaarden;
-// - het beheer in de demo: de tabs, Instellingen vanuit Profiel, Profiel › Aanvragen;
+// - het beheer in de demo: de tabs en Instellingen vanuit Profiel;
 // - inloggen tegen een nagebootste Supabase: wachtwoord kiezen, pincode (PBKDF2 in de browser), slot.
 // Overal: geen JavaScript-fouten en nooit zijwaarts scrollen (dan zoomt een gsm of tablet de pagina uit).
 //   npm run serve

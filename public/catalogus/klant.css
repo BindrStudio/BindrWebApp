@@ -243,7 +243,10 @@ body { overflow-x: hidden; }
 .klant-zoekrij .zoekbalk input { padding-left: 2px; }
 .sorteer { position: relative; display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 46px; min-height: 46px; padding: 0 12px; border-radius: 13px; background: var(--room); box-shadow: var(--schaduw); color: var(--zee-donker); cursor: pointer; }
 .sorteer-tekst { display: none; font-size: 14px; font-weight: 600; color: var(--inkt); }
-.sorteer select { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; font-size: 16px; }
+/* De onzichtbare keuzelijst ligt over de knop. Safari geeft een select een minimumbreedte (de langste keuze):
+   zonder appearance: none en overflow: hidden stak ze 50 px buiten het scherm op een iPhone. */
+.sorteer { overflow: hidden; }
+.sorteer select { position: absolute; inset: 0; width: 100%; min-width: 0; max-width: 100%; opacity: 0; cursor: pointer; font-size: 16px; -webkit-appearance: none; appearance: none; }
 .sorteer:focus-within { outline: 3px solid var(--zee-donker); outline-offset: 2px; }
 @media (min-width: 520px) { .sorteer-tekst { display: inline; } }
 
