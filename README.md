@@ -5,7 +5,7 @@ De app van Bind'r voor de stand op beurzen: elke kaart met een eigen QR-label, o
 - **Klantenpagina:** https://bindrstudio.github.io/BindrWebApp/ (helemaal onderaan een kleine link *Beheer* voor ons)
 - **Beheer:** https://bindrstudio.github.io/BindrWebApp/beheer.html
 
-Versie 0.11 · oktober 2026
+Versie 0.12 · oktober 2026
 
 ## Wat de app kan
 
@@ -37,8 +37,9 @@ Versie 0.11 · oktober 2026
 - **Beurzen plannen** enkel in *Profiel › Beurzen* (naam, datum, plaats, uren en de website van de beurs; aanpassen of schrappen met een tik). Klanten zien ze op de startpagina, de volgende groot als ticket met een knop *Route*. Op de dag zelf start je de beurs in de kassa met de cashkoffer.
 - Tijdens een beurs zie je dat meteen (groene stip) en bekijk je de **cijfers van de beurs**: verkocht per soort (kaarten, slabs, binders, 3D-prints, sealed), ingekocht, ruil en de laatste transacties.
 - Het mandje heeft twee kanten: **Uit onze voorraad** (scannen, zoeken, artikels) en **Van de klant**. *Zoek* toont meteen de hele voorraad, het laatst toegevoegde eerst (filter Catalogus of Vault), en je kan typen om te zoeken.
-- **Inkopen en ruilen zoals aan de stand:** zoek elke kaart van de klant op, kijk naar de marktwaarde (of de eBay-verkopen bij graded) en vul ze in. Daarna kies je een percentage met de schuifknop (65 tot 95%, per 5%), rond je af naar boven of onder (of typ een eigen bedrag), en zie je per kaart wat we echt betalen. Zo komt het ook in de boekhouding.
-- **Per kaart een ander percentage:** tik *Per kaart* en geef een kaart met − en + een eigen percentage (bv. de vintage kaart 65% terwijl de rest op 80% staat). De grote schuifknop verdwijnt dan; het algemene percentage zet je met − en +, en je ziet wat het percentage van alles samen is.
+- **Inkopen en ruilen zoals aan de stand:** zoek elke kaart van de klant op, kijk naar de marktwaarde (of de eBay-verkopen bij graded) en vul ze in. Daarna kies je een percentage met de schuifknop (65 tot 95%, per 5%), tik je een afronding aan (naar onder, exact of naar boven), en zie je per kaart wat we echt betalen. Zo komt het ook in de boekhouding.
+- **Toch een ander bedrag?** Tik nog eens op de afronding die aan staat en typ het bedrag. Het vervangt dan het vakje *exact* (met *eigen* erop); leeg maken zet het terug.
+- **Per kaart een ander percentage:** tik *Per kaart*. De schuifknop verdwijnt en elke kaart staat op het standaardpercentage (inkoop 70%, ruil 80%); zet een kaart met − en + hoger of lager (bv. de vintage kaart 65%). Bovenaan staat in het rood wat dat samen is: *Samen 72% van € 720 = € 516*.
 - Het oogje *Inkoop* toont onze aankoopprijs en marge per kaart (enkel op jouw gsm, standaard uit).
 - Betalen cash, SumUp, beide of per overschrijving, met wisselgeld. **Cash kan hoogstens € 3.000** per verkoop of aankoop (wettelijke grens): daarboven SumUp of een overschrijving.
 - **Aankoopbewijs bij inkoop en ruil, zonder formulier:** de lijst in de app (elke kaart met code, marktwaarde met bron en datum, percentage en wat we betaalden) is het bewijs. Neem bij het afrekenen één foto van de gekochte kaarten en vraag een voornaam. Pas vanaf € 250 raadt de app ook de gemeente en een handtekening op de gsm aan (of betaal per overschrijving). Niets is verplicht aan de stand: wat ontbreekt, vul je later aan in Boekhouding.
@@ -76,10 +77,10 @@ In *Profiel › Boekhouding*. De app houdt alles bij; jij geeft de bedragen over
 In *Profiel › Inzichten*, voor altijd, dit jaar, de laatste 30 dagen of één beurs, in euro of in stuks: de populairste Pokémon (op een podium), de sets die het best verkopen, prijsklassen, wat verkoopt (kaarten, slabs, binders, sealed), talen en condities, de drukste uren, de beste beurzen, de duurste verkopen, hoe lang iets gemiddeld ligt voor het verkocht is, en wat al lang in de catalogus ligt.
 
 ### Klantenpagina
-- **Start:** wie we zijn (de kaft van een zip-binder zoals een Vault X: rits rondom, rug zonder ringen, stiksel, en een titel die erin gegraveerd wordt), de **etalage** (foto's van ons werk die rond de kaft zweven en om beurten omdraaien), wat je bij ons vindt (een binderpagina met hoesjes die langs de zijkant openen: kaarten, binders, 3D-prints, sealed) en onze komende beurzen (de volgende als ticket met uren, *Route* en de website). Daaronder *Over Bind'r*, Instagram en Facebook.
-- **Etalage** (*Profiel › Etalage*): Instagram laat geen foto's ophalen zonder een app bij Meta, dus zet je ze hier zelf: bewaar een foto van Instagram op je gsm, kies ze hier en plak de link naar het bericht erbij. Zolang de etalage leeg is, zweven de foto's van onze binders.
+- **Start:** één zin over wat we doen, twee knoppen (*Bekijk de binders*, *Ontwerp je binder*) en ernaast onze binders als een **waaier**: de middelste staat vooraan, om de paar seconden schuift de volgende naar voren met een glans en een sterretje. Tik op een binder opzij of veeg om te wisselen; tik op de voorste om naar de binders of het Instagram-bericht te gaan. Daaronder *Wat je bij ons vindt* (vier vakken: kaarten, binders, 3D-prints, sealed, met een paar foto's), onze komende beurzen (de volgende als ticket met uren, *Route* en de website) en *Over Bind'r*. Op de achtergrond zweven een paar belletjes en lichten sterretjes om beurten op, zoals in ons logo (niet als je toestel minder beweging vraagt).
+- **Etalage** (*Profiel › Etalage*): Instagram laat geen foto's ophalen zonder een app bij Meta, dus zet je ze hier zelf: bewaar een foto van Instagram op je gsm, kies ze hier en plak de link naar het bericht erbij. De waaier toont de foto's uit de etalage en die van onze binders (*Profiel › Artikels*). Zijn het er samen minder dan drie, dan staan er **voorbeeldbinders** in de kleuren van Vault X (met sterretjes en belletjes gegraveerd), nooit door elkaar met echte foto's. Een binder recht van voren op een rustige achtergrond staat het mooist.
 - **Vier catalogi** (`#kaarten`, `#binders`, `#3d`, `#sealed`): op de gsm wissel je met de balk onderaan, op een groot scherm met de tabs bovenaan. Kaarten met zoeken, filters (ook per set met het logo) en sorteren; binders groot in beeld, ook die niet uitgestald liggen ("vraag ernaar"), met al hun foto's.
-- **Ontwerp je binder** (`#ontwerp`): een kort formulier: wat de klant wil, zijn idee met tot drie afbeeldingen (foto, schets, screenshot), welke binder, *voor toploaders* ja of nee, de kleur van de binder, naam en e-mail. Heeft hij al een eigen ontwerp, dan zet hij de proef aan: zijn zwart-wit SVG of PNG op een foto van een echte zip-binder in de gekozen kleur, tot aan het stiksel (kleur van de gravure, groter of kleiner, verslepen; een indicatie, geen proef). De aanvraag komt in *Profiel › Aanvragen* met het bestand en het voorbeeld, en met een sleutel van Web3Forms ook in jullie mailbox (zie *Eenmalig klaarzetten*). Afgewerkt of spam? *Wissen* onderaan de aanvraag (dan zijn ook de afbeeldingen weg).
+- **Ontwerp je binder** (`#ontwerp`): een kort formulier: wat de klant wil, zijn idee met tot drie afbeeldingen (foto, schets, screenshot), welke binder, *voor toploaders* ja of nee, de kleur van de binder, naam en e-mail. Heeft hij al een eigen ontwerp, dan zet hij de proef aan: zijn zwart-wit SVG of PNG op een foto van een echte zip-binder in de gekozen kleur, standaard tot aan het stiksel (groter of kleiner, verslepen; een indicatie, geen proef). Een lasergravure is altijd zwart. De kleuren volgen de basiskleuren van Vault X (zwart, koningsblauw, oceaanblauw, bosgroen, rood, geel, roze, paars), gemeten op hun productfoto's. De aanvraag komt in *Profiel › Aanvragen* met het bestand en het voorbeeld, en met een sleutel van Web3Forms ook in jullie mailbox (zie *Eenmalig klaarzetten*). Afgewerkt of spam? *Wissen* onderaan de aanvraag (dan zijn ook de afbeeldingen weg).
 - **Onderaan elke pagina:** onze gegevens (naam, adres, ondernemingsnummer, e-mail), dat we onder de bijzondere vrijstellingsregeling voor kleine ondernemingen vallen (geen btw), Instagram en Facebook, en de links *Privacy en cookies* (`#privacy`), *Verkoopvoorwaarden* (`#voorwaarden`: bestellen, prijzen, betalen, levering, herroepen (niet voor een binder op maat), garantie, lasergravure die licht kan verschillen, klachten) en, klein, *Beheer*. De gegevens vul je in bij *Instellingen › Klantencatalogus › Wettelijke gegevens*; zolang ze ontbreken, staat er enkel Bind'r. Laat de teksten één keer nalezen door een boekhouder of jurist.
 - Werkt op gsm, tablet (ook een Galaxy Tab rechtop en liggend) en computer, in Safari, Chrome, Samsung Internet en Firefox. De pagina scrolt nooit zijwaarts (anders zoomt een tablet uit en verspringt alles).
 - De QR aan de stand (*Instellingen › Klantencatalogus*) opent meteen de kaarten.
@@ -139,7 +140,7 @@ npm run e2e        # de testcase beursdag in de echte app, inloggen (wachtwoord,
 node tests/e2e/browsers.cjs   # klantenpagina, beheer en inloggen in Chromium, WebKit (Safari) en Firefox, op gsm, tablet en computer
 ```
 
-`public/app.js`, `public/catalogus/app.js` en `public/sw.js` staan mee in git: **voer `npm run build` uit voor je commit**. De workflow *Controle* kijkt dat na, en test daarna de app in Chrome (ook als Galaxy Tab), Safari (WebKit, iPhone en iPad) en Firefox, plus de volledige doorloop; de screenshots staan bij de run.
+`public/app.js`, `public/catalogus/app.js` en `public/sw.js` staan mee in git: **voer `npm run build` uit voor je commit**. De workflow *Controle* kijkt dat na, en test daarna de app in Chrome (ook als Galaxy Tab en MacBook Air), Safari (WebKit, iPhone en iPad) en Firefox, plus de volledige doorloop; de screenshots staan bij de run.
 
 ```
 src/
@@ -150,10 +151,12 @@ src/
   gedeeld/   wat beide pagina's gebruiken (de setkiezer)
   state.ts   centrale toestand, acties, omgevingen en de offline wachtrij
 public/      wat online komt (index.html = klanten, beheer.html, bundels, sw.js, data/, vendor/, img/)
-scripts/     build, tests, catalogus (TCGdex), prijsgids en sealed (Cardmarket)
+scripts/     build, tests, catalogus (TCGdex), prijsgids en sealed (Cardmarket), voorbeeldbinders
 supabase/    databaseschema
 tests/       unit tests en de e2e-doorlopen
 ```
+
+**Voorbeeldbinders** (`public/img/voorbeeld/`): `node scripts/voorbeeldbinders.cjs` legt de gravure `scripts/data/voorbeeldgravure.svg` op de foto van de zip-binder in vijf kleuren, met dezelfde code als de proef bij *Ontwerp je binder*, en zegt hoe je er webp van maakt.
 
 **Automatisch:** *App publiceren* (bij elke push en elke nacht: prijsgids en sealed-lijst van Cardmarket ophalen en `public/` online zetten) en *Kaartencatalogus bijwerken* (elke maandag uit TCGdex, in een job zonder schrijfrechten).
 

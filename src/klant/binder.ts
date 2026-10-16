@@ -1,36 +1,35 @@
 // Een ontwerp van een klant op een echte zip-binder tonen: een foto van een binder (logo eraf), in elke
-// kleur omgekleurd, met het ontwerp tot aan het stiksel, zoals een lasergravure (inkt, wat structuur van de
-// binder erdoor en een donkere brandrand). Enkel een indicatie. Alles gebeurt in de browser; er gaat niets
+// kleur omgekleurd, met het ontwerp tot aan het stiksel, zoals een lasergravure (altijd zwart, met wat
+// structuur van de binder erdoor en een donkere brandrand). Enkel een indicatie. Alles gebeurt in de browser; er gaat niets
 // weg tot de klant de aanvraag verstuurt. Dezelfde aanpak als de interne gravure-preview van Bind'r.
 
 export interface BinderKleur { id: string; naam: string; kleur: string; foto?: boolean }
 
-/** De kleuren van de binder. Turkoois is de foto zelf; de rest is omgekleurd (een benadering). */
+/**
+ * De basiskleuren van de Vault X 9-Pocket Exo-Tec Zip Binder (oktober 2026). Elke kleur is de gemiddelde kleur
+ * van het midden van de kaft op de productfoto van Vault X (vaultx.com, zelfde studiolicht voor alle kleuren),
+ * op dezelfde manier gemeten als REF op onze foto. De foto wordt naar die kleur omgekleurd: een benadering.
+ */
 export const BINDER_KLEUREN: BinderKleur[] = [
-  { id: "turkoois", naam: "Turkoois", kleur: "#3f8b8d", foto: true },
-  { id: "zwart", naam: "Zwart", kleur: "#26262a" },
-  { id: "koningsblauw", naam: "Koningsblauw", kleur: "#24408f" },
-  { id: "oceaanblauw", naam: "Oceaanblauw", kleur: "#2f7fb5" },
-  { id: "groen", naam: "Groen", kleur: "#23603c" },
-  { id: "rood", naam: "Rood", kleur: "#ad2226" },
-  { id: "geel", naam: "Geel", kleur: "#e2ac2a" },
-  { id: "roze", naam: "Roze", kleur: "#d9538c" },
-  { id: "paars", naam: "Paars", kleur: "#5f3b95" },
+  { id: "zwart", naam: "Zwart", kleur: "#212121" },          // Signature Black
+  { id: "koningsblauw", naam: "Koningsblauw", kleur: "#233349" }, // Royal Blue (donker, bijna marine)
+  { id: "oceaanblauw", naam: "Oceaanblauw", kleur: "#078d8e" },   // Ocean Blue (petrol)
+  { id: "bosgroen", naam: "Bosgroen", kleur: "#2d443a" },         // Forest Green
+  { id: "rood", naam: "Rood", kleur: "#ae242c" },                 // Fire Red
+  { id: "geel", naam: "Geel", kleur: "#d3a611" },                 // Sunrise Yellow
+  { id: "roze", naam: "Roze", kleur: "#e9aeaf" },                 // Just Pink (lichtroze)
+  { id: "paars", naam: "Paars", kleur: "#a97fd5" },               // Just Purple (lila)
 ];
 
-export interface Inkt { id: string; naam: string; kleur: string }
-export const INKTEN: Inkt[] = [
-  { id: "wit", naam: "Wit", kleur: "#f1efea" },
-  { id: "grijs", naam: "Grijs", kleur: "#9b9b98" },
-  { id: "zwart", naam: "Zwart", kleur: "#1b1b1d" },
-];
+/** Een lasergravure op deze binders is altijd zwart. */
+export const GRAVUREKLEUR = "#141414";
 
 /** De foto (722 × 1008) en het vlak binnen het stiksel: recht aan de rug, rond aan de buitenkant. */
 export const BINDER_W = 722;
 export const BINDER_H = 1008;
 export const DRUKVLAK = { x: 52, y: 56, w: 638, h: 920, r: 46 };
 /** De kleur van de foto (turkoois) in HSL: omkleuren schuift alles daarvandaan. */
-const REF = { h: 0.5043, s: 0.376, l: 0.397 };
+const REF = { h: 0.502, s: 0.402, l: 0.376 }; // gemiddelde van het midden van de kaft (30–80% breed, 20–55% hoog)
 /** Hoe de gravure eruitziet: dekking, hoeveel structuur er doorheen komt, de brandrand. */
 const GRAVURE = { sterkte: 0.88, structuur: 0.38, rand: 0.28 };
 
@@ -270,7 +269,7 @@ function werkvlak(i: number): HTMLCanvasElement {
  * Tekent de binder met het ontwerp in de ruimte van de foto (BINDER_W × BINDER_H; de transformatie van ctx
  * bepaalt de echte grootte). Werkt ook in oudere Safari: geen ctx.filter, de vervaging gaat via een schaduw.
  */
-export function teken(ctx: CanvasRenderingContext2D, binder: HTMLCanvasElement, o: Ontwerp | null, p: Plaatsing | null, inkt: string) {
+export function teken(ctx: CanvasRenderingContext2D, binder: HTMLCanvasElement, o: Ontwerp | null, p: Plaatsing | null, inkt = GRAVUREKLEUR) {
   ctx.drawImage(binder, 0, 0, BINDER_W, BINDER_H);
   if (!o || !p) return;
   ctx.save();
@@ -325,7 +324,7 @@ export function ontwerpAlsPng(o: Ontwerp): string | null {
 }
 
 /** Het voorbeeld op de binder als JPEG (klein genoeg om mee te sturen, de database neemt 250.000 tekens). */
-export function voorbeeldAlsJpeg(binder: HTMLCanvasElement, o: Ontwerp | null, p: Plaatsing | null, inkt: string): string {
+export function voorbeeldAlsJpeg(binder: HTMLCanvasElement, o: Ontwerp | null, p: Plaatsing | null, inkt = GRAVUREKLEUR): string {
   const breed = 560;
   const c = document.createElement("canvas");
   c.width = breed;

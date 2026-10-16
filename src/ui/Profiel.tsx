@@ -101,7 +101,7 @@ export function Profiel() {
           <button className="profiel-tegel etalage" onClick={openEtalage}>
             <Icoon naam="etalage" maat={26} />
             <strong>Etalage</strong>
-            <span>Foto's van jullie werk die op de startpagina zweven</span>
+            <span>Foto's van jullie werk vooraan op de startpagina</span>
           </button>
           <button className="profiel-tegel aanvragen" onClick={() => openAanvragen()}>
             <Icoon naam="brief" maat={26} />

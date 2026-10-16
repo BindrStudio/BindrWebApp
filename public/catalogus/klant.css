@@ -1,8 +1,7 @@
-/* Klantenpagina: zelfde huisstijl als de app (perzik, zeeblauw met stiksel, boter, bruine inkt, Fredoka).
-   Het eigen beeld: alles is een stuk van een zip-binder voor kaarten (zoals een Vault X): de start is de
-   kaft met een rits rondom en een gegraveerde titel, het aanbod een binderpagina met hoesjes die langs de
-   zijkant openen, de volgende beurs een ticket. Waar het logo zijn letters een bruine rand geeft, krijgen
-   deze drie dat ook; de rest blijft rustig. Foto's van ons werk zweven rond de kaft (de etalage). */
+/* Klantenpagina: zelfde huisstijl als de app (perzik, zeeblauw, boter, bruine inkt, Fredoka voor titels).
+   Sinds 0.12 eenvoudiger: onze binders staan vooraan als een waaier (zoals kaarten in je hand), belletjes en
+   sterretjes uit het logo zweven zacht in de achtergrond, en er is geen stiksel meer in kaders en knoppen.
+   De bruine inktrand blijft enkel op het ticket van de beurs, de aanvraag en de bovenste tab. */
 
 /* Nooit zijwaarts scrollen: anders zoomt Chrome op Android (en Safari) de hele pagina uit en verspringt alles.
    Eerst hidden voor oudere browsers, dan clip (dat laat position: sticky met rust). */
@@ -57,130 +56,140 @@ body { overflow-x: hidden; }
   .klant-nav.boven a[aria-current="page"] { background: var(--boter); border-color: var(--inkt); color: var(--inkt); }
 }
 
-/* ── Start: de kaft van een zip-binder (rits rondom, rug zonder ringen, stiksel), met een gegraveerde titel ── */
-.held { position: relative; display: grid; gap: 18px; margin-top: 26px; }
-.zipbinder {
-  --kaft: var(--zee-donker);
-  position: relative; isolation: isolate;
-  border: 2.5px solid var(--inkt); border-radius: 16px 34px 34px 16px; background-color: var(--kaft); color: var(--room);
-  box-shadow: 0 6px 0 var(--inkt);
-  /* De structuur van het materiaal: fijne schuine streepjes, en een zachte glans van linksboven */
-  background-image:
-    radial-gradient(circle at 80% -10%, rgba(255, 255, 255, .16), transparent 50%),
-    radial-gradient(circle at 0% 110%, rgba(0, 0, 0, .18), transparent 55%),
-    repeating-linear-gradient(45deg, rgba(255, 255, 255, .035) 0 2px, transparent 2px 5px),
-    repeating-linear-gradient(-45deg, rgba(0, 0, 0, .05) 0 2px, transparent 2px 5px);
-}
-/* De rug: dicht, zonder ringen, met een vouw en stiksel */
-.zip-rug { position: absolute; z-index: 1; left: 0; top: 0; bottom: 0; width: 30px; border-radius: 13px 0 0 13px; background: rgba(0, 0, 0, .2); border-right: 2.5px solid var(--inkt); }
-.zip-rug::after { content: ""; position: absolute; top: 12px; bottom: 12px; left: 12px; border-left: 2px dashed rgba(243, 201, 129, .55); }
-/* De rits: een donkere band met tandjes, rond boven, rechts en onder */
-.zip-rits { position: absolute; z-index: 1; inset: 5px 5px 5px 22px; border: 9px solid rgba(31, 24, 14, .55); border-left: 0; border-radius: 0 28px 28px 0; pointer-events: none; }
-.zip-rits::after { content: ""; position: absolute; inset: -6px; border: 3px dotted rgba(238, 226, 205, .85); border-left: 0; border-radius: 0 32px 32px 0; }
-/* De trekker van de rits, bovenaan bij de rug: wiebelt even als de pagina opent */
-.zip-trekker { position: absolute; z-index: 2; top: -16px; left: 46px; width: 18px; height: 40px; border-radius: 8px 8px 6px 6px; background: #2b4a50; border: 2.5px solid var(--inkt);
-  transform-origin: 50% 6px; animation: trekker 2.2s .9s var(--veer) both; }
-.zip-trekker i { position: absolute; left: 50%; top: 7px; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: var(--perzik); border: 2px solid var(--inkt); }
-@keyframes trekker { 0% { transform: rotate(0); } 18% { transform: rotate(16deg); } 36% { transform: rotate(-11deg); } 54% { transform: rotate(6deg); } 72% { transform: rotate(-3deg); } 100% { transform: rotate(0); } }
-.zipbinder:hover .zip-trekker { animation: trekker 1.6s var(--veer) both; }
-.zip-vlak { position: relative; z-index: 2; display: grid; gap: 12px; padding: 34px 28px 32px 48px; }
-.zip-vlak::before { content: ""; position: absolute; inset: 22px 22px 22px 42px; border: 2px dashed rgba(243, 201, 129, .45); border-radius: 12px 20px 20px 12px; pointer-events: none; }
-.zip-vlak > * { min-width: 0; }
-.zip-vlak p { position: relative; margin: 0; max-width: 52ch; font-size: 15px; line-height: 1.45; color: var(--room); overflow-wrap: break-word; hyphens: auto; }
-.kaft-eend { position: absolute; z-index: 3; bottom: -18px; right: 12px; width: 78px; height: 78px; filter: drop-shadow(0 8px 10px rgba(0, 0, 0, .22)); animation: dobber 3.4s ease-in-out infinite; pointer-events: none; }
-.held-knoppen { position: relative; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 2px; }
-.held-knoppen .knop { background: var(--boter); color: var(--inkt); text-decoration: none; }
-.held-knoppen .knop::after { border-color: rgba(59, 42, 18, .35); }
+/* ── Start (0.12): eenvoudig, met onze binders vooraan als een waaier, zoals kaarten in je hand ── */
+.held { position: relative; display: grid; gap: 18px; margin-top: 22px; }
+.held-tekst { display: grid; gap: 12px; justify-items: start; }
+.held-tekst h1 { font-size: clamp(31px, 8.2vw, 52px); line-height: 1.03; letter-spacing: -.012em; color: var(--inkt); max-width: 14ch; text-wrap: balance; }
+.held-tekst p { margin: 0; max-width: 44ch; font-size: 16px; line-height: 1.5; color: var(--inkt-2); }
+.held-knoppen { position: relative; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.held-knoppen .knop { text-decoration: none; }
+.held-tekst .knop.zacht { background: var(--room); color: var(--inkt); box-shadow: inset 0 0 0 2px rgba(59, 42, 18, .1); }
 .knop.doorzichtig { background: transparent; color: var(--room); box-shadow: inset 0 0 0 2px rgba(255, 248, 239, .75); text-decoration: none; }
 .knop.doorzichtig::after { display: none; }
-.held-knoppen .knop.doorzichtig { background: transparent; color: var(--room); }
-@media (prefers-reduced-motion: reduce) { .zip-trekker, .zipbinder:hover .zip-trekker { animation: none; } }
+/* Geen stiksel meer in de knoppen en kaders van de klantenpagina. */
+.klant .knop::after { display: none; }
 
-/* De titel: lasergravure. Een straal schuift één keer van links naar rechts en laat de letters achter,
-   eerst nog gloeiend, dan afgekoeld in de kaft. Bij "minder beweging" staat de titel er meteen. */
-.gravure { position: relative; margin: 0; padding-right: 0; font-size: clamp(30px, 8.6vw, 58px); line-height: 1.02; letter-spacing: -.005em; color: var(--boter-licht); text-wrap: balance; }
-.gravure-tekst { display: block; text-shadow: 0 1px 0 rgba(0, 0, 0, .2); animation: graveer 1.7s .35s cubic-bezier(.55, .05, .45, .95) both, afkoelen 2.6s .35s ease-out both; }
-.gravure::after {
-  content: ""; position: absolute; top: -6px; bottom: -6px; left: 0; width: 3px; border-radius: 2px; background: #fffaf0; opacity: 0; pointer-events: none;
-  box-shadow: 0 0 6px 2px rgba(243, 201, 129, .95), 0 0 24px 7px rgba(226, 81, 63, .4);
-  animation: straal 1.7s .35s cubic-bezier(.55, .05, .45, .95) both;
+.waaier-blok { --w: min(52vw, 220px); --onder: 24px; display: grid; gap: 4px; justify-items: center; min-width: 0; }
+.waaier { position: relative; height: calc(var(--w) * 1.42 + var(--onder) + 16px); width: 100%; max-width: 560px; margin: 0 auto; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.waaier-foto {
+  position: absolute; left: 50%; bottom: var(--onder); width: var(--w); margin-left: calc(var(--w) / -2); aspect-ratio: 4 / 5; display: block;
+  border-radius: 20px; overflow: hidden; background: var(--room); z-index: var(--z, 1); opacity: var(--o, 1);
+  box-shadow: 0 1px 0 rgba(59, 42, 18, .05), 0 24px 40px -20px rgba(59, 42, 18, .5);
+  transform-origin: 50% 115%; transform: translate(var(--x, 0), var(--y, 0)) rotate(var(--r, 0deg)) scale(var(--s, 1));
+  transition: transform .85s var(--zacht-uit), opacity .55s ease, box-shadow .3s;
 }
-@keyframes graveer { from { clip-path: inset(-10px 100% -10px 0); } to { clip-path: inset(-10px -10px -10px 0); } }
-@keyframes straal { 0% { left: 0; opacity: 1; } 94% { opacity: 1; } 100% { left: 100%; opacity: 0; } }
-@keyframes afkoelen { from { color: #fffaf0; text-shadow: 0 0 10px rgba(243, 201, 129, .95), 0 0 2px #fff; } to { color: var(--boter-licht); text-shadow: 0 1px 0 rgba(0, 0, 0, .2); } }
-@media (prefers-reduced-motion: reduce) {
-  .gravure-tekst, .kaft-eend { animation: none; }
-  .gravure::after { display: none; }
-}
-
-/* ── De etalage: foto's van ons werk die rond de kaft zweven en om beurten omdraaien ──
-   Gsm: drie onder de kaft, door elkaar. Groot scherm: vijf naast de kaft, als een collage. */
-.etalage { position: relative; z-index: 3; height: 196px; margin: -30px 0 0; }
-.etalage-foto {
-  --b: 124px; --hoek: 0deg; --duur: 6s; --vertraag: 0s;
-  position: absolute; top: 0; width: var(--b); aspect-ratio: 4 / 5; display: block; color: var(--inkt); text-decoration: none;
-  transform: rotate(var(--hoek)); animation: zweef var(--duur) var(--vertraag) ease-in-out infinite alternate;
-}
-.etalage-foto.e0 { left: 2%; top: 22px; --hoek: -7deg; --duur: 6.5s; }
-.etalage-foto.e1 { left: calc(50% - 66px); top: 0; --b: 132px; --hoek: 2deg; --duur: 5.6s; --vertraag: -2s; z-index: 1; }
-.etalage-foto.e2 { right: 2%; top: 26px; --hoek: 7deg; --duur: 7s; --vertraag: -4s; }
-.etalage-kader { position: relative; display: block; width: 100%; height: 100%; padding: 5px; border-radius: 14px; background: var(--room); border: 2.5px solid var(--inkt);
-  box-shadow: 0 5px 0 var(--inkt); overflow: hidden; animation: omdraai .7s var(--veer) backwards; transform-origin: 50% 50%; }
-.etalage-kader img { width: 100%; height: 100%; object-fit: cover; border-radius: 9px; display: block; background: var(--zee-licht); }
-.etalage-titel { position: absolute; left: 10px; right: 10px; bottom: 10px; padding: 3px 8px; border-radius: 8px; background: rgba(255, 248, 239, .92); font-size: 11.5px; font-weight: 700; line-height: 1.25;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.etalage-foto:hover .etalage-kader, .etalage-foto:focus-visible .etalage-kader { transform: scale(1.04); transition: transform .25s var(--veer); }
-@keyframes zweef { from { transform: translateY(-5px) rotate(var(--hoek)); } to { transform: translateY(7px) rotate(calc(var(--hoek) * .6)); } }
-@keyframes omdraai { from { transform: perspective(600px) rotateY(80deg) scale(.92); opacity: .2; } }
-@media (prefers-reduced-motion: reduce) { .etalage-foto, .etalage-kader { animation: none; } }
-
-/* ── Wat je bij ons vindt: een pagina uit een zip-binder, met hoesjes die langs de zijkant openen ── */
-.aanbod h2, .beurzen h2, .over h2, .ontwerp h2, .aanvraag h2 { font-size: 24px; line-height: 1.15; color: var(--inkt); }
-.aanbod, .beurzen, .over { display: grid; gap: 12px; margin-top: 18px; }
-.binderpagina {
-  position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr);
-  border: 2.5px solid var(--inkt); border-radius: 14px 22px 22px 14px; background: #2b241d; box-shadow: 0 5px 0 var(--inkt); overflow: hidden;
-  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, .025) 0 2px, transparent 2px 5px);
-}
-/* Waar de pagina in de rug vastzit: een strook met stiksel, geen gaatjes */
-.pagina-rug { background: #1f1a15; border-right: 2px solid rgba(0, 0, 0, .35); position: relative; }
-.pagina-rug::after { content: ""; position: absolute; top: 10px; bottom: 10px; left: 9px; border-left: 2px dashed rgba(243, 201, 129, .35); }
-.pockets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 14px; }
-.pocket { display: grid; gap: 8px; color: var(--room); text-decoration: none; min-width: 0; }
-.pocket-hoes {
-  position: relative; display: block; aspect-ratio: 63 / 88; overflow: hidden; border-radius: 6px; padding: 6px 6px 6px 9px;
-  background: rgba(255, 255, 255, .07); border: 1.5px solid rgba(255, 255, 255, .2); transition: transform .25s var(--veer);
-}
-/* De opening langs de zijkant (naar de rug toe), met een duimuitsparing */
-.pocket-hoes::before { content: ""; position: absolute; z-index: 2; left: 3px; top: 6px; bottom: 6px; width: 2px; border-radius: 1px; background: rgba(255, 255, 255, .45); }
-.pocket-hoes::after { content: ""; position: absolute; z-index: 2; left: -9px; top: 50%; width: 16px; height: 26px; margin-top: -13px; border-radius: 50%; border: 1.5px solid rgba(255, 255, 255, .35); background: #2b241d; }
-.pocket:active .pocket-hoes { transform: scale(.97); }
-.pocket-hoes .foto { height: 100%; aspect-ratio: auto; border-radius: 5px; }
-.pocket-hoes .foto .glans { display: none; }
-.pocket-foto { width: 100%; height: 100%; object-fit: cover; border-radius: 5px; display: block; }
-.pocket-leeg { display: grid; place-items: center; height: 100%; border-radius: 5px; color: var(--inkt); }
-.pocket-leeg svg { width: 56px; height: 56px; stroke-width: 1.4; }
-.pocket.kaarten .pocket-leeg { background: var(--zee-licht); }
-.pocket.binders .pocket-leeg { background: var(--zee); color: var(--boter-licht); }
-.pocket.\33 d .pocket-leeg { background: var(--boter); }
-.pocket.sealed .pocket-leeg { background: var(--hart-licht); color: var(--hart-inkt); }
-/* De glans van een plastic hoesje */
-.pocket-glans { position: absolute; z-index: 1; inset: 0; pointer-events: none; background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, .4) 42%, transparent 52%, transparent 70%, rgba(255, 255, 255, .18) 76%, transparent 82%); }
-.pocket-etiket { display: grid; gap: 1px; padding: 0 2px; }
-.pocket-etiket strong { font-family: var(--titel); font-weight: 600; font-size: 19px; line-height: 1.1; color: var(--boter-licht); }
-.pocket-etiket span { font-size: 13px; color: rgba(255, 248, 239, .72); }
+.waaier-foto img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+/* Een uitgeknipte binder (de voorbeelden): zonder kader, zoals hij in je hand ligt. */
+.waaier-foto.kaal { aspect-ratio: 722 / 1008; background: none; border-radius: 0; overflow: visible; box-shadow: none; }
+.waaier-foto.kaal img { object-fit: contain; filter: drop-shadow(0 18px 16px rgba(59, 42, 18, .3)); }
+.waaier-foto.o0 { --z: 6; }
+.waaier-foto.l1 { --x: -28%; --y: 4%; --r: -5.5deg; --s: .9; --z: 5; }
+.waaier-foto.r1 { --x: 28%; --y: 4%; --r: 5.5deg; --s: .9; --z: 4; }
+.waaier-foto.l2 { --x: -64%; --y: 10%; --r: -13deg; --s: .8; --z: 3; }
+.waaier-foto.r2 { --x: 64%; --y: 10%; --r: 13deg; --s: .8; --z: 2; }
+.waaier-foto.weg-l { --x: -24%; --y: 18%; --r: -10deg; --s: .7; --o: 0; --z: 0; pointer-events: none; }
+.waaier-foto.weg-r { --x: 24%; --y: 18%; --r: 10deg; --s: .7; --o: 0; --z: 0; pointer-events: none; }
+.waaier-foto:focus-visible { outline: 3px solid var(--zee-donker); outline-offset: 3px; }
 @media (hover: hover) {
-  .pocket:hover .pocket-hoes { transform: translateY(-3px) rotate(-.6deg); }
+  .waaier:hover .l1 { --x: -34%; --r: -8deg; }
+  .waaier:hover .r1 { --x: 34%; --r: 8deg; }
+  .waaier:hover .l2 { --x: -70%; --r: -16deg; }
+  .waaier:hover .r2 { --x: 70%; --r: 16deg; }
+  .waaier-foto.o0:not(.kaal):hover { box-shadow: 0 1px 0 rgba(59, 42, 18, .05), 0 30px 46px -18px rgba(59, 42, 18, .55); }
 }
+/* Als een binder vooraan landt: één keer een holo-glans erover (binnen de vorm van de binder) en een sterretje. */
+.waaier-glans { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: screen;
+  background: linear-gradient(112deg, transparent 36%, rgba(150, 225, 255, .28) 44%, rgba(255, 255, 255, .55) 50%, rgba(255, 214, 160, .3) 56%, transparent 64%) no-repeat;
+  background-size: 260% 100%; background-position: 115% 0; animation: glans 1.15s .5s cubic-bezier(.4, .1, .3, 1) both; }
+.waaier-foto.kaal .waaier-glans { -webkit-mask: var(--beeld) center / contain no-repeat; mask: var(--beeld) center / contain no-repeat; }
+@keyframes glans { from { background-position: 115% 0; opacity: 1; } 85% { opacity: 1; } to { background-position: -15% 0; opacity: 0; } }
+.waaier-ster { position: absolute; top: -12px; right: 4%; width: 28px; height: 28px; fill: #f2c662; pointer-events: none; z-index: 2;
+  filter: drop-shadow(0 2px 2px rgba(59, 42, 18, .15)); animation: ster-pop 1.4s .75s ease-out both; }
+@keyframes ster-pop { 0% { transform: scale(0) rotate(-30deg); opacity: 0; } 30% { transform: scale(1.2) rotate(8deg); opacity: 1; } 45% { transform: scale(.92) rotate(4deg); } 70% { transform: scale(1) rotate(10deg); opacity: 1; } 100% { transform: scale(.4) rotate(24deg); opacity: 0; } }
+/* Waar je bent in de waaier (ook knoppen, voor wie niet veegt). */
+.waaier-bolletjes { display: flex; justify-content: center; gap: 0; }
+.waaier-bolletjes button { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; background: none; }
+.waaier-bolletjes button::before { content: ""; width: 7px; height: 7px; border-radius: 4px; background: rgba(59, 42, 18, .2); transition: width .3s var(--veer), background .3s; }
+.waaier-bolletjes button.aan::before { width: 20px; background: var(--zee); }
+.waaier-bolletjes button:focus-visible { outline: 2px solid var(--zee-donker); outline-offset: -2px; border-radius: 8px; }
 
-/* Een uitnodiging om een eigen binder te ontwerpen */
-.ontwerp-banner { display: flex; align-items: center; gap: 14px; margin-top: 18px; padding: 16px 18px; border-radius: 20px; background: var(--boter); color: var(--inkt); text-decoration: none;
-  border: 2.5px solid var(--inkt); box-shadow: 0 5px 0 var(--inkt); transition: transform .2s var(--veer); }
-.ontwerp-banner:active { transform: translateY(3px); box-shadow: 0 2px 0 var(--inkt); }
-.ontwerp-banner-tekst { flex: 1; display: grid; gap: 2px; }
-.ontwerp-banner-tekst strong { font-family: var(--titel); font-weight: 600; font-size: 19px; line-height: 1.15; }
-.ontwerp-banner-tekst span { font-size: 14px; color: var(--inkt-2); }
-.ontwerp-banner-pijl { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; background: var(--inkt); color: var(--boter); flex: none; }
+/* ── Wat je bij ons vindt: per soort een paar beelden als een klein waaiertje ── */
+.aanbod h2, .beurzen h2, .over h2, .ontwerp h2, .aanvraag h2 { font-size: 24px; line-height: 1.15; color: var(--inkt); }
+.aanbod, .beurzen, .over { display: grid; gap: 14px; margin-top: 44px; }
+.vakken { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.vak { --kleur: var(--zee-licht); position: relative; display: grid; gap: 8px; padding: 0 0 14px; border-radius: 22px; overflow: hidden; background: var(--kleur);
+  color: var(--inkt); text-decoration: none; min-width: 0; transition: transform .25s var(--veer); }
+.vak.binders { --kleur: var(--boter-licht); }
+.vak.\33 d { --kleur: #f7e1d0; }
+.vak.sealed { --kleur: var(--hart-licht); }
+.vak:active { transform: scale(.97); }
+.vak:focus-visible { outline: 3px solid var(--zee-donker); outline-offset: 3px; }
+.vak-beeld { position: relative; display: block; aspect-ratio: 5 / 4; overflow: hidden; }
+.vak-kaart { position: absolute; left: 50%; bottom: -14%; width: 44%; margin-left: -22%; aspect-ratio: 63 / 88; border-radius: 8px; overflow: hidden; background: var(--wit);
+  box-shadow: 0 10px 18px -10px rgba(59, 42, 18, .5); transform-origin: 50% 120%; transition: transform .35s var(--veer); }
+.vak-kaart img, .vak-kaart .foto { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 0; }
+.vak-kaart .foto .glans { display: none; }
+.vak-kaart.kaal { aspect-ratio: 722 / 1008; bottom: -10%; border-radius: 0; background: none; box-shadow: none; overflow: visible; }
+.vak-kaart.kaal img { object-fit: contain; filter: drop-shadow(0 8px 8px rgba(59, 42, 18, .25)); }
+.vak-beeld.n2 .vak-kaart:nth-child(1) { transform: translateX(-24%) rotate(-8deg); }
+.vak-beeld.n2 .vak-kaart:nth-child(2) { transform: translateX(24%) rotate(8deg); }
+.vak-beeld.n3 .vak-kaart:nth-child(1) { transform: translateX(-46%) rotate(-12deg) scale(.92); }
+.vak-beeld.n3 .vak-kaart:nth-child(2) { z-index: 2; }
+.vak-beeld.n3 .vak-kaart:nth-child(3) { transform: translateX(46%) rotate(12deg) scale(.92); }
+@media (hover: hover) {
+  .vak:hover .vak-beeld.n1 .vak-kaart { transform: translateY(-5%); }
+  .vak:hover .vak-beeld.n2 .vak-kaart:nth-child(1) { transform: translateX(-32%) translateY(-4%) rotate(-11deg); }
+  .vak:hover .vak-beeld.n2 .vak-kaart:nth-child(2) { transform: translateX(32%) translateY(-4%) rotate(11deg); }
+  .vak:hover .vak-beeld.n3 .vak-kaart:nth-child(1) { transform: translateX(-58%) rotate(-16deg) scale(.92); }
+  .vak:hover .vak-beeld.n3 .vak-kaart:nth-child(2) { transform: translateY(-5%); }
+  .vak:hover .vak-beeld.n3 .vak-kaart:nth-child(3) { transform: translateX(58%) rotate(16deg) scale(.92); }
+  .vak:hover .vak-pijl { transform: translateX(3px); }
+}
+/* Geen foto's: een rustig icoon in een rondje, geen leeg vlak. */
+.vak-icoon { position: absolute; inset: 0; display: grid; place-items: center; }
+.vak-icoon svg { width: 76px; height: 76px; padding: 18px; border-radius: 50%; background: rgba(255, 248, 239, .75); color: var(--inkt-2); stroke-width: 1.5; }
+.vak-tekst { display: grid; gap: 1px; padding: 0 46px 0 14px; }
+.vak-tekst strong { font-family: var(--titel); font-weight: 600; font-size: 19px; line-height: 1.15; }
+.vak-tekst span { font-size: 13.5px; color: var(--inkt-2); }
+.vak-pijl { position: absolute; right: 10px; bottom: 12px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--room); color: var(--inkt); transition: transform .25s var(--veer); }
+
+/* ── Sfeer: belletjes en sterretjes uit ons logo, zacht in de achtergrond (langs de randen) ── */
+.sfeer { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.klant-inhoud, .klant-voet { position: relative; z-index: 1; }
+.belletje { position: absolute; width: var(--d); height: var(--d); border-radius: 50%; opacity: .8;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, .95) 0 8%, rgba(255, 255, 255, 0) 11%),
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, .06) 0 50%, rgba(76, 127, 135, .16) 64%, rgba(243, 201, 129, .3) 71%, rgba(243, 201, 129, 0) 74%);
+  animation: drijf var(--t, 14s) ease-in-out var(--v, 0s) infinite alternate; }
+@keyframes drijf { from { transform: translate(0, 0); } to { transform: translate(var(--dx, 6px), var(--dy, -18px)); } }
+.sterretje { position: absolute; width: var(--d); height: var(--d); fill: #f2c662; opacity: 0; transform-origin: 50% 50%;
+  animation: fonkel 15s ease-in-out var(--v, 0s) infinite; }
+/* Om beurten één sterretje: het licht op, pompt even, blijft kort staan en verdwijnt (elk 3 s van 15 s). */
+@keyframes fonkel {
+  0% { opacity: 0; transform: scale(.2) rotate(0deg); }
+  4% { opacity: .95; transform: scale(1.15) rotate(8deg); }
+  7% { transform: scale(.86) rotate(5deg); }
+  10% { opacity: .9; transform: scale(1.05) rotate(7deg); }
+  16% { opacity: .85; transform: scale(1) rotate(12deg); }
+  20%, 100% { opacity: 0; transform: scale(.25) rotate(18deg); }
+}
+.b0 { --d: 34px; top: 12%; left: 3%; --t: 13s; --v: -3s; --dx: 8px; --dy: -22px; }
+.b1 { --d: 24px; top: 9%; right: 6%; --t: 11s; --v: -6s; --dx: -6px; --dy: -16px; }
+.b2 { --d: 46px; top: 46%; right: 2%; --t: 17s; --v: -1s; --dx: -10px; --dy: -26px; }
+.b3 { --d: 26px; top: 70%; left: 2%; --t: 12s; --v: -8s; --dx: 7px; --dy: -14px; }
+.b4 { --d: 30px; top: 86%; right: 9%; --t: 15s; --v: -4s; --dx: -8px; --dy: -20px; }
+.s0 { --d: 20px; top: 20%; left: 9%; --v: 0s; }
+.s1 { --d: 16px; top: 30%; right: 5%; --v: -3s; }
+.s2 { --d: 18px; top: 58%; left: 4%; --v: -6s; }
+.s3 { --d: 14px; top: 76%; right: 4%; --v: -9s; }
+.s4 { --d: 18px; top: 7%; left: 46%; --v: -12s; }
+@media (max-width: 759px) { .b1, .b3, .s1, .s3 { display: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .belletje { animation: none; }
+  .sterretje { animation: none; opacity: .7; }
+  .waaier-foto, .vak-kaart { transition: none; }
+  .waaier-glans, .waaier-ster { display: none; }
+}
 
 /* ── Komende beurzen: de volgende als ticket, de rest als lijst ── */
 .ticket {
@@ -191,7 +200,7 @@ body { overflow-x: hidden; }
 .ticket::before, .ticket::after { content: ""; position: absolute; left: 72px; width: 22px; height: 22px; border-radius: 50%; background: var(--perzik); border: 2.5px solid var(--inkt); z-index: 1; }
 .ticket::before { top: -13px; }
 .ticket::after { bottom: -13px; }
-.ticket-stomp { display: grid; align-content: center; justify-items: center; gap: 0; padding: 16px 6px; background: var(--zee); color: var(--room); border-right: 2.5px dashed var(--inkt); text-align: center; }
+.ticket-stomp { display: grid; align-content: center; justify-items: center; gap: 0; padding: 16px 6px; background: var(--zee); color: var(--room); border-right: 2.5px solid var(--inkt); text-align: center; }
 .ticket-stomp span { font-size: 13px; font-weight: 700; }
 .ticket-stomp strong { font-family: var(--titel); font-weight: 600; font-size: 40px; line-height: 1; margin: 2px 0; }
 .ticket-lijf { display: grid; gap: 6px; padding: 16px 16px 16px 20px; min-width: 0; }
@@ -205,7 +214,7 @@ body { overflow-x: hidden; }
 .beurzen-leeg { margin: 0; font-size: 15px; color: var(--inkt-2); }
 .beurzen-leeg a { color: var(--zee-donker); font-weight: 700; }
 .beurs-lijst { list-style: none; margin: 4px 0 0; padding: 0; display: grid; }
-.beurs-lijst li { display: flex; align-items: center; gap: 12px; padding: 10px 2px; border-top: 1.5px dashed var(--lijn); }
+.beurs-lijst li { display: flex; align-items: center; gap: 12px; padding: 10px 2px; border-top: 1px solid var(--lijn); }
 .beurs-lijst li:first-child { border-top: 0; }
 .beurs-datum { width: 48px; height: 52px; border-radius: 12px; background: var(--zee-licht); color: var(--zee-donker); display: grid; place-content: center; text-align: center; flex: none; }
 .beurs-datum strong { font-family: var(--titel); font-weight: 600; font-size: 21px; line-height: 1; }
@@ -217,8 +226,7 @@ body { overflow-x: hidden; }
 
 /* ── Over Bind'r ── */
 .over { grid-template-columns: minmax(0, 1fr); padding: 6px 0 0; }
-.over-logo { width: min(240px, 64vw); height: auto; justify-self: center; }
-.over-tekst { display: grid; gap: 10px; }
+.over-tekst { display: grid; gap: 10px; max-width: 64ch; }
 .over-tekst p { margin: 0; font-size: 15.5px; line-height: 1.55; max-width: 60ch; }
 .over-lijst { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .over-lijst li { display: flex; gap: 12px; align-items: flex-start; font-size: 15px; line-height: 1.45; }
@@ -291,11 +299,12 @@ body { overflow-x: hidden; }
 .binder-kaart { display: grid; gap: 8px; align-content: start; padding: 8px; border-radius: 20px; background: var(--room); box-shadow: var(--schaduw); text-align: left; animation: tegel-in .45s var(--veer) backwards; animation-delay: calc(var(--i, 0) * 50ms); }
 .binder-kaart .artikel-vlak { aspect-ratio: 4 / 5; border-radius: 14px; }
 .binder-tekst { display: grid; gap: 2px; padding: 0 4px; }
-.binder-tekst strong { font-family: var(--titel); font-weight: 600; font-size: 19px; line-height: 1.15; }
+/* Zelfde letter als de namen van de kaarten (niet Fredoka): Fredoka enkel voor titels. */
+.binder-tekst strong { font-weight: 650; font-size: 16px; line-height: 1.25; }
 .binder-tekst span { font-size: 13.5px; color: var(--inkt-2); }
 .binder-onder { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 4px 2px; }
 .binder-onder em { font-style: normal; font-size: 13px; font-weight: 700; color: var(--zee-donker); }
-@media (max-width: 480px) { .binders-rij { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .binder-tekst strong { font-size: 17px; } }
+@media (max-width: 480px) { .binders-rij { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .binder-tekst strong { font-size: 15px; } }
 
 /* Detail */
 .klant .sheet { max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
@@ -329,7 +338,7 @@ body { overflow-x: hidden; }
 .sociaal-knop em { font-style: normal; font-family: var(--tekst); font-weight: 500; font-size: 12.5px; color: var(--inkt-2); }
 .sociaal-tekst { max-width: 44ch; margin-bottom: 8px !important; }
 .voet-logo { width: 120px; height: auto; margin-top: 6px; opacity: .95; }
-.voet-wettelijk { display: grid; gap: 3px; max-width: 64ch; margin-top: 8px; padding-top: 10px; border-top: 1.5px dashed var(--lijn); font-size: 12.5px; line-height: 1.45; color: var(--inkt-3); overflow-wrap: anywhere; }
+.voet-wettelijk { display: grid; gap: 3px; max-width: 64ch; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--lijn); font-size: 12.5px; line-height: 1.45; color: var(--inkt-2); overflow-wrap: anywhere; }
 .voet-wettelijk strong { color: var(--inkt-2); }
 .voet-wettelijk a { color: inherit; }
 .voet-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px; margin-top: 6px; font-size: 13px; }
@@ -369,29 +378,9 @@ body { overflow-x: hidden; }
 /* ── Groot scherm ── */
 @media (min-width: 760px) {
   .klant { padding-inline: 24px; }
-  .held { margin-top: 44px; }
-  .zip-rug { width: 38px; }
-  .zip-rug::after { left: 16px; }
-  .zip-rits { inset: 6px 6px 6px 28px; border-width: 11px; border-radius: 0 34px 34px 0; }
-  .zip-trekker { left: 58px; width: 20px; height: 46px; top: -18px; }
-  .zip-vlak { padding: 52px 52px 46px 70px; gap: 18px; }
-  .zip-vlak::before { inset: 28px 30px 28px 56px; }
-  .kaft-eend { width: 112px; height: 112px; top: -54px; bottom: auto; right: 30px; }
-  .gravure { padding-right: 96px; }
-  @keyframes straal { 0% { left: 0; opacity: 1; } 94% { opacity: 1; } 100% { left: calc(100% - 96px); opacity: 0; } }
-  /* Tablet rechtop (tot 1100 px): de etalage als strook onder de kaft, zodat de kaft breed blijft. */
-  .etalage { height: 250px; margin: -12px 0 0; }
-  .etalage-foto { --b: 142px; }
-  .etalage-foto.e0 { left: 0; top: 34px; --hoek: -7deg; }
-  .etalage-foto.e1 { left: calc(21% - 10px); top: 8px; --b: 148px; --hoek: 3deg; z-index: 1; }
-  .etalage-foto.e2 { right: auto; left: calc(50% - 74px); top: 44px; --b: 148px; --hoek: -2deg; z-index: 2; }
-  .etalage-foto.e3 { right: calc(21% - 10px); top: 6px; --hoek: 5deg; --duur: 6.8s; --vertraag: -3s; z-index: 1; }
-  .etalage-foto.e4 { right: 0; top: 38px; --hoek: 8deg; --duur: 5.9s; --vertraag: -1s; }
-  .pockets { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; padding: 18px 20px; }
-  .binderpagina { grid-template-columns: 30px minmax(0, 1fr); }
-  .pagina-rug::after { left: 13px; }
-  .ontwerp-banner { padding: 20px 24px; }
-  .ontwerp-banner-tekst strong { font-size: 22px; }
+  .held { margin-top: 30px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 20px; min-height: 420px; }
+  .waaier-blok { --w: 200px; }
+  .vakken { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
   .beurzen { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); column-gap: 28px; align-items: start; }
   .beurzen h2, .beurzen-leeg { grid-column: 1 / -1; }
   .beurs-lijst { margin-top: 0; }
@@ -400,8 +389,7 @@ body { overflow-x: hidden; }
   .ticket-stomp strong { font-size: 48px; }
   .ticket-lijf { padding: 22px 22px 22px 26px; }
   .ticket-lijf h3 { font-size: 26px; }
-  .over { grid-template-columns: 280px minmax(0, 1fr); gap: 32px; align-items: center; }
-  .over-logo { width: 100%; }
+  .aanbod, .beurzen, .over { margin-top: 72px; }
   .aanbod h2, .beurzen h2, .over h2, .ontwerp h2, .aanvraag h2 { font-size: 28px; }
   .klant-detail { grid-template-columns: minmax(260px, 340px) 1fr; gap: 24px; align-items: start; }
   .klant-detail-foto { width: 100%; }
@@ -447,7 +435,6 @@ body { overflow-x: hidden; }
 .segmentje { display: flex; gap: 6px; flex-wrap: wrap; }
 .segmentje button { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 6px 14px 6px 8px; border-radius: 999px; background: var(--wit); border: 1.5px solid var(--lijn); font-weight: 600; font-size: 14px; }
 .segmentje button.aan { border-color: var(--inkt); background: var(--boter-licht); }
-.inkt-bol { width: 22px; height: 22px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px rgba(0, 0, 0, .25); }
 .ontwerp-knoppen { display: flex; flex-wrap: wrap; gap: 4px 16px; }
 .ontwerp-knoppen .tekstknop { padding: 4px 0; }
 
@@ -482,16 +469,11 @@ body { overflow-x: hidden; }
 }
 @media (prefers-reduced-motion: reduce) { .aanvraag-vink { animation: none; } }
 
-/* Breed scherm (vanaf 1100 px): de etalage naast de kaft, als een collage. */
-@media (min-width: 1100px) {
-  .held.met-etalage { grid-template-columns: minmax(0, 1fr) 360px; align-items: center; gap: 30px; }
-  .etalage { height: 460px; margin: 0; z-index: auto; }
-  .etalage-foto { --b: 152px; }
-  .etalage-foto.e0 { left: 4px; top: 6px; --hoek: -6deg; }
-  .etalage-foto.e1 { left: auto; right: 0; top: 34px; --b: 164px; --hoek: 5deg; z-index: 0; }
-  .etalage-foto.e2 { right: auto; left: 92px; top: 172px; --b: 172px; --hoek: 2deg; z-index: 2; }
-  .etalage-foto.e3 { left: -8px; right: auto; top: 300px; --b: 140px; --hoek: -8deg; }
-  .etalage-foto.e4 { right: 6px; top: 286px; --b: 148px; --hoek: 8deg; z-index: 1; }
+/* Breed scherm (vanaf 1000 px): vijf binders in de waaier. */
+@media (min-width: 1000px) {
+  .held { grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 24px; min-height: 480px; }
+  .held-tekst h1 { font-size: 58px; }
+  .waaier-blok { --w: 220px; --onder: 58px; } /* de buitenste binders hangen lager: plaats voor de bolletjes */
 }
 
 /* Zes tabbladen bovenaan: op een smaller groot scherm wat compacter, Instagram enkel als icoon. */

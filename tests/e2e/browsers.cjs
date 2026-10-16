@@ -25,6 +25,7 @@ const PROFIELEN = {
     ["galaxy-tab-s8-rechtop", { viewport: { width: 800, height: 1280 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, userAgent: TAB_UA }],
     ["galaxy-tab-s8-liggend", { viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, userAgent: SAMSUNG_UA }],
     ["pixel-7", { ...pw.devices["Pixel 7"] }],
+    ["macbook-air", { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 }],
   ],
   webkit: [
     ["iphone-13", { ...pw.devices["iPhone 13"] }],
@@ -153,8 +154,15 @@ async function doorloop(ctx, page, motor, naam, opties) {
   await page.keyboard.press("Escape");
   for (const tab of ["Catalogus", "Vault", "Kassa", "Profiel"]) {
     await tabbalk(tab);
-    await page.waitForTimeout(450);
+    await page.waitForTimeout(650);
     await nooitTeBreed(`beheer ${tab}`);
+    // Het lichtblauwe ovaaltje staat onder de actieve tab (op een Mac schoot het er ooit voorbij).
+    const naast = await page.evaluate(() => {
+      const d = document.querySelector(".tabbalk .tab-duim").getBoundingClientRect();
+      const k = document.querySelector(".tabbalk button.aan").getBoundingClientRect();
+      return Math.abs((d.left + d.width / 2) - (k.left + k.width / 2));
+    });
+    assert.ok(naast < 3, `beheer ${tab}: het ovaaltje staat ${Math.round(naast)} px naast de tab`);
   }
   await foto("beheer-profiel");
   // Instellingen vanuit Profiel (dat gaf op een iPhone ooit een leeg scherm).
@@ -166,8 +174,11 @@ async function doorloop(ctx, page, motor, naam, opties) {
   // De klantenpagina.
   await page.waitForLoadState("networkidle").catch(() => undefined);
   await page.goto(BASIS + "?demo=1");
-  await page.locator(".zipbinder").waitFor();
-  await page.locator(".etalage-foto").first().waitFor();
+  await page.locator(".waaier").waitFor();
+  await page.locator(".waaier-foto.o0").waitFor();
+  // De waaier: met de bolletjes naar een andere binder.
+  await page.locator(".waaier-bolletjes button").nth(2).click();
+  assert.equal(await page.locator(".waaier-bolletjes button").nth(2).getAttribute("aria-current"), "true", "bolletje 3 zet binder 3 vooraan");
   await nooitTeBreed("start", 6); // de etalage zweeft: een paar keer kijken
   await foto("klant-start");
   await nav("Kaarten");

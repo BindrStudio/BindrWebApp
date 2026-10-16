@@ -1,4 +1,4 @@
-// Profiel › Etalage: de foto's van ons werk die op de startpagina van de klanten zweven en afwisselen.
+// Profiel › Etalage: de foto's van ons werk die vooraan op de startpagina van de klanten in een waaier wisselen.
 // Instagram laat geen foto's ophalen zonder een app bij Meta; daarom zet je ze hier zelf (bewaar de foto
 // van Instagram op je gsm en kies ze hier, met de link naar het bericht erbij).
 import { useEffect, useRef, useState } from "react";
@@ -40,8 +40,9 @@ export function EtalageSheet() {
   return (
     <Sheet titel="Etalage" onSluit={sluit} vol>
       <p className="zacht">
-        Foto's van jullie binders zweven op de startpagina van de klanten en wisselen om de paar seconden. Neem een foto van
-        Instagram (bewaar ze op je gsm) of een nieuwe, en zet de link naar het bericht erbij.
+        Foto's van jullie binders draaien vooraan op de startpagina van de klanten, als een waaier die om de paar seconden
+        wisselt. Neem een foto van Instagram (bewaar ze op je gsm) of een nieuwe, en zet de link naar het bericht erbij. Een
+        binder recht van voren, op een rustige achtergrond, staat het mooist.
       </p>
       {!kan ? <p className="nakijken">{SCHEMA_010}</p> : (
         <>
@@ -55,7 +56,7 @@ export function EtalageSheet() {
           {lijst == null ? <p className="zacht">Laden…</p> : !lijst.length ? (
             <div className="etalage-leeg">
               <Icoon naam="etalage" maat={40} />
-              <p>Nog geen foto's. Zolang de etalage leeg is, tonen we de foto's van jullie binders (Profiel › Artikels).</p>
+              <p>Nog geen foto's. Samen met de foto's van jullie binders (Profiel › Artikels) zijn er minstens drie nodig; tot dan tonen we voorbeeldbinders.</p>
             </div>
           ) : (
             <ul className="etalage-lijst">

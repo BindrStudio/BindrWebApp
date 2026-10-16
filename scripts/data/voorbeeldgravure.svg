@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 638 920">
+  <!-- Een eigen voorbeeldgravure voor de startpagina: sterretjes en belletjes uit de stijl van Bind'r (geen naam, geen Pokémon). -->
+  <rect width="638" height="920" fill="#fff"/>
+  <g fill="#000">
+    <path d="M300 250c10 92 52 146 150 160-98 14-140 68-150 160-10-92-52-146-150-160 98-14 140-68 150-160Z"/>
+    <path d="M470 150c5 44 25 70 72 77-47 7-67 33-72 77-5-44-25-70-72-77 47-7 67-33 72-77Z"/>
+    <path d="M170 610c4 34 20 54 56 60-36 6-52 26-56 60-4-34-20-54-56-60 36-6 52-26 56-60Z"/>
+    <path d="M480 560c3 26 15 41 42 45-27 4-39 19-42 45-3-26-15-41-42-45 27-4 39-19 42-45Z"/>
+    <path d="M140 170c3 22 12 35 34 38-22 3-31 16-34 38-3-22-12-35-34-38 22-3 31-16 34-38Z"/>
+    <path d="M380 760c2 18 10 28 28 31-18 3-26 13-28 31-2-18-10-28-28-31 18-3 26-13 28-31Z"/>
+  </g>
+  <g fill="none" stroke="#000" stroke-width="9">
+    <circle cx="520" cy="420" r="38"/>
+    <circle cx="120" cy="420" r="24"/>
+    <circle cx="280" cy="700" r="30"/>
+    <circle cx="560" cy="770" r="20"/>
+    <circle cx="250" cy="110" r="18"/>
+  </g>
+  <g fill="none" stroke="#000" stroke-width="7" stroke-linecap="round">
+    <path d="M500 400a24 24 0 0 1 16-12"/>
+    <path d="M108 410a14 14 0 0 1 9-7"/>
+    <path d="M265 684a18 18 0 0 1 11-9"/>
+  </g>
+</svg>

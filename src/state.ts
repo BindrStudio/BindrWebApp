@@ -1549,9 +1549,15 @@ export function zetRegelPct(i: number, pct: number | null) {
   zetRegels(regels, b.afronding === "eigen" ? { ...b, afronding: "exact", eigen: null } : b);
 }
 
-/** Per kaart aan of uit. Uit = alle kaarten weer op het algemene percentage. */
+/**
+ * Per kaart aan of uit. Aan = elke kaart begint op het standaardpercentage (inkoop 70%, ruil 80%) en de
+ * beheerder past per kaart aan. Uit = alle kaarten weer op één percentage.
+ */
 export function zetPerKaart(aan: boolean) {
-  const b: BodInstelling = { afronding: "exact", ...(state.mandje.bod ?? {}), perKaart: aan };
+  const vorig: BodInstelling = { afronding: "exact", ...(state.mandje.bod ?? {}) };
+  const b: BodInstelling = aan
+    ? { ...vorig, perKaart: true, pct: null, afronding: vorig.afronding === "eigen" ? "exact" : vorig.afronding, eigen: null }
+    : { ...vorig, perKaart: false };
   zetRegels(aan ? state.mandje.regels : state.mandje.regels.map((r) => (r.pct != null ? { ...r, pct: null } : r)), b);
 }
 

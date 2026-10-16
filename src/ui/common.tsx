@@ -62,6 +62,7 @@ const PADEN: Record<string, ReactNode> = {
   ster: <path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.5Z" />,
   brief: <><rect x="3" y="5.5" width="18" height="13" rx="2.5" /><path d="m3.8 7 8.2 6 8.2-6" /></>,
   penseel: <><path d="M14.5 4.5 19.5 9.5 10 19H5v-5l9.5-9.5Z" /><path d="m12.5 6.5 5 5" /></>,
+  potlood: <><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /><path d="m15 5 4 4" /></>,
   etalage: <><rect x="3.5" y="4" width="11" height="13" rx="2" transform="rotate(-6 9 10.5)" /><rect x="10" y="7" width="10.5" height="13" rx="2" transform="rotate(6 15 13.5)" /></>,
 };
 

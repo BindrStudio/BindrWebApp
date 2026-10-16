@@ -26,7 +26,7 @@ import { BEWIJS_GROOT, heeftBewijs } from "../lib/boekhouding";
 import { FotoKnop, FotoRij } from "./Fotos";
 import { HandtekeningBeeld, HandtekeningPad } from "./Handtekening";
 import { cardmarketKentTaal, cardmarketLink, gradedZoektekst, NIET_OP_CARDMARKET } from "../lib/markt";
-import { afrondKeuzes, exactBod, heeftEigenPct, marktwaarde, PCT_MAX, PCT_MIN, procentVan, samenPct, type BodInstelling } from "../lib/bod";
+import { afrondKeuzes, exactBod, marktwaarde, PCT_MAX, PCT_MIN, procentVan, samenPct, type BodInstelling } from "../lib/bod";
 import { GELUKT, kies, MANDJE_LEEG } from "../lib/grapjes";
 
 type Paneel = null | "scan" | "zoek" | "artikel" | "klantkaart" | "afrekenen" | "start" | "afsluiten" | "transacties" | "kas";
@@ -258,7 +258,7 @@ function RegelRij({ r, i }: { r: Regel; i: number }) {
   );
 }
 
-/** Per kaart een eigen percentage: − 70% +, in stappen van 5. Gelijk aan het algemene = geen eigen. */
+/** Per kaart een eigen percentage: − 70% +, in stappen van 5. Gelijk aan de standaard (70%, ruil 80%) = geen eigen. */
 function PctStapper({ r, i, algemeen }: { r: Regel; i: number; algemeen: number }) {
   const p = r.pct ?? algemeen;
   const zet = (x: number) => { zetRegelPct(i, x); tril(15); };
@@ -267,7 +267,7 @@ function PctStapper({ r, i, algemeen }: { r: Regel; i: number; algemeen: number 
       <button onClick={() => zet(p - 5)} disabled={p <= PCT_MIN} aria-label={`${r.naam}: 5% minder`}>−</button>
       <span>{p}%</span>
       <button onClick={() => zet(p + 5)} disabled={p >= PCT_MAX} aria-label={`${r.naam}: 5% meer`}>+</button>
-      {r.pct != null && <button className="pct-terug" onClick={() => zetRegelPct(i, null)} aria-label="Zoals de rest" title="Zoals de rest"><Icoon naam="terug" maat={14} /></button>}
+      {r.pct != null && <button className="pct-terug" onClick={() => zetRegelPct(i, null)} aria-label={`Terug naar ${algemeen}%`} title={`Terug naar ${algemeen}%`}><Icoon naam="terug" maat={14} /></button>}
     </span>
   );
 }
@@ -334,26 +334,37 @@ function TotaalRij({ richting, totaal }: { richting: "uit" | "in"; totaal: numbe
  */
 function BodPaneel() {
   const { mandje } = useApp();
-  const [eigen, setEigen] = useState(() => (mandje.bod?.afronding === "eigen" && mandje.bod.eigen != null ? String(mandje.bod.eigen).replace(".", ",") : ""));
   const m = marktwaarde(mandje.regels);
   const pct = bodPct(mandje);
   const ruil = mandje.regels.some((r) => r.richting === "uit");
   const b = mandje.bod ?? { afronding: "exact" as const };
   const exact = exactBod(mandje.regels, pct);
-  const eigenPct = heeftEigenPct(mandje.regels);
   const samen = samenPct(mandje.regels, pct);
-  const keuzes = afrondKeuzes(exact, b.afronding);
+  const keuzes = afrondKeuzes(exact, b.afronding === "eigen" ? undefined : b.afronding);
   const zonderMarkt = mandje.regels.filter((r) => r.richting === "in" && !((r.referentie ?? 0) > 0)).reduce((x, r) => x + r.prijs, 0);
   const kies = (w: Partial<BodInstelling>) => { zetBod(w); tril(); };
-  // Werd het eigen bod opzijgezet (andere kaarten), dan ook het veld leegmaken.
-  useEffect(() => { if (b.afronding !== "eigen") setEigen(""); }, [b.afronding]);
+  // Zelf een bedrag typen: tik nog eens op het gekozen bedrag (meestal is de afronding al goed).
+  const [bewerk, setBewerk] = useState<string | null>(null);
   const typ = (tekst: string) => {
-    setEigen(tekst);
+    setBewerk(tekst);
     const n = getal(tekst);
     if (n != null && n >= 0) zetBod({ afronding: "eigen", eigen: Math.round(n * 100) / 100 });
-    else if (!tekst.trim() && b.afronding === "eigen") zetBod({ afronding: "exact", eigen: null });
+  };
+  const klaarMetTypen = () => {
+    if (bewerk != null && !bewerk.trim() && b.afronding === "eigen") zetBod({ afronding: "exact", eigen: null });
+    setBewerk(null);
   };
   const nuPct = procentVan(m.bod, m.totaal);
+  const lijst: { sleutel: string; bedrag: number; label: string; aan: boolean; kies: () => void }[] = keuzes.map((k) => ({
+    sleutel: k.afronding, bedrag: k.bedrag, aan: b.afronding === k.afronding,
+    label: k.afronding === "exact" ? "exact" : k.afronding.startsWith("omlaag") ? "↓ afronden" : "↑ afronden",
+    kies: () => kies({ afronding: k.afronding, eigen: null }),
+  }));
+  // Een zelf getypt bedrag staat op de plaats van "exact" (het exacte bedrag staat er al boven).
+  if (b.afronding === "eigen" && b.eigen != null) {
+    const i = Math.max(0, lijst.findIndex((k) => k.sleutel === "exact"));
+    lijst.splice(i, lijst.length ? 1 : 0, { sleutel: "eigen", bedrag: b.eigen, label: "eigen", aan: true, kies: () => undefined });
+  }
   return (
     <div className="bod-paneel">
       <div className="bod-kop">
@@ -361,24 +372,10 @@ function BodPaneel() {
         <strong className="bod-markt">{euro(m.totaal)}</strong>
       </div>
       {m.kaarten > 1 && (
-        <Segment waarde={b.perKaart ? "kaart" : "alles"} onKies={(w) => { zetPerKaart(w === "kaart"); tril(15); }}
+        <Segment waarde={b.perKaart ? "kaart" : "alles"} onKies={(w) => { setBewerk(null); zetPerKaart(w === "kaart"); tril(15); }}
           opties={[{ waarde: "alles", label: "Eén % voor alles" }, { waarde: "kaart", label: "Per kaart" }]} />
       )}
-      {b.perKaart ? (
-        // Per kaart: geen grote schuifknop meer, enkel het algemene percentage voor de kaarten zonder eigen %.
-        <div className="bod-algemeen">
-          <span className="bod-algemeen-tekst">
-            <strong>{ruil ? "Ruil" : "Inkoop"} · algemeen</strong>
-            <span className="zacht klein">voor de kaarten zonder eigen %</span>
-          </span>
-          <span className="pct-stapper groot">
-            <button onClick={() => { setEigen(""); kies({ pct: Math.max(PCT_MIN, pct - 5), afronding: b.afronding === "eigen" ? "exact" : b.afronding, eigen: null }); }} disabled={pct <= PCT_MIN} aria-label="Algemeen 5% minder">−</button>
-            <span>{pct}%</span>
-            <button onClick={() => { setEigen(""); kies({ pct: Math.min(PCT_MAX, pct + 5), afronding: b.afronding === "eigen" ? "exact" : b.afronding, eigen: null }); }} disabled={pct >= PCT_MAX} aria-label="Algemeen 5% meer">+</button>
-          </span>
-          {eigenPct && <span className="bod-samen-label">samen <strong>{samen}%</strong></span>}
-        </div>
-      ) : (
+      {!b.perKaart && (
         <label className="bod-slider">
           <span className="bod-slider-kop">
             <span>{ruil ? "Ruil" : "Inkoop"} · % van de marktwaarde</span>
@@ -386,33 +383,43 @@ function BodPaneel() {
           </span>
           <span className="bod-slider-baan">
             <input type="range" min={PCT_MIN} max={PCT_MAX} step={5} value={pct} aria-label="Percentage van de marktwaarde"
-              onChange={(e) => { setEigen(""); kies({ pct: Number(e.target.value), afronding: b.afronding === "eigen" ? "exact" : b.afronding, eigen: null }); }} />
+              onChange={(e) => { setBewerk(null); kies({ pct: Number(e.target.value), afronding: b.afronding === "eigen" ? "exact" : b.afronding, eigen: null }); }} />
           </span>
           <span className="bod-schaal" aria-hidden="true">{Array.from({ length: (PCT_MAX - PCT_MIN) / 5 + 1 }, (_, i) => <span key={i}>{PCT_MIN + i * 5}</span>)}</span>
         </label>
       )}
-      {b.perKaart && !eigenPct && <p className="zacht klein bod-uitleg">Geef een kaart hierboven met − en + een eigen percentage.</p>}
-      <div className="bod-som">{eigenPct ? `Samen ${samen}%` : `${pct}%`} van {euro(m.totaal)} = <strong>{euro(exact)}</strong></div>
-      <div className="bod-keuzes">
-        {keuzes.map((k) => (
-          <button key={k.afronding} className={`bod-keuze${b.afronding === k.afronding ? " aan" : ""}`} onClick={() => { setEigen(""); kies({ afronding: k.afronding, eigen: null }); }}>
-            <strong>{euro(k.bedrag)}</strong>
-            <span>{k.afronding === "exact" ? "exact" : k.afronding.startsWith("omlaag") ? "↓ afronden" : "↑ afronden"}</span>
-          </button>
-        ))}
+      {/* Per kaart: elke kaart hierboven heeft haar eigen % (standaard {pct}%); hier enkel wat dat samen geeft. */}
+      <div className="bod-som">
+        {b.perKaart ? <>Samen <strong className="samen">{samen}%</strong></> : `${pct}%`} van {euro(m.totaal)} = <strong>{euro(exact)}</strong>
       </div>
-      <div className="bod-eigen">
-        <span className={`euro-invoer mini${b.afronding === "eigen" ? " aan" : ""}`}><span>€</span>
-          <input inputMode="decimal" value={eigen} placeholder="Eigen bod" aria-label="Eigen bod" onChange={(e) => typ(e.target.value)} />
-        </span>
-        {b.afronding === "eigen" ? <span className={`bod-pct${nuPct > 100 ? " hoog" : ""}`}>{nuPct}%</span> : <span className="zacht klein">of typ zelf een bedrag</span>}
-      </div>
+      {bewerk != null ? (
+        // Zelf een bedrag typen: één vast veld, zodat het blijft staan terwijl je typt.
+        <div className="bod-keuzes">
+          <span className="bod-keuze aan bewerk">
+            <span className="euro-invoer mini"><span>€</span>
+              <input autoFocus inputMode="decimal" value={bewerk} aria-label="Eigen bedrag" onChange={(e) => typ(e.target.value)}
+                onBlur={klaarMetTypen} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+            </span>
+            <span>eigen bedrag</span>
+          </span>
+        </div>
+      ) : (
+        <div className="bod-keuzes">
+          {lijst.map((k) => (
+            <button key={k.sleutel} className={`bod-keuze${k.aan ? " aan" : ""}`}
+              onClick={() => (k.aan ? setBewerk(String(k.bedrag).replace(".", ",")) : k.kies())}
+              aria-label={k.aan ? `${euro(k.bedrag)}, tik om zelf een bedrag te typen` : undefined}>
+              <strong>{euro(k.bedrag)}</strong>
+              <span>{k.label}{k.aan && <Icoon naam="potlood" maat={11} />}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <div className={`bod-stand${m.bod > m.totaal ? " hoog" : ""}`}>
         <Icoon naam={m.bod > m.totaal ? "waarschuwing" : "check"} maat={16} />
         <span>We betalen <strong>{euro(m.bod)}</strong> · {nuPct}% van de marktwaarde{m.bod > m.totaal ? ", meer dan ze waard zijn" : ""}</span>
       </div>
       {zonderMarkt > 0 && <p className="zacht klein">Plus {euro(zonderMarkt)} voor kaarten zonder marktwaarde.</p>}
-      <p className="zacht klein bod-uitleg">Per kaart zie je hierboven wat we echt betalen{eigenPct ? "" : " (in verhouding tot de marktwaarde)"}. Zo komt het ook in de boekhouding.</p>
       {m.zonder > 0 && <p className="nakijken klein">{m.zonder === 1 ? "1 kaart heeft" : `${m.zonder} kaarten hebben`} geen marktwaarde: tik op "markt?" om ze er een te geven.</p>}
     </div>
   );

@@ -83,8 +83,9 @@ function fouten(page) {
   // Het bod voor alle kaarten van de klant samen: een eigen bedrag (zoals de testcase het afspreekt).
   async function bied(bedrag) {
     const p = page.locator(".bod-paneel");
-    await p.getByLabel("Eigen bod").fill(String(bedrag));
-    await p.getByLabel("Eigen bod").press("Enter");
+    await p.locator("button.bod-keuze.aan").click(); // nog eens tikken op het gekozen bedrag = zelf typen
+    await p.getByLabel("Eigen bedrag").fill(String(bedrag));
+    await p.getByLabel("Eigen bedrag").press("Enter");
     await p.locator(".bod-stand", { hasText: String(bedrag) }).waitFor();
   }
   async function prijs(naam, bedrag) {
@@ -375,8 +376,12 @@ function fouten(page) {
   const betaald = kaarten.reduce((x, t) => x + Number(t.replace(/[^\d,]/g, "").replace(",", ".")), 0);
   const stand = Number((await paneel.locator(".bod-stand strong").innerText()).replace(/[^\d,]/g, "").replace(",", "."));
   assert.ok(Math.abs(betaald - stand) < 0.005 && Number.isInteger(stand), `afgerond bod ${stand} verdeeld over de kaarten (${betaald})`);
-  await paneel.getByLabel("Eigen bod").fill("12");
-  assert.match(await paneel.locator(".bod-pct").innerText(), /\d+%/);
+  assert.equal(await paneel.getByLabel("Eigen bod").count(), 0, "geen apart veld voor een eigen bod meer");
+  await paneel.locator("button.bod-keuze.aan").click();
+  await paneel.getByLabel("Eigen bedrag").fill("12");
+  await paneel.getByLabel("Eigen bedrag").press("Enter");
+  await paneel.locator(".bod-keuze.aan", { hasText: "eigen" }).waitFor();
+  assert.match(await paneel.locator(".bod-stand").innerText(), /We betalen €\s?12(,00)? · \d+% van de marktwaarde/);
   await foto("09b-bod");
   await geenHorizontaleScroll("bod");
   await page.getByRole("button", { name: "Leegmaken" }).click();
@@ -544,14 +549,17 @@ function fouten(page) {
   const pk = page.locator(".bod-paneel");
   await pk.getByRole("button", { name: "Per kaart" }).click();
   assert.equal(await pk.locator(".bod-slider").count(), 0, "per kaart: geen grote schuifknop");
-  for (let i = 0; i < 2; i++) { await pk.getByRole("button", { name: "Algemeen 5% meer" }).click(); await wacht(80); }
-  assert.match(await pk.locator(".bod-algemeen").innerText(), /80%/);
+  assert.equal(await pk.getByRole("button", { name: /^Algemeen/ }).count(), 0, "per kaart: geen algemeen percentage meer");
   const vintage = page.locator(".regel", { hasText: "Vintage Base" });
+  assert.match(await vintage.locator(".pct-stapper").innerText(), /70%/, "elke kaart begint op 70%");
+  for (const naam of ["Modern A", "Modern B"]) {
+    const r = page.locator(".regel", { hasText: naam });
+    for (let i = 0; i < 2; i++) { await r.getByRole("button", { name: /5% meer/ }).dispatchEvent("click"); await wacht(120); }
+  }
   await vintage.evaluate((el) => el.scrollIntoView({ block: "center" }));
-  for (let i = 0; i < 3; i++) { await vintage.getByRole("button", { name: /5% minder/ }).dispatchEvent("click"); await wacht(120); }
-  await pk.locator(".bod-samen-label").waitFor();
-  assert.match(await pk.locator(".bod-samen-label").innerText(), /samen\s*72%/, "het algemene percentage toont het nieuwe totaal");
+  await vintage.getByRole("button", { name: /5% minder/ }).dispatchEvent("click"); await wacht(120);
   assert.match(await pk.locator(".bod-som").innerText(), /Samen 72% van €\s?720(,00)? = €\s?516(,00)?/);
+  assert.equal(await pk.locator(".bod-som strong.samen").innerText(), "72%", "samen in het rood");
   assert.match(await vintage.innerText(), /65%/);
   await foto("22-per-kaart");
   await geenHorizontaleScroll("per kaart");
@@ -789,21 +797,23 @@ function fouten(page) {
   const fk = fouten(klant);
   await klant.goto(BASIS + "catalogus/?demo=1");
   await klant.waitForURL((u) => !u.pathname.includes("/catalogus/"));
-  // De start: wie we zijn, wat we aanbieden (een binderpagina met vier vakken), onze komende beurzen.
+  // De start (0.12): onze binders als een waaier, wat we aanbieden (vier vakken), onze komende beurzen.
   await klant.getByRole("heading", { name: "Binders die even uniek zijn als je collectie" }).waitFor();
   assert.ok(await klant.locator(".klant-merk img").isVisible(), "logo linksboven");
   assert.match(await klant.locator(".klant-balk .klant-ig-knop").first().getAttribute("href"), /instagram\.com\/bindr\.test\//);
-  assert.equal(await klant.locator(".binderpagina .pocket").count(), 4, "kaarten, binders, 3D-prints en sealed");
-  assert.equal(await klant.locator(".zipbinder .zip-rits").count(), 1, "de kaft is een zip-binder");
+  assert.equal(await klant.locator(".vakken .vak").count(), 4, "kaarten, binders, 3D-prints en sealed");
+  assert.equal(await klant.locator(".zipbinder, .binderpagina, .ontwerp-banner").count(), 0, "geen nep-binder, geen hoesjes, geen tweede ontwerp-knop");
+  assert.equal(await klant.locator(".waaier-foto.kaal").count(), 5, "nog geen drie foto's van ons werk: de voorbeeldbinders");
+  assert.equal(await klant.locator('.klant-inhoud a[href="#ontwerp"]').count(), 1, "Ontwerp je binder maar één keer op de start");
   assert.match(await klant.locator(".beurzen").innerText(), /Beurs Antwerpen[\s\S]*Antwerp Expo[\s\S]*10:00–17:00/, "geplande beurs op de klantenpagina, met de uren");
   assert.equal(await klant.locator(".ticket a", { hasText: "Website van de beurs" }).getAttribute("href"), "https://www.antwerpexpo.be/");
   assert.match(await klant.locator(".ticket .ticket-nog").innerText(), /Over \d+ (dagen|weken)/);
-  await klant.waitForTimeout(2400); // de titel wordt gegraveerd
+  await klant.waitForTimeout(1200); // de glans over de voorste binder
   await klant.screenshot({ path: path.join(SHOTS, "14a-klant-start.png") });
   await geenHorizontaleScroll("klantenpagina start", klant);
   assert.equal(await klant.locator(".tabbalk, .kop-knoppen, .beurs-balk").count(), 0, "geen beheer op de klantenpagina");
-  // Naar de kaarten via het vak op de binderpagina; de rest via de balk onderaan.
-  await klant.locator(".pocket.kaarten").click();
+  // Naar de kaarten via het vak; de rest via de balk onderaan.
+  await klant.locator(".vak.kaarten").click();
   await klant.waitForURL(/#kaarten$/);
   await klant.locator(".tegel").first().waitFor();
   const verwacht = await klant.evaluate(() => {
@@ -913,7 +923,7 @@ function fouten(page) {
   assert.match(aanvraag?.artwork ?? "", /^data:image\/png;base64,/, "het ontwerp gaat mee");
   assert.match(aanvraag?.voorbeeld ?? "", /^data:image\/jpeg;base64,/, "het voorbeeld op de binder gaat mee");
   await klant.locator(".klant-nav.onder a", { hasText: "Start" }).click();
-  await klant.locator(".binderpagina").waitFor();
+  await klant.locator(".vakken").waitFor();
   assert.deepEqual(fk, [], "geen fouten op de klantenpagina");
   await klant.close();
 
@@ -937,9 +947,20 @@ function fouten(page) {
   const klant2 = await ctx.newPage();
   const fk2 = fouten(klant2);
   await klant2.goto(BASIS + "?demo=1");
-  await klant2.locator(".etalage-foto").first().waitFor();
-  assert.ok(await klant2.locator(".etalage-foto").count() >= 2, "de etalage zweeft op de start");
-  assert.equal(await klant2.locator(".etalage-foto").first().getAttribute("href"), "https://www.instagram.com/p/test/");
+  await klant2.locator(".waaier-foto").first().waitFor();
+  assert.ok(await klant2.locator(".waaier-foto").count() >= 3, "de etalage en onze binderfoto's in de waaier");
+  assert.equal(await klant2.locator(".waaier-foto.kaal").count(), 0, "nooit door elkaar met de voorbeeldbinders");
+  assert.equal(await klant2.locator(".waaier-foto.o0").getAttribute("href"), "https://www.instagram.com/p/test/");
+  // Een binder opzij aantikken brengt hem naar voren (en opent hem nog niet).
+  await klant2.locator(".waaier").hover(); // met de muis erop draait de waaier niet vanzelf verder
+  await klant2.waitForTimeout(1000);
+  const naarVoren = await klant2.locator(".waaier-foto.r1").getAttribute("href");
+  const welke = await klant2.locator(".waaier-foto").evaluateAll((l) => l.findIndex((e) => e.classList.contains("r1")));
+  const r1 = await klant2.locator(".waaier-foto.r1").boundingBox();
+  await klant2.mouse.click(r1.x + r1.width - 14, r1.y + r1.height / 2); // het stuk dat rechts achter de voorste uitsteekt
+  await klant2.waitForTimeout(300);
+  assert.equal(await klant2.locator(".waaier-bolletjes button").nth(welke).getAttribute("aria-current"), "true", `de binder opzij (${naarVoren}) staat nu vooraan`);
+  assert.ok(!/instagram/.test(klant2.url()), "nog niet weg naar Instagram");
   await klant2.waitForTimeout(2400);
   await klant2.screenshot({ path: path.join(SHOTS, "14g-klant-etalage.png") });
   assert.deepEqual(fk2, [], "geen fouten op de klantenpagina (etalage)");

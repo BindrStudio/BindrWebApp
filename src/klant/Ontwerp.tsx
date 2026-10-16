@@ -6,8 +6,8 @@ import { useEffect, useRef, useState, type PointerEvent as WijsEvent, type React
 import { SUPABASE_KEY, SUPABASE_URL } from "../config";
 import { uuid } from "../lib/uuid";
 import {
-  BINDER_H, BINDER_KLEUREN, BINDER_W, binderIn, grenzen, houdBinnen, ideeAfbeelding, INKTEN, leesOntwerp, lichtOpDonker, maakMasker, midden, ontwerpAlsPng,
-  teken, voorbeeldAlsJpeg, type BinderKleur, type Inkt, type Ontwerp, type Plaatsing,
+  BINDER_H, BINDER_KLEUREN, BINDER_W, binderIn, grenzen, houdBinnen, ideeAfbeelding, leesOntwerp, lichtOpDonker, maakMasker, midden, ontwerpAlsPng,
+  teken, voorbeeldAlsJpeg, type BinderKleur, type Ontwerp, type Plaatsing,
 } from "./binder";
 
 const GROOTTES = ["4-pocket", "9-pocket", "12-pocket", "Weet ik nog niet"];
@@ -17,12 +17,12 @@ const MAX_BEELDEN = 3;
 interface Props { demo: boolean; sleutel: string | null; ig: string; igLink: string; basis: string }
 
 /** Wat de proef op de binder doorgeeft aan het formulier. */
-interface Proefstand { ontwerp: Ontwerp | null; plaats: Plaatsing | null; inkt: Inkt; binder: HTMLCanvasElement | null }
+interface Proefstand { ontwerp: Ontwerp | null; plaats: Plaatsing | null; binder: HTMLCanvasElement | null }
 
 export function OntwerpPagina({ demo, sleutel, ig, igLink, basis }: Props) {
-  const [kleur, setKleur] = useState<BinderKleur>(BINDER_KLEUREN[1]);
+  const [kleur, setKleur] = useState<BinderKleur>(BINDER_KLEUREN[0]);
   const [proefAan, setProefAan] = useState(false);
-  const proef = useRef<Proefstand>({ ontwerp: null, plaats: null, inkt: INKTEN[0], binder: null });
+  const proef = useRef<Proefstand>({ ontwerp: null, plaats: null, binder: null });
   const [heeftOntwerp, setHeeftOntwerp] = useState(false);
   return (
     <>
@@ -45,7 +45,6 @@ export function OntwerpPagina({ demo, sleutel, ig, igLink, basis }: Props) {
 function Proef({ kleur, basis, onStand }: { kleur: BinderKleur; basis: string; onStand: (s: Proefstand) => void }) {
   const [binder, setBinder] = useState<HTMLCanvasElement | null>(null);
   const [laadFout, setLaadFout] = useState(false);
-  const [inkt, setInkt] = useState(INKTEN[0]);
   const [bron, setBron] = useState<HTMLCanvasElement | null>(null);
   const [ontwerp, setOntwerp] = useState<Ontwerp | null>(null);
   const [plaats, setPlaats] = useState<Plaatsing | null>(null);
@@ -71,9 +70,7 @@ function Proef({ kleur, basis, onStand }: { kleur: BinderKleur; basis: string; o
     binderIn(kleur, `${basis}img/binder-zip.webp`).then((b) => { if (!weg) setBinder(b); }, () => { if (!weg) setLaadFout(true); });
     return () => { weg = true; };
   }, [kleur, basis]);
-  // Lichte binder: standaard zwarte inkt, donkere binder: witte.
-  useEffect(() => { setInkt(kleur.id === "geel" || kleur.id === "roze" ? INKTEN[2] : INKTEN[0]); }, [kleur]);
-  useEffect(() => { onStand({ ontwerp, plaats, inkt, binder }); }, [ontwerp, plaats, inkt, binder]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onStand({ ontwerp, plaats, binder }); }, [ontwerp, plaats, binder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tekenen, scherp op elk scherm.
   useEffect(() => {
@@ -86,8 +83,8 @@ function Proef({ kleur, basis, onStand }: { kleur: BinderKleur; basis: string; o
     const ctx = c.getContext("2d")!;
     ctx.setTransform(c.width / BINDER_W, 0, 0, c.width / BINDER_W, 0, 0);
     ctx.clearRect(0, 0, BINDER_W, BINDER_H);
-    teken(ctx, binder, ontwerp, plaats, inkt.kleur);
-  }, [binder, ontwerp, plaats, inkt, breedte]);
+    teken(ctx, binder, ontwerp, plaats);
+  }, [binder, ontwerp, plaats, breedte]);
 
   const kies = async (f: File | undefined) => {
     if (!f) return;
@@ -97,7 +94,7 @@ function Proef({ kleur, basis, onStand }: { kleur: BinderKleur; basis: string; o
       const o = maakMasker(c, lichtOpDonker(c));
       setBron(c);
       setOntwerp(o);
-      setPlaats(midden(o, grenzen(o).passend * 0.9));
+      setPlaats(midden(o, grenzen(o).vullend)); // standaard tot aan het stiksel
       setBestandNaam(f.name);
     } catch (e) {
       setBestandFout(e instanceof Error ? e.message : String(e));
@@ -153,19 +150,9 @@ function Proef({ kleur, basis, onStand }: { kleur: BinderKleur; basis: string; o
           <input ref={invoer} type="file" accept="image/svg+xml,image/png,image/jpeg,image/webp,.svg" hidden onChange={(e) => { void kies(e.target.files?.[0]); e.target.value = ""; }} />
         </div>
         {bestandFout && <p className="ontwerp-fout" role="alert">{bestandFout}</p>}
-        <p className="ontwerp-tip">Best: een zwart-wit tekening of logo op een witte of doorzichtige achtergrond. Wat zwart is, wordt gegraveerd; grijs wordt een lichtere gravure.</p>
+        <p className="ontwerp-tip">Best: een zwart-wit tekening of logo op een witte of doorzichtige achtergrond. Wat zwart is, wordt gegraveerd (een gravure is altijd zwart); grijs wordt een lichtere gravure.</p>
         {ontwerp && plaats && g && (
           <>
-            <fieldset className="keuze-groep">
-              <legend>Kleur van de gravure</legend>
-              <div className="segmentje">
-                {INKTEN.map((i) => (
-                  <button key={i.id} type="button" className={i.id === inkt.id ? "aan" : ""} aria-pressed={i.id === inkt.id} onClick={() => setInkt(i)}>
-                    <span className="inkt-bol" style={{ background: i.kleur }} />{i.naam}
-                  </button>
-                ))}
-              </div>
-            </fieldset>
             <label className="keuze-groep schuif">
               <span>Grootte</span>
               <input type="range" min={8} max={Math.max(9, Math.round(g.vullend * 100))} step={1} value={Math.round(plaats.schaal * 100)}
@@ -233,7 +220,7 @@ function Aanvraag({ demo, sleutel, ig, igLink, kleur, setKleur, proefAan, setPro
       grootte: v.grootte, kleur: kleur.naam, idee, toploader,
       beelden: beelden.length ? beelden : null,
       artwork: ontwerpMee && p.ontwerp ? ontwerpAlsPng(p.ontwerp) : null,
-      voorbeeld: ontwerpMee && p.binder ? voorbeeldAlsJpeg(p.binder, p.ontwerp, p.plaats, p.inkt.kleur) : null,
+      voorbeeld: ontwerpMee && p.binder ? voorbeeldAlsJpeg(p.binder, p.ontwerp, p.plaats) : null,
     };
     if (demo) {
       try {

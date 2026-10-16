@@ -1,6 +1,6 @@
 // De klantenpagina: een aparte, publieke pagina zonder login en zonder beheerfuncties.
 //
-// Opbouw: een startpagina (een zip-binder als kaft, foto's van ons werk die rond zweven, wat we aanbieden,
+// Opbouw: een startpagina (een waaier met foto's van onze binders, wat we aanbieden als vier vakken,
 // onze komende beurzen), vier catalogi (#kaarten, #binders, #3d, #sealed) en "Ontwerp je binder" (#ontwerp).
 // Onderaan op de gsm een balk met icoontjes om ertussen te wisselen; op een groot scherm staan ze bovenaan.
 // Ze toont enkel de publieke weergaven in Supabase. Niets uit de beheer-app wordt hier geladen,
@@ -77,7 +77,7 @@ interface Stuk extends Toonbaar {
 interface KomendeBeurs { naam: string; datum: string; locatie: string | null; uren?: string | null; link?: string | null }
 /** Een foto van ons werk op de startpagina (de etalage, beheerd in Profiel › Etalage). */
 interface EtalageRij { id: string; foto?: string | null; titel?: string | null; link?: string | null; volgorde?: number }
-interface EtalageFoto { id: string; src: string; titel: string | null; link: string | null }
+interface EtalageFoto { id: string; src: string; titel: string | null; link: string | null; kaal?: boolean }
 
 const CONDITIE: Record<string, string> = { M: "Mint", NM: "Near Mint", EX: "Excellent", GD: "Good", LP: "Light Played", PL: "Played", PO: "Poor" };
 const taalNaam = (t: string) => TALEN.find((x) => x.code === t)?.label ?? t;
@@ -245,8 +245,8 @@ function KlantPagina() {
         facebook: typeof fb === "string" ? fb : FACEBOOK, bedrijf: bedrijf && typeof bedrijf === "object" ? bedrijf as BedrijfPubliek : null,
         sleutel: typeof sleutel === "string" && sleutel ? sleutel : null,
       });
-      // De foto's van de etalage: eerst de vijf die meteen zweven, de rest rustig daarna (om de 7 seconden drie,
-      // ongeveer zo snel als er een omdraait), en niet zolang de pagina in de achtergrond staat.
+      // De foto's van de etalage: eerst de vijf die meteen in de waaier staan, de rest rustig daarna (om de 7 seconden drie,
+      // ongeveer zo snel als de waaier draait), en niet zolang de pagina in de achtergrond staat.
       void (async () => {
         for (let i = 0; i < etalage.length; i += i ? 3 : 5) {
           if (i) {
@@ -288,6 +288,7 @@ function KlantPagina() {
 
   return (
     <div className={`klant route-${route}${balkWeg ? " balk-weg" : ""}`}>
+      <Sfeer />
       <header className="klant-balk">
         <a href="#" className="klant-merk" aria-label="Bind'r, naar de start">
           <img src={`${BASIS}img/logo-woord.png`} alt="Bind'r" width={150} height={66} />
@@ -340,71 +341,54 @@ function KlantPagina() {
   );
 }
 
-// ── Start: wie we zijn, wat we aanbieden, waar we staan ──────────────────────
+// ── Start: onze binders vooraan, wat we aanbieden, waar we staan ─────────────
+
+/** Zolang er nog geen foto's van ons werk zijn: voorbeeldbinders met een gravure (scripts/voorbeeldbinders.cjs). */
+const VOORBEELDEN = ["oceaanblauw", "geel", "rood", "roze", "paars"];
+const voorbeelden = (): EtalageFoto[] => VOORBEELDEN.map((k) => ({ id: `vb-${k}`, src: `${BASIS}img/voorbeeld/${k}.webp`, titel: null, link: "#binders", kaal: true }));
 
 function Start({ data, stukken, telling, beurzen, ig, demo }: { data: Data | null; stukken: Stuk[]; telling: Record<Plek, number>; beurzen: KomendeBeurs[]; ig: string; demo: boolean }) {
-  // Wat er rond de kaft zweeft: de etalage, aangevuld met de foto's van onze binders; anders onze mooiste kaarten.
+  // Vooraan: de foto's uit de etalage en van onze binders, zonder namen erbij. Nooit door elkaar met de
+  // voorbeelden: vanaf drie eigen foto's enkel die, anders enkel de voorbeeldbinders.
   const fotos = useMemo<EtalageFoto[]>(() => {
     const uit: EtalageFoto[] = [];
     for (const e of data?.etalage ?? []) { const src = veiligeFoto(e.foto); if (src) uit.push({ id: e.id, src, titel: e.titel ?? null, link: veiligeLink(e.link) }); }
-    for (const b of stukken) if (b.plek === "binders" && b.foto) uit.push({ id: `b-${b.id}`, src: b.foto, titel: b.binder?.artwork || b.naam, link: null });
-    if (uit.length < 3) {
-      for (const k of stukken.filter((x) => x.plek === "kaarten" && x.soort === "kaart" && x.afbeelding).sort((a, b) => b.prijs - a.prijs).slice(0, 5 - uit.length)) {
-        uit.push({ id: `k-${k.id}`, src: k.afbeelding!, titel: null, link: "#kaarten" });
-      }
-    }
-    return uit;
+    for (const b of stukken) if (b.plek === "binders" && b.foto) uit.push({ id: `b-${b.id}`, src: b.foto, titel: b.binder?.artwork || b.naam, link: "#binders" });
+    return uit.length >= 3 ? uit : voorbeelden();
   }, [data?.etalage, stukken]);
-  // Eén beeld per vak van de binderpagina: de duurste met een foto.
-  const beeld = (p: Plek) => stukken.filter((s) => s.plek === p && (p === "kaarten" ? s.afbeelding : s.foto)).sort((a, b) => b.prijs - a.prijs)[0] ?? null;
+  // Per soort een paar beelden: de duurste met een foto eerst.
+  const beelden = (p: Plek): Stuk[] => stukken.filter((s) => s.plek === p && (p === "kaarten" ? s.afbeelding : s.foto)).sort((a, b) => b.prijs - a.prijs).slice(0, 3);
   return (
     <>
-      <section className={`held${fotos.length ? " met-etalage" : ""}`} aria-labelledby="held-titel">
-        <div className="zipbinder">
-          <span className="zip-rits" aria-hidden="true" />
-          <span className="zip-trekker" aria-hidden="true"><i /></span>
-          <span className="zip-rug" aria-hidden="true" />
-          <div className="zip-vlak">
-            <h1 id="held-titel" className="gravure"><span className="gravure-tekst">Binders die even uniek zijn als je collectie</span></h1>
-            <p>Bind'r ontwerpt custom binders voor Pokémon-verzamelaars en graveert ze met de laser. Op beurzen vind je ons ook met kaarten, slabs, sealed en 3D-prints.{demo ? " (Voorbeeld met de demo.)" : ""}</p>
-            <div className="held-knoppen">
-              <a className="knop" href="#binders">Bekijk de binders</a>
-              <a className="knop doorzichtig" href="#ontwerp">Ontwerp je eigen</a>
-            </div>
+      <section className="held" aria-labelledby="held-titel">
+        <div className="held-tekst">
+          <h1 id="held-titel">Binders die even uniek zijn als je collectie</h1>
+          <p>Custom binders voor Pokémon-verzamelaars, met de laser gegraveerd.{demo ? " (Voorbeeld met de demo.)" : ""}</p>
+          <div className="held-knoppen">
+            <a className="knop" href="#binders">Bekijk de binders</a>
+            <a className="knop zacht" href="#ontwerp">Ontwerp je binder</a>
           </div>
-          <img className="kaft-eend" src={`${BASIS}img/eend.png`} alt="" width={120} height={120} />
         </div>
-        <Etalage fotos={fotos} />
+        <Waaier fotos={fotos} />
       </section>
 
       <section className="aanbod" aria-labelledby="aanbod-titel">
         <h2 id="aanbod-titel">Wat je bij ons vindt</h2>
-        <div className="binderpagina">
-          <span className="pagina-rug" aria-hidden="true" />
-          <div className="pockets">
-            <Pocket plek="kaarten" titel="Kaarten" tekst={data ? `${telling.kaarten} singles en slabs` : "…"} beeld={beeld("kaarten")} />
-            <Pocket plek="binders" titel="Binders" tekst={data ? (telling.binders ? `${telling.binders} ontwerpen van ons` : "Ons eigen werk") : "…"} beeld={beeld("binders")} />
-            <Pocket plek="3d" titel="3D-prints" tekst={data ? (telling["3d"] ? `${telling["3d"]} stuks` : "Aan onze stand") : "…"} beeld={beeld("3d")} />
-            <Pocket plek="sealed" titel="Sealed" tekst={data ? (telling.sealed ? `${telling.sealed} stuks` : "Aan onze stand") : "…"} beeld={beeld("sealed")} />
-          </div>
+        <div className="vakken">
+          <Vak plek="kaarten" titel="Kaarten" tekst={data ? `${telling.kaarten} singles en slabs` : "…"} beelden={beelden("kaarten")} />
+          <Vak plek="binders" titel="Binders" tekst={data ? (telling.binders ? `${telling.binders} ontwerpen van ons` : "Ons eigen werk") : "…"} beelden={beelden("binders")} />
+          <Vak plek="3d" titel="3D-prints" tekst={data ? (telling["3d"] ? `${telling["3d"]} stuks` : "Aan onze stand") : "…"} beelden={beelden("3d")} />
+          <Vak plek="sealed" titel="Sealed" tekst={data ? (telling.sealed ? `${telling.sealed} stuks` : "Aan onze stand") : "…"} beelden={beelden("sealed")} />
         </div>
       </section>
 
-      <a className="ontwerp-banner" href="#ontwerp">
-        <span className="ontwerp-banner-tekst">
-          <strong>Je eigen ontwerp op een binder?</strong>
-          <span>Probeer je tekening of logo op een zip-binder en vraag hem aan.</span>
-        </span>
-        <span className="ontwerp-banner-pijl" aria-hidden="true"><OntwerpIcoon maat={24} /></span>
-      </a>
-
-      <Beurzen beurzen={beurzen} ig={ig} geladen={!!data} />
+      {/* Geen beurs gepland: dan geen lege sectie (onderaan staat al waar je ons volgt). */}
+      {beurzen.length > 0 && <Beurzen beurzen={beurzen} ig={ig} geladen={!!data} />}
 
       <section className="over" aria-labelledby="over-titel">
-        <img className="over-logo" src={`${BASIS}img/logo.png`} alt="" width={240} height={160} loading="lazy" />
         <div className="over-tekst">
           <h2 id="over-titel">Over Bind'r</h2>
-          <p>Een gewone kaartmap wordt bij ons een stuk van je collectie. Wil je een naam of je eigen ontwerp op je binder? Vraag het via <a href="#ontwerp">Ontwerp je binder</a>, aan de stand of op Instagram.</p>
+          <p>Een gewone kaartmap wordt bij ons een stuk van je collectie. Een naam of je eigen tekening op je binder? Dat vraag je bij Ontwerp, hierboven in het menu.</p>
           <ul className="over-lijst">
             <li><OntwerpIcoon /><span><strong>Eigen ontwerp.</strong> Elk artwork maken we zelf, geïnspireerd op Pokémon, sets en card art.</span></li>
             <li><LaserIcoon /><span><strong>Lasergravure.</strong> Het ontwerp gaat er met de laser in, op de voorkant of op voor- én achterkant.</span></li>
@@ -429,77 +413,123 @@ function useBreed(px: number): boolean {
 }
 
 /**
- * Foto's van ons werk die rond de kaft zweven. Om de paar seconden draait er één om naar een volgende foto,
- * zodat je na een tijdje alles gezien hebt. Bij "minder beweging" staan ze stil en wisselen ze niet.
+ * Onze binders als een waaier, zoals kaarten in je hand. Om de paar seconden schuift de voorste opzij en komt de
+ * volgende naar voren, met één keer een holo-glans erover (zoals een holo-kaart) en een sterretje. Vegen of tikken
+ * neemt het over (dan draait hij niet meer vanzelf); stil zolang hij niet in beeld is, de muis erop staat of bij
+ * "minder beweging". De bolletjes eronder tonen waar je bent en zijn ook knoppen.
  */
-function Etalage({ fotos }: { fotos: EtalageFoto[] }) {
-  const breed = useBreed(760);
-  const vakken = Math.min(fotos.length, breed ? 5 : 3);
-  // Per vak de id van de foto (niet de plaats in de lijst: die schuift als er later foto's binnenkomen).
-  const [toon, setToon] = useState<string[]>([]);
-  const lijst = useRef(fotos);
-  lijst.current = fotos;
-  const volgende = useRef(0);
+function Waaier({ fotos }: { fotos: EtalageFoto[] }) {
+  const breed = useBreed(1000);
+  const half = breed ? 2 : 1; // zoveel links en rechts van de voorste
+  const [voor, setVoor] = useState(0);
+  const [stil, setStil] = useState(false);
+  const [zelf, setZelf] = useState(false); // de bezoeker nam het over: niet meer vanzelf draaien
+  const [inBeeld, setInBeeld] = useState(true);
+  const aantal = fotos.length;
+  const ref = useRef({ aantal, x: 0, id: -1 });
+  ref.current.aantal = aantal;
+  const veegde = useRef(false);
+  const doos = useRef<HTMLDivElement>(null);
+  const naar = (i: number) => setVoor(((i % Math.max(1, ref.current.aantal)) + ref.current.aantal) % Math.max(1, ref.current.aantal));
+  const volgende = (stap: number) => setVoor((v) => (v + stap + ref.current.aantal) % Math.max(1, ref.current.aantal));
   useEffect(() => {
-    setToon((nu) => {
-      const ids = fotos.map((f) => f.id);
-      const blijft = nu.filter((id) => ids.includes(id)).slice(0, vakken);
-      for (const id of ids) { if (blijft.length >= vakken) break; if (!blijft.includes(id)) blijft.push(id); }
-      return blijft.length === nu.length && blijft.every((x, i) => x === nu[i]) ? nu : blijft;
-    });
-  }, [fotos, vakken]);
-  const wisselt = fotos.length > vakken;
+    const el = doos.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([x]) => setInBeeld(x.isIntersecting), { threshold: 0.3 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
   useEffect(() => {
-    if (!wisselt || minderBeweging()) return;
-    let beurt = 0;
-    const t = setInterval(() => {
-      if (document.hidden) return;
-      setToon((nu) => {
-        const l = lijst.current;
-        if (!nu.length || l.length <= nu.length) return nu;
-        let k = volgende.current % l.length;
-        for (let i = 0; i < l.length && nu.includes(l[k].id); i++) k = (k + 1) % l.length;
-        volgende.current = k + 1;
-        // De vakken om beurten, niet links naar rechts: dat oogt rustiger.
-        const vak = [0, 2, 1, 4, 3][beurt++ % 5] % nu.length;
-        return nu.map((x, i) => (i === vak ? l[k].id : x));
-      });
-    }, 3600);
+    if (aantal < 2 || stil || zelf || !inBeeld || minderBeweging()) return;
+    const t = setInterval(() => { if (!document.hidden) volgende(1); }, 5500);
     return () => clearInterval(t);
-  }, [wisselt]);
-  if (!vakken) return null;
+  }, [aantal > 1, stil, zelf, inBeeld]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!aantal) return null;
+  const neer = (e: WijsEvent<HTMLDivElement>) => { ref.current.x = e.clientX; ref.current.id = e.pointerId; };
+  const los = (e: WijsEvent<HTMLDivElement>) => {
+    if (ref.current.id !== e.pointerId) return;
+    const dx = e.clientX - ref.current.x;
+    ref.current.id = -1;
+    if (Math.abs(dx) > 40) { volgende(dx < 0 ? 1 : -1); veegde.current = true; setZelf(true); }
+  };
   return (
-    <div className={`etalage n${vakken}`} aria-label="Wat we maken">
-      {toon.map((id, vak) => {
-        const f = fotos.find((x) => x.id === id);
-        if (!f) return null;
-        const extern = !!f.link && /^https?:/.test(f.link);
-        return (
-          <a key={vak} className={`etalage-foto e${vak}`} href={f.link ?? "#binders"} target={extern ? "_blank" : undefined} rel={extern ? "noreferrer" : undefined}
-            aria-label={f.titel ? `${f.titel}${extern ? " (op Instagram)" : ""}` : "Bekijk onze binders"}>
-            <span className="etalage-kader" key={f.id}>
-              <img src={f.src} alt="" loading={vak < 3 ? "eager" : "lazy"} decoding="async" />
-              {f.titel && <span className="etalage-titel">{f.titel}</span>}
-            </span>
-          </a>
-        );
-      })}
+    <div className="waaier-blok">
+      <div ref={doos} className="waaier" role="group" aria-roledescription="carrousel" aria-label="Onze binders"
+        onPointerDown={neer} onPointerUp={los} onPointerCancel={() => { ref.current.id = -1; }}
+        onPointerEnter={(e) => { if (e.pointerType === "mouse") setStil(true); }} onPointerLeave={() => setStil(false)}
+        onFocus={() => setStil(true)} onBlur={() => setStil(false)}>
+        {fotos.map((f, i) => {
+          // Plaats ten opzichte van de voorste: 0 = vooraan in het midden, negatief links, positief rechts.
+          let o = (i - voor + aantal) % aantal;
+          if (o > aantal / 2) o -= aantal;
+          const zichtbaar = Math.abs(o) <= half;
+          const plek = o === 0 ? "o0" : zichtbaar ? `${o < 0 ? "l" : "r"}${Math.abs(o)}` : o < 0 ? "weg-l" : "weg-r";
+          const extern = !!f.link && /^https?:/.test(f.link);
+          return (
+            <a key={f.id} className={`waaier-foto ${plek}${f.kaal ? " kaal" : ""}`} href={f.link ?? "#binders"}
+              style={f.kaal ? ({ "--beeld": `url("${f.src}")` } as React.CSSProperties) : undefined}
+              target={extern ? "_blank" : undefined} rel={extern ? "noreferrer" : undefined} tabIndex={zichtbaar ? 0 : -1} aria-hidden={!zichtbaar}
+              aria-label={f.titel ? `${f.titel}${extern ? " (op Instagram)" : ""}` : "Bekijk onze binders"}
+              onClick={(e) => {
+                // Na vegen niets openen; een binder opzij eerst naar voren halen, de voorste openen.
+                if (veegde.current) { veegde.current = false; e.preventDefault(); return; }
+                if (o !== 0) { e.preventDefault(); setZelf(true); volgende(o); }
+              }}>
+              <img src={f.src} alt="" loading={zichtbaar ? "eager" : "lazy"} decoding="async" draggable={false} />
+              {/* De glans en het sterretje komen opnieuw bij elke binder die vooraan landt (key = wie vooraan staat). */}
+              {o === 0 && <span key={`g${voor}`} className="waaier-glans" aria-hidden="true" />}
+              {o === 0 && (
+                <svg key={`s${voor}`} className="waaier-ster" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 1c.7 5.6 3.4 9.3 11 11-7.6 1.7-10.3 5.4-11 11-.7-5.6-3.4-9.3-11-11 7.6-1.7 10.3-5.4 11-11Z" />
+                </svg>
+              )}
+            </a>
+          );
+        })}
+      </div>
+      {aantal > 1 && (
+        <div className="waaier-bolletjes">
+          {fotos.map((f, i) => (
+            <button key={f.id} type="button" className={i === voor ? "aan" : ""} aria-label={`Binder ${i + 1} van ${aantal}`} aria-current={i === voor}
+              onClick={() => { setZelf(true); naar(i); }} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-/** Eén vak van de binderpagina: een hoesje dat langs de zijkant opent (zoals in een zip-binder), met een etiket eronder. */
-function Pocket({ plek, titel, tekst, beeld }: { plek: Plek; titel: string; tekst: string; beeld: Stuk | null }) {
+/** Een soort uit ons aanbod: een paar beelden als een klein waaiertje, met de naam en hoeveel er zijn. */
+function Vak({ plek, titel, tekst, beelden }: { plek: Plek; titel: string; tekst: string; beelden: Stuk[] }) {
+  // Nog geen foto's van onze binders: de voorbeeldbinders.
+  const voorbeeld = plek === "binders" && !beelden.length ? voorbeelden().slice(0, 3) : [];
+  const n = beelden.length || voorbeeld.length;
   return (
-    <a className={`pocket ${plek}`} href={`#${plek}`}>
-      <span className="pocket-hoes">
-        {beeld ? (
-          plek === "kaarten" ? <Foto kaart={beeld} alt="" /> : <img className="pocket-foto" src={beeld.foto!} alt="" loading="lazy" />
-        ) : <span className="pocket-leeg" aria-hidden="true">{ROUTES.find((r) => r.id === plek)?.icoon()}</span>}
-        <span className="pocket-glans" aria-hidden="true" />
+    <a className={`vak ${plek}`} href={`#${plek}`}>
+      <span className={`vak-beeld n${n}`} aria-hidden="true">
+        {beelden.length ? beelden.map((b) => (
+          <span key={b.id} className="vak-kaart">
+            {plek === "kaarten" ? <Foto kaart={b} alt="" /> : <img src={b.foto!} alt="" loading="lazy" />}
+          </span>
+        )) : voorbeeld.length ? voorbeeld.map((v) => (
+          <span key={v.id} className="vak-kaart kaal"><img src={v.src} alt="" loading="lazy" /></span>
+        )) : <span className="vak-icoon">{ROUTES.find((r) => r.id === plek)?.icoon()}</span>}
       </span>
-      <span className="pocket-etiket"><strong>{titel}</strong><span>{tekst}</span></span>
+      <span className="vak-tekst"><strong>{titel}</strong><span>{tekst}</span></span>
+      <span className="vak-pijl" aria-hidden="true"><PijlIcoon /></span>
     </a>
+  );
+}
+
+/** De sfeer van ons logo: een paar belletjes die zacht zweven en sterretjes die om beurten even oplichten, achter alles. */
+function Sfeer() {
+  return (
+    <div className="sfeer" aria-hidden="true">
+      {Array.from({ length: 5 }, (_, i) => <span key={`b${i}`} className={`belletje b${i}`} />)}
+      {Array.from({ length: 5 }, (_, i) => (
+        <svg key={`s${i}`} className={`sterretje s${i}`} viewBox="0 0 24 24"><path d="M12 1c.7 5.6 3.4 9.3 11 11-7.6 1.7-10.3 5.4-11 11-.7-5.6-3.4-9.3-11-11 7.6-1.7 10.3-5.4 11-11Z" /></svg>
+      ))}
+    </div>
   );
 }
 
@@ -1081,6 +1111,7 @@ const KubusIcoon = () => <Svg maat={22}><path d="M12 3.5 19.5 7.6v8.8L12 20.5l-7
 const PackIcoon = () => <Svg maat={22}><path d="M6 3.5h12l-.9 1.5.9 1.5v11l-.9 1.5.9 1.5H6l.9-1.5L6 17.5v-11L6.9 5Z" /><path d="M9.5 12h5" /></Svg>;
 const OntwerpIcoon = ({ maat = 22 }: { maat?: number }) => <Svg maat={maat}><path d="m14.5 5.5 4 4L9 19H5v-4Z" /><path d="m12.5 7.5 4 4" /></Svg>;
 const LaserIcoon = () => <Svg maat={22}><path d="M9 3.5h6v5H9Z" /><path d="M12 8.5v6" /><path d="M8.5 17.5 12 14.5l3.5 3M6 20.5h12" /></Svg>;
+const PijlIcoon = () => <Svg maat={18}><path d="M5 12h13M13 6l6 6-6 6" /></Svg>;
 const StandIcoon = () => <Svg maat={22}><path d="M3.5 9.5 6 4.5h12l2.5 5" /><path d="M3.5 9.5a2.8 2.8 0 0 0 5.67 0 2.8 2.8 0 0 0 5.66 0 2.8 2.8 0 0 0 5.67 0" /><path d="M5 12v8h14v-8" /></Svg>;
 const Sparkel = () => <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2c.6 4.6 2.4 7.4 10 10-7.6 2.6-9.4 5.4-10 10-.6-4.6-2.4-7.4-10-10 7.6-2.6 9.4-5.4 10-10Z" /></svg>;
 
