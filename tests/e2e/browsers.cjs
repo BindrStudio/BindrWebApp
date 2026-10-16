@@ -90,7 +90,7 @@ async function profiel(browser, motor, naam, opties) {
 
 async function doorloop(ctx, page, motor, naam, opties) {
   const fouten = [];
-  page.on("pageerror", (e) => fouten.push(`${e.message}`));
+  page.on("pageerror", (e) => fouten.push(`${page.url().replace(BASIS, "/")}: ${e.message} ${String(e.stack || "").split("\n").slice(1, 3).join(" ").trim()}`));
   page.on("dialog", (d) => d.accept());
   const breedte = opties.viewport.width;
   const foto = (n) => page.screenshot({ path: path.join(SHOTS, `${motor}-${naam}-${n}.png`) });
@@ -237,7 +237,7 @@ async function doorloop(ctx, page, motor, naam, opties) {
   await page.locator(".tabbalk").waitFor();
   await nooitTeBreed("beheer na inloggen");
 
-  assert.deepEqual(fouten, [], "geen JavaScript-fouten");
+  assert.equal(fouten.length, 0, `JavaScript-fouten: ${fouten.slice(0, 3).join(" / ")}`);
 }
 
 (async () => {
