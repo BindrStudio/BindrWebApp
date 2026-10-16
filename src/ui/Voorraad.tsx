@@ -11,7 +11,7 @@ import { kantel } from "../lib/kantel";
 import { veiligeFoto } from "../lib/eigenfoto";
 
 import {
-  groepeer, groepSleutel, isNieuw, pastFilters, perSet, SNELFILTERS, SORTERINGEN, setIdVan, sorteer,
+  groepeer, groepSleutel, isNieuw, pastFilters, perSet, SNELFILTERS, SORTERINGEN, setIdVan, setNaam, setTaal, sorteer,
   type Groep, type SetInfo, type Snelfilter, type Sortering, type Toonbaar,
 } from "../lib/weergave";
 import { Badges, Hartje, Icoon, KaartFoto, Leeg } from "./common";
@@ -39,7 +39,7 @@ function toonbaarArtikel(a: Artikel): Toonbaar {
 
 // De sets (naam en release) komen uit een klein bestand, voor "Per set" van nieuw naar oud.
 let setsLaden: Promise<SetInfo | null> | null = null;
-function useSets(): SetInfo | null {
+export function useSets(): SetInfo | null {
   const [sets, setSets] = useState<SetInfo | null>(null);
   useEffect(() => {
     setsLaden ??= fetch("data/sets.json").then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -85,7 +85,7 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
       if (e.soort === "eigen product") continue;
       const id = setIdVan(e);
       if (!id) continue;
-      const x = m.get(id) ?? { id, naam: e.set_naam || sets?.[id]?.[0] || id, aantal: 0, release: sets?.[id]?.[2] ?? "" };
+      const x = m.get(id) ?? { id, naam: setNaam(id, e.set_naam, sets), aantal: 0, release: sets?.[id]?.[2] ?? "" };
       x.aantal++;
       m.set(id, x);
     }
@@ -193,7 +193,7 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
 
       <div className="chips">
         {setLijst.length > 1 && (
-          <SetKiezer sets={setLijst.map((x) => ({ ...x, logo: setLogo(x.id, sets?.[x.id]), code: sets?.[x.id]?.[1] || null }))} gekozen={set} onKies={setSet} />
+          <SetKiezer sets={setLijst.map((x) => ({ ...x, logo: setLogo(x.id, sets?.[x.id]), code: sets?.[x.id]?.[1] || null, taal: setTaal(sets?.[x.id]), intl: sets?.[x.id]?.[5] || null, eigen: sets?.[x.id]?.[6] || null }))} gekozen={set} onKies={setSet} />
         )}
         {catalogus && teWijzigen.size > 0 && <FilterChip aan={filter === "wijzigen"} onClick={() => setFilter(filter === "wijzigen" ? "geen" : "wijzigen")} rood>Te wijzigen {teWijzigen.size}</FilterChip>}
         {!catalogus && stijgers.size > 0 && <FilterChip aan={filter === "gestegen"} onClick={() => setFilter(filter === "gestegen" ? "geen" : "gestegen")}>Waarde gestegen {stijgers.size}</FilterChip>}
@@ -218,7 +218,7 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
         <div className="set-groepen">
           {(() => {
             let teller = 0;
-            return perSet(lijst, (it) => it.t).map((g) => {
+            return perSet(lijst, (it) => it.t, sets).map((g) => {
               const start = teller;
               teller += g.items.length;
               return (

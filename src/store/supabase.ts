@@ -1,6 +1,6 @@
 // Supabase via de REST- en login-API, zonder extra bibliotheek.
 import { SUPABASE_KEY, SUPABASE_URL } from "../config";
-import type { Aanwezig, Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Transactie } from "../types";
+import type { Aanwezig, Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
 import { Fout, type Alles, type Backend, type Beheerder, type PrijsMarkering } from "./backend";
 import { schoonArtikel, schoonExemplaar } from "../lib/exemplaar";
 
@@ -18,6 +18,18 @@ const KOLOMMEN_V4: Record<Tabel, string[]> = {
   artikelen: ["aankoopprijs", "foto", "details", "cardmarket_id"],
   beurzen: [],
 };
+const KOLOMMEN_V5: Record<Tabel, string[]> = {
+  exemplaren: ["foto"],
+  artikelen: [],
+  beurzen: [],
+};
+// Exemplaren zonder de eigen foto (die komt apart, zie vulFotos).
+const EXEMPLAAR_KOLOMMEN = [
+  "id", "code", "soort", "kaart_id", "catalogus", "afbeelding", "naam", "naam_origineel", "set_naam", "set_code", "nummer",
+  "taal", "conditie", "variant", "grader", "grade", "cardmarket_id", "opslag", "status", "verkoopprijs", "prijs_handmatig",
+  "hartjesprijs", "hartjesdatum", "aankoopprijs", "aankoopdatum", "aankoopbron", "label_status", "opmerking", "transactie_id",
+  "afgeboekt_op", "vitrine_sinds", "nieuw_hartje", "cert", "verkopen", "omgeving_id", "aangemaakt_op", "gewijzigd_op",
+].join(",");
 
 interface Sessie {
   access_token: string;
@@ -166,17 +178,19 @@ export class SupabaseBackend implements Backend {
   /** True als de database nog het schema van fase 1 heeft (geen beurzen en transacties). */
   schemaOud = false;
 
-  /** 4 = met artikel-details en graded (versie 0.5), 3 = met omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
-  versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v >= 2 && v <= 4 ? v : null; })();
+  /** 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
+  versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v >= 2 && v <= 5 ? v : null; })();
 
   private async zekerVersie() {
     if (this.versie == null) await this.laadOmgevingen().catch(() => undefined);
   }
 
   private schoon<T extends object>(r: T, tabel: Tabel): T {
-    const v = this.versie ?? 4;
-    if (v >= 4) return r;
+    const v = this.versie ?? 5;
+    if (v >= 5) return r;
     const k = { ...r } as Record<string, unknown>;
+    for (const x of KOLOMMEN_V5[tabel]) delete k[x];
+    if (v >= 4) return k as T;
     for (const x of KOLOMMEN_V4[tabel]) delete k[x];
     if (v < 3) for (const x of KOLOMMEN_V3) delete k[x];
     return k as T;
@@ -190,13 +204,17 @@ export class SupabaseBackend implements Backend {
   async laadOmgevingen(): Promise<Omgeving[]> {
     try {
       const o = await this.vraag<Omgeving[]>("GET", "omgevingen?select=id,naam,volgorde,zichtbaar_voor_klanten&order=volgorde.asc,aangemaakt_op.asc");
-      // Bestaan de kolommen van versie 0.5 al? Een onbekende kolom geeft een fout 400.
-      try {
-        await this.vraag("GET", "artikelen?select=id&limit=1&details=not.is.null&foto=is.null"); // filtert op de kolommen, zonder een foto te downloaden
-        this.zetVersie(4);
-      } catch (e) {
-        if (e instanceof Fout && e.status === 400) this.zetVersie(3); else throw e;
-      }
+      // Bestaan de kolommen van versie 0.5 en 0.6 al? Een onbekende kolom geeft een fout 400.
+      // (We filteren op de kolommen, zonder een foto te downloaden.)
+      const bestaat = (pad: string) => this.vraag("GET", pad).then(() => true, (e) => {
+        if (e instanceof Fout && e.status === 400) return false;
+        throw e;
+      });
+      const [v4, v5] = await Promise.all([
+        bestaat("artikelen?select=id&limit=1&details=not.is.null&foto=is.null"),
+        bestaat("transacties?select=id&limit=1&tegenpartij=is.null").then((ok) => ok && bestaat("exemplaren?select=id&limit=1&foto=is.null")),
+      ]);
+      this.zetVersie(v4 && v5 ? 5 : v4 ? 4 : 3);
       return o;
     } catch (e) {
       if (e instanceof Fout && e.status === 404) {
@@ -216,17 +234,18 @@ export class SupabaseBackend implements Backend {
     if ((this.versie ?? 0) < 3) return null;
     const f = `gewijzigd_op=gt.${encodeURIComponent(sinds)}`;
     const [exemplaren, artikelen, beurzen, transacties] = await Promise.all([
-      this.alles<Exemplaar>("exemplaren", "gewijzigd_op.asc", f),
+      this.alles<Exemplaar>("exemplaren", "gewijzigd_op.asc", f, this.exemplaarKolommen()),
       this.alles<Artikel>("artikelen", "gewijzigd_op.asc", f, this.artikelKolommen()),
       this.alles<Beurs>("beurzen", "gewijzigd_op.asc", f),
       this.alles<Transactie>("transacties", "gewijzigd_op.asc", f),
     ]);
-    return { exemplaren: exemplaren.map(schoonExemplaar), artikelen: (await this.vulFotos(artikelen, false)).map(schoonArtikel), beurzen, transacties: transacties.map(getallen) };
+    const [metFoto, artikelenMetFoto] = await Promise.all([this.vulFotos("exemplaren", exemplaren, false), this.vulFotos("artikelen", artikelen, false)]);
+    return { exemplaren: metFoto.map(schoonExemplaar), artikelen: artikelenMetFoto.map(schoonArtikel), beurzen, transacties: transacties.map(getallen) };
   }
 
-  // ── Foto's van artikels: apart en enkel als ze veranderden ──────────────────
+  // ── Eigen foto's (artikels, en kaarten zonder foto): apart en enkel als ze veranderden ──
   // Een foto is tot ~450 kB. Bij elke synchronisatie alles opnieuw downloaden kost op een beurs
-  // (4G) te veel; daarom laden we de rijen zonder foto en houden we de foto's per artikel bij.
+  // (4G) te veel; daarom laden we de rijen zonder foto en houden we de foto's per rij bij.
   private fotos = new Map<string, { gewijzigd: string | null | undefined; foto: string }>();
 
   private artikelKolommen() {
@@ -235,24 +254,30 @@ export class SupabaseBackend implements Backend {
       : "*";
   }
 
-  private async vulFotos(artikelen: Artikel[], alles: boolean): Promise<Artikel[]> {
-    if ((this.versie ?? 0) < 4 || !artikelen.length) return artikelen;
+  private exemplaarKolommen() {
+    return (this.versie ?? 0) >= 5 ? EXEMPLAAR_KOLOMMEN : "*";
+  }
+
+  private async vulFotos<T extends { id: string; foto?: string | null }>(tabel: "artikelen" | "exemplaren", rijen: T[], alles: boolean): Promise<T[]> {
+    if ((this.versie ?? 0) < (tabel === "artikelen" ? 4 : 5) || !rijen.length) return rijen;
+    const sleutel = (id: string) => `${tabel}:${id}`;
     try {
-      const ids = artikelen.map((a) => a.id);
+      const ids = rijen.map((a) => a.id);
       const metFoto: { id: string; gewijzigd_op: string | null }[] = [];
       for (let i = 0; i < (alles ? 1 : ids.length); i += 80) {
         const filter = alles ? "" : `&id=in.(${ids.slice(i, i + 80).join(",")})`;
-        metFoto.push(...await this.vraag<{ id: string; gewijzigd_op: string | null }[]>("GET", `artikelen?select=id,gewijzigd_op&foto=not.is.null${filter}`));
+        metFoto.push(...await this.vraag<{ id: string; gewijzigd_op: string | null }[]>("GET", `${tabel}?select=id,gewijzigd_op&foto=not.is.null${filter}`));
       }
-      const nodig = metFoto.filter((x) => this.fotos.get(x.id)?.gewijzigd !== x.gewijzigd_op).map((x) => x.id);
+      const nodig = metFoto.filter((x) => this.fotos.get(sleutel(x.id))?.gewijzigd !== x.gewijzigd_op).map((x) => x.id);
       for (let i = 0; i < nodig.length; i += 20) {
-        const rijen = await this.vraag<{ id: string; foto: string | null; gewijzigd_op: string | null }[]>("GET", `artikelen?select=id,foto,gewijzigd_op&id=in.(${nodig.slice(i, i + 20).join(",")})`);
-        for (const r of rijen) if (r.foto) this.fotos.set(r.id, { gewijzigd: r.gewijzigd_op, foto: r.foto });
+        const r = await this.vraag<{ id: string; foto: string | null; gewijzigd_op: string | null }[]>("GET", `${tabel}?select=id,foto,gewijzigd_op&id=in.(${nodig.slice(i, i + 20).join(",")})`);
+        for (const x of r) if (x.foto) this.fotos.set(sleutel(x.id), { gewijzigd: x.gewijzigd_op, foto: x.foto });
       }
       const heeft = new Set(metFoto.map((x) => x.id));
-      return artikelen.map((a) => ({ ...a, foto: heeft.has(a.id) ? this.fotos.get(a.id)?.foto ?? null : null }));
+      return rijen.map((a) => ({ ...a, foto: heeft.has(a.id) ? this.fotos.get(sleutel(a.id))?.foto ?? null : null }));
     } catch {
-      return artikelen; // foto's zijn niet nodig om te werken: volgende keer opnieuw
+      // Foto's zijn niet nodig om te werken: wat we al hadden, blijft; de rest volgende keer.
+      return rijen.map((a) => ({ ...a, foto: this.fotos.get(sleutel(a.id))?.foto ?? a.foto }));
     }
   }
 
@@ -307,13 +332,13 @@ export class SupabaseBackend implements Backend {
     this.schemaOud = false;
     await this.zekerVersie();
     const [exemplaren, artikelenZonder, beurzen, transacties] = await Promise.all([
-      this.alles<Exemplaar>("exemplaren", "aangemaakt_op.asc"),
+      this.alles<Exemplaar>("exemplaren", "aangemaakt_op.asc", "", this.exemplaarKolommen()),
       this.alles<Artikel>("artikelen", "naam.asc", "", this.artikelKolommen()),
       fase2(this.alles<Beurs>("beurzen", "datum.desc")),
       fase2(this.alles<Transactie>("transacties", "tijd.asc")),
     ]);
-    const artikelen = await this.vulFotos(artikelenZonder, true);
-    return { exemplaren: exemplaren.map(schoonExemplaar), artikelen: artikelen.map(schoonArtikel), beurzen, transacties: transacties.map(getallen) };
+    const [exemplarenMetFoto, artikelen] = await Promise.all([this.vulFotos("exemplaren", exemplaren, true), this.vulFotos("artikelen", artikelenZonder, true)]);
+    return { exemplaren: exemplarenMetFoto.map(schoonExemplaar), artikelen: artikelen.map(schoonArtikel), beurzen, transacties: transacties.map(getallen) };
   }
 
   laadBeheerders() {
@@ -392,9 +417,29 @@ export class SupabaseBackend implements Backend {
     return this.vraag<Transactie>("POST", `rpc/${naam}`, args).then(getallen);
   }
 
-  boekTransactie(t: Transactie) {
-    const { id, beurs_id, soort, tijd, regels, totaal, cash, sumup, opmerking, omgeving_id } = t;
-    return this.rpc("boek_transactie", { t: { id, beurs_id, soort, tijd, regels, totaal, cash, sumup, opmerking, omgeving_id } });
+  /** Wat pas kan na de update van het schema (0.6): wachten in plaats van weigeren (en kwijtraken). */
+  private async vraagVersie5(wat: string) {
+    await this.zekerVersie();
+    if ((this.versie ?? 0) < 5) {
+      // Opnieuw nakijken (misschien werd het schema net uitgevoerd); anders blijft het in de wachtrij.
+      localStorage.removeItem(VERSIE_SLEUTEL);
+      this.versie = null;
+      await this.zekerVersie();
+      if ((this.versie ?? 0) < 5) throw new Fout(`${wat} kan pas na de update van de database. Voer supabase/schema.sql opnieuw uit.`, 404);
+    }
+  }
+
+  async boekTransactie(t: Transactie) {
+    const { id, beurs_id, soort, tijd, regels, totaal, cash, sumup, bank, tegenpartij, opmerking, omgeving_id } = t;
+    const nieuw = soort === "kas" || !!bank || !!tegenpartij || (soort === "retour" && regels.some((r) => r.richting === "uit"));
+    if (nieuw) await this.vraagVersie5(soort === "kas" ? "Geld in of uit de kas" : soort === "retour" ? "Een deal terugdraaien" : "Een borderel of overschrijving");
+    return this.rpc("boek_transactie", { t: { id, beurs_id, soort, tijd, regels, totaal, cash, sumup, opmerking, omgeving_id, ...(nieuw ? { bank: bank ?? 0, tegenpartij: tegenpartij ?? null } : {}) } });
+  }
+
+  /** Het borderel aanvullen (naam, adres, handtekening) nadat de transactie geboekt is. */
+  async zetTegenpartij(id: string, tegenpartij: Tegenpartij | null) {
+    await this.vraagVersie5("Een borderel bewaren");
+    await this.vraag("PATCH", `transacties?id=eq.${id}`, { tegenpartij }, { Prefer: "return=minimal" });
   }
 
   maakOngedaan(id: string) {
@@ -433,5 +478,5 @@ export class SupabaseBackend implements Backend {
 
 // PostgREST geeft numeric-kolommen soms als tekst; de kassa rekent met getallen.
 function getallen(t: Transactie): Transactie {
-  return { ...t, totaal: Number(t.totaal), cash: Number(t.cash), sumup: Number(t.sumup), conflicten: t.conflicten ?? [] };
+  return { ...t, totaal: Number(t.totaal), cash: Number(t.cash), sumup: Number(t.sumup), bank: Number(t.bank ?? 0), conflicten: t.conflicten ?? [] };
 }

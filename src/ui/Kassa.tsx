@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   actieveBeurs, afrekenen, alleCodes, huidig, inMandje, mandjeLegen, meld, ongedaanMaken, openTransactie, print, totaalAanpassen,
-  bodPct, useApp, verwijderRegel, wijzigRegel, zetArtikelAantal, zetBod, zetInstellingen,
+  bodPct, kanNieuweBoekhouding, kasbeweging, OUD_SCHEMA, useApp, verwijderRegel, wijzigRegel, zetArtikelAantal, zetBod, zetInstellingen, zetPerKaart, zetRegelPct,
 } from "../state";
-import type { Artikel, CatalogusKaart, Exemplaar, Regel, Transactie } from "../types";
+import type { Artikel, CatalogusKaart, Exemplaar, Regel, Tegenpartij, Transactie } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
 import { inVoorraad } from "../lib/exemplaar";
-import { beursCijfers, marge, netto, regelArtikelUit, regelIn, regelUit, totaalIn, totaalUit, type Betaling } from "../lib/kassa";
+import { beursCijfers, CASH_GRENS, marge, netto, regelArtikelUit, regelIn, regelUit, totaalIn, totaalUit, type Betaling } from "../lib/kassa";
 import { datumKort, euro, getal, vandaag, zonderAccenten } from "../lib/format";
 import { nieuweCode, toonCode } from "../lib/code";
 import { afbeelding } from "../lib/catalog";
@@ -21,11 +21,14 @@ import { KiesKaart } from "./Toevoegen";
 import { BeursAfsluiten, BeursStart, geplandeBeurzen } from "./Beurs";
 import { BeursDashboard, BeurzenEnTransacties } from "./Historiek";
 import { GradedVelden, SoldLinks } from "./Graded";
-import { cardmarketLink, gradedZoektekst } from "../lib/markt";
-import { afrondKeuzes, bodBedrag, marktwaarde, PCT_MAX, PCT_MIN, procentVan, type BodInstelling } from "../lib/bod";
+import { BorderelSheet, TegenpartijVelden } from "./Boekhouding";
+import { borderelNummer, borderelOntbreekt, heeftBorderel } from "../lib/boekhouding";
+import { HandtekeningBeeld, HandtekeningPad } from "./Handtekening";
+import { cardmarketKentTaal, cardmarketLink, gradedZoektekst } from "../lib/markt";
+import { afrondKeuzes, exactBod, heeftEigenPct, marktwaarde, PCT_MAX, PCT_MIN, procentVan, samenPct, type BodInstelling } from "../lib/bod";
 import { GELUKT, kies, MANDJE_LEEG } from "../lib/grapjes";
 
-type Paneel = null | "scan" | "zoek" | "artikel" | "klantkaart" | "afrekenen" | "start" | "plan" | "afsluiten" | "transacties";
+type Paneel = null | "scan" | "zoek" | "artikel" | "klantkaart" | "afrekenen" | "start" | "plan" | "afsluiten" | "transacties" | "kas";
 
 export function Kassa() {
   const s = useApp();
@@ -53,6 +56,7 @@ export function Kassa() {
             : <p className="kop-sub">Geen beurs bezig</p>}
         </div>
         <div className="kop-knoppen">
+          <button className="pil-knop" onClick={() => setPaneel("kas")} title="Geld in of uit de koffer, wisselgeld"><Icoon naam="geld" maat={18} /> Kas</button>
           <button className="pil-knop" onClick={() => setPaneel("transacties")}><Icoon naam="historiek" maat={18} /> Historiek</button>
         </div>
       </header>
@@ -125,6 +129,7 @@ export function Kassa() {
       {paneel === "plan" && <BeursStart plannen onSluit={sluit} />}
       {paneel === "afsluiten" && beurs && <BeursAfsluiten beurs={beurs} onSluit={sluit} />}
       {paneel === "transacties" && <BeurzenEnTransacties onSluit={sluit} />}
+      {paneel === "kas" && <KasSheet onSluit={sluit} />}
     </div>
   );
 }
@@ -184,7 +189,7 @@ function BeursBalk({ onStart, onPlan, onAfsluiten }: { onStart: () => void; onPl
 }
 
 function RegelRij({ r, i }: { r: Regel; i: number }) {
-  const { exemplaren, instellingen } = useApp();
+  const { exemplaren, instellingen, mandje } = useApp();
   const toonMarge = !!instellingen.toonMarge;
   const ex = r.exemplaar_id ? exemplaren.find((e) => e.id === r.exemplaar_id) : null;
   const beeld = ex?.afbeelding ?? r.nieuw?.afbeelding ?? null;
@@ -223,6 +228,7 @@ function RegelRij({ r, i }: { r: Regel; i: number }) {
           </span>
         )}
         {r.artikel_id && r.richting === "in" && <span className="zacht klein">{r.aantal} stuks</span>}
+        {klantKaart && mandje.bod?.perKaart && (r.referentie ?? 0) > 0 && <PctStapper r={r} i={i} algemeen={bodPct(mandje)} />}
       </div>
       <div className="regel-prijs">
         {bewerk ? (
@@ -246,6 +252,20 @@ function RegelRij({ r, i }: { r: Regel; i: number }) {
       </div>
       <button className="rond-knop" onClick={() => verwijderRegel(i)} aria-label="Uit het mandje"><Icoon naam="kruis" maat={16} /></button>
     </div>
+  );
+}
+
+/** Per kaart een eigen percentage: − 70% +, in stappen van 5. Gelijk aan het algemene = geen eigen. */
+function PctStapper({ r, i, algemeen }: { r: Regel; i: number; algemeen: number }) {
+  const p = r.pct ?? algemeen;
+  const zet = (x: number) => { zetRegelPct(i, x); tril(15); };
+  return (
+    <span className={`pct-stapper${r.pct != null ? " eigen" : ""}`}>
+      <button onClick={() => zet(p - 5)} disabled={p <= PCT_MIN} aria-label={`${r.naam}: 5% minder`}>−</button>
+      <span>{p}%</span>
+      <button onClick={() => zet(p + 5)} disabled={p >= PCT_MAX} aria-label={`${r.naam}: 5% meer`}>+</button>
+      {r.pct != null && <button className="pct-terug" onClick={() => zetRegelPct(i, null)} aria-label="Zoals de rest" title="Zoals de rest"><Icoon naam="terug" maat={14} /></button>}
+    </span>
   );
 }
 
@@ -316,7 +336,11 @@ function BodPaneel() {
   const pct = bodPct(mandje);
   const ruil = mandje.regels.some((r) => r.richting === "uit");
   const b = mandje.bod ?? { afronding: "exact" as const };
-  const exact = bodBedrag(m.totaal, pct, { afronding: "exact" });
+  const exact = exactBod(mandje.regels, pct);
+  const eigenPct = heeftEigenPct(mandje.regels);
+  const samen = samenPct(mandje.regels, pct);
+  // Waar "samen" op de schuifknop valt (de duim is 30 px breed).
+  const plek = Math.min(1, Math.max(0, (samen - PCT_MIN) / (PCT_MAX - PCT_MIN)));
   const keuzes = afrondKeuzes(exact, b.afronding);
   const zonderMarkt = mandje.regels.filter((r) => r.richting === "in" && !((r.referentie ?? 0) > 0)).reduce((x, r) => x + r.prijs, 0);
   const kies = (w: Partial<BodInstelling>) => { zetBod(w); tril(); };
@@ -335,13 +359,24 @@ function BodPaneel() {
         <span className="zacht klein">Marktwaarde · {m.kaarten} {m.kaarten === 1 ? "kaart" : "kaarten"}</span>
         <strong className="bod-markt">{euro(m.totaal)}</strong>
       </div>
+      {m.kaarten > 1 && (
+        <Segment waarde={b.perKaart ? "kaart" : "alles"} onKies={(w) => { zetPerKaart(w === "kaart"); tril(15); }}
+          opties={[{ waarde: "alles", label: "Eén % voor alles" }, { waarde: "kaart", label: "Per kaart" }]} />
+      )}
       <label className="bod-slider">
-        <span className="bod-slider-kop"><span>{ruil ? "Ruil" : "Inkoop"} · % van de marktwaarde</span><strong>{pct}%</strong></span>
-        <input type="range" min={PCT_MIN} max={PCT_MAX} step={5} value={pct} aria-label="Percentage van de marktwaarde"
-          onChange={(e) => { setEigen(""); kies({ pct: Number(e.target.value), afronding: b.afronding === "eigen" ? "exact" : b.afronding, eigen: null }); }} />
+        <span className="bod-slider-kop">
+          <span>{ruil ? "Ruil" : "Inkoop"} · {b.perKaart ? "algemeen" : "% van de marktwaarde"}</span>
+          <strong className={eigenPct ? "samen" : ""}>{eigenPct ? <><small>samen</small> {samen}%</> : `${pct}%`}</strong>
+        </span>
+        <span className="bod-slider-baan">
+          <input type="range" min={PCT_MIN} max={PCT_MAX} step={5} value={pct} aria-label={b.perKaart ? "Algemeen percentage" : "Percentage van de marktwaarde"}
+            onChange={(e) => { setEigen(""); kies({ pct: Number(e.target.value), afronding: b.afronding === "eigen" ? "exact" : b.afronding, eigen: null }); }} />
+          {eigenPct && <span className="bod-samen" style={{ left: `calc(15px + (100% - 30px) * ${plek})` }} aria-hidden="true" />}
+        </span>
         <span className="bod-schaal" aria-hidden="true">{Array.from({ length: (PCT_MAX - PCT_MIN) / 5 + 1 }, (_, i) => <span key={i}>{PCT_MIN + i * 5}</span>)}</span>
       </label>
-      <div className="bod-som">{pct}% van {euro(m.totaal)} = <strong>{euro(exact)}</strong></div>
+      {b.perKaart && <p className="zacht klein bod-uitleg">{eigenPct ? `Algemeen ${pct}%, met een eigen % voor sommige kaarten: samen ${samen}% van de marktwaarde.` : "Kies hierboven per kaart een ander percentage (− en +). De rest volgt de schuifknop."}</p>}
+      <div className="bod-som">{eigenPct ? `Samen ${samen}%` : `${pct}%`} van {euro(m.totaal)} = <strong>{euro(exact)}</strong></div>
       <div className="bod-keuzes">
         {keuzes.map((k) => (
           <button key={k.afronding} className={`bod-keuze${b.afronding === k.afronding ? " aan" : ""}`} onClick={() => { setEigen(""); kies({ afronding: k.afronding, eigen: null }); }}>
@@ -361,7 +396,7 @@ function BodPaneel() {
         <span>We betalen <strong>{euro(m.bod)}</strong> · {nuPct}% van de marktwaarde{m.bod > m.totaal ? ", meer dan ze waard zijn" : ""}</span>
       </div>
       {zonderMarkt > 0 && <p className="zacht klein">Plus {euro(zonderMarkt)} voor kaarten zonder marktwaarde.</p>}
-      <p className="zacht klein bod-uitleg">Per kaart zie je hierboven wat we echt betalen (in verhouding tot de marktwaarde). Zo komt het ook in de boekhouding.</p>
+      <p className="zacht klein bod-uitleg">Per kaart zie je hierboven wat we echt betalen{eigenPct ? "" : " (in verhouding tot de marktwaarde)"}. Zo komt het ook in de boekhouding.</p>
       {m.zonder > 0 && <p className="nakijken klein">{m.zonder === 1 ? "1 kaart heeft" : `${m.zonder} kaarten hebben`} geen marktwaarde: tik op "markt?" om ze er een te geven.</p>}
     </div>
   );
@@ -460,26 +495,40 @@ function FotoKeuze({ r, onKies, onWeg }: { r: FotoResultaat; onKies: (ex: Exempl
 }
 
 function VoorraadZoeker({ onSluit }: { onSluit: () => void }) {
-  const { exemplaren } = useApp();
+  const { exemplaren, mandje } = useApp();
   const [q, setQ] = useState("");
+  const [waar, setWaar] = useState<"alles" | "vitrine" | "stockdoos">("alles");
+  const [toon, setToon] = useState(30);
   const [open, setOpen] = useState<string | null>(null);
+  const inMand = useMemo(() => new Set(mandje.regels.map((r) => r.exemplaar_id).filter(Boolean)), [mandje.regels]);
+  // Zonder zoekterm: de hele voorraad, het laatst toegevoegde eerst. Met zoekterm: catalogus eerst.
   const resultaten = useMemo(() => {
     const woorden = zonderAccenten(q.trim()).split(/\s+/).filter(Boolean);
-    if (!woorden.length) return [];
-    return exemplaren.filter(inVoorraad).filter((e) => {
+    const lijst = exemplaren.filter(inVoorraad).filter((e) => waar === "alles" || e.opslag === waar);
+    if (!woorden.length) return [...lijst].sort((a, b) => b.aangemaakt_op.localeCompare(a.aangemaakt_op));
+    return lijst.filter((e) => {
       const t = zonderAccenten([e.naam, e.naam_origineel, e.set_naam, e.set_code, e.nummer, e.code, toonCode(e.code)].filter(Boolean).join(" "));
       return woorden.every((w) => t.includes(w));
-    }).sort((a, b) => (a.opslag === b.opslag ? 0 : a.opslag === "vitrine" ? -1 : 1)).slice(0, 40);
-  }, [q, exemplaren]);
+    }).sort((a, b) => (a.opslag === b.opslag ? b.aangemaakt_op.localeCompare(a.aangemaakt_op) : a.opslag === "vitrine" ? -1 : 1));
+  }, [q, waar, exemplaren]);
+  useEffect(() => setToon(30), [q, waar]);
+  const zichtbaar = resultaten.slice(0, toon);
   return (
     <Sheet titel="Zoek in de voorraad" onSluit={onSluit} vol>
       <div className="zoekbalk">
         <Icoon naam="zoek" maat={18} />
-        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Naam, set, nummer of code" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Naam, set, nummer of code" aria-label="Zoek in de voorraad" />
+        {q && <button className="rond-knop" onClick={() => setQ("")} aria-label="Wis"><Icoon naam="kruis" maat={14} /></button>}
+      </div>
+      <div className="chips zoeker-chips">
+        {([["alles", "Alles"], ["vitrine", "Catalogus"], ["stockdoos", "Vault"]] as const).map(([w, l]) => (
+          <button key={w} className={`chip${waar === w ? " aan" : ""}`} onClick={() => setWaar(w)}>{l}</button>
+        ))}
+        <span className="zacht klein zoeker-telling">{resultaten.length} {q.trim() ? "gevonden" : "in voorraad · nieuwste eerst"}</span>
       </div>
       <ul className="resultaten">
-        {resultaten.map((e) => (
-          <li key={e.id} className={open === e.id ? "open" : ""}>
+        {zichtbaar.map((e) => (
+          <li key={e.id} className={`${open === e.id ? "open" : ""}${inMand.has(e.id) ? " in-mand" : ""}`}>
             <button onClick={() => setOpen(open === e.id ? null : e.id)}>
               <KaartFoto src={e.afbeelding} alt={e.naam} klein kaart={e} />
               <span className="res-tekst">
@@ -487,13 +536,62 @@ function VoorraadZoeker({ onSluit }: { onSluit: () => void }) {
                 <span className="zacht">{[e.set_code, e.nummer].filter(Boolean).join(" ")} · <span className="code">{toonCode(e.code)}</span></span>
                 <Badges ex={e} />
               </span>
-              <span className="rechts">{e.opslag === "vitrine" ? <Hartje prijs={e.hartjesprijs} /> : <span className="zacht klein">vault · {euro(e.verkoopprijs)}</span>}</span>
+              <span className="rechts">
+                {inMand.has(e.id) ? <span className="pil-klein">in mandje</span>
+                  : e.opslag === "vitrine" ? <Hartje prijs={e.hartjesprijs} /> : <span className="zacht klein">vault · {euro(e.verkoopprijs)}</span>}
+              </span>
             </button>
             {open === e.id && <div className="in-voorraad"><MandjeActie ex={e} naToevoegen={() => setOpen(null)} /></div>}
           </li>
         ))}
       </ul>
-      {q.trim() && !resultaten.length && <p className="zacht center">Niets in voorraad gevonden.</p>}
+      {resultaten.length > toon && (
+        <button className="knop zacht breed" onClick={() => setToon(toon + 30)}>Toon meer ({resultaten.length - toon} over)</button>
+      )}
+      {!resultaten.length && <p className="zacht center">{q.trim() ? "Niets in voorraad gevonden." : "Geen kaarten in voorraad."}</p>}
+    </Sheet>
+  );
+}
+
+/**
+ * Geld in of uit de cashkoffer zonder verkoop: wisselgeld bijleggen, geld afhalen, of een andere
+ * stand die met SumUp betaalt en cash meekrijgt. Telt in de kas, niet als omzet.
+ */
+function KasSheet({ onSluit }: { onSluit: () => void }) {
+  const s = useApp();
+  const [soort, setSoort] = useState<"in" | "uit" | "wissel">("in");
+  const [bedrag, setBedrag] = useState("");
+  const [wat, setWat] = useState("");
+  const [wie, setWie] = useState("");
+  const b = getal(bedrag);
+  const ok = b != null && b > 0;
+  const oudSchema = !kanNieuweBoekhouding(s);
+  const boek = () => {
+    if (!ok) return;
+    const x = Math.round(b! * 100) / 100;
+    try {
+      const omschrijving = wat.trim() || (soort === "in" ? "Geld in de koffer" : soort === "uit" ? "Geld uit de koffer" : `Wissel met ${wie.trim() || "een andere stand"}: SumUp in, cash uit`);
+      kasbeweging(soort === "wissel" ? { cash: -x, sumup: x } : { cash: soort === "in" ? x : -x }, omschrijving, wie.trim() ? { naam: wie.trim(), type: "handelaar" } : null);
+      onSluit();
+    } catch (e) {
+      meld(e instanceof Error ? e.message : String(e), "fout");
+    }
+  };
+  return (
+    <Sheet titel="Kas" onSluit={onSluit}>
+      <p className="zacht klein">Geld dat in of uit de cashkoffer gaat zonder dat er iets verkocht wordt. Zo klopt de kas op het einde van de beurs. Dit is geen omzet.</p>
+      {oudSchema && <p className="nakijken">{OUD_SCHEMA}</p>}
+      <Segment<"in" | "uit" | "wissel"> waarde={soort} onKies={setSoort} opties={[
+        { waarde: "in", label: "Geld erbij" }, { waarde: "uit", label: "Geld eruit" }, { waarde: "wissel", label: "Wissel via SumUp" },
+      ]} />
+      {soort === "wissel" && <p className="zacht klein">Een andere stand betaalt met jullie SumUp en krijgt hetzelfde bedrag in cash. Gewoon briefjes wisselen (50 voor 5 × 10) hoef je niet te boeken.</p>}
+      <Veld label="Bedrag (€)"><span className="euro-invoer groot-invoer"><span>€</span><input inputMode="decimal" value={bedrag} onChange={(e) => setBedrag(e.target.value)} aria-label="Bedrag" autoFocus /></span></Veld>
+      {soort === "wissel"
+        ? <Veld label="Welke stand (optioneel)"><input value={wie} onChange={(e) => setWie(e.target.value)} placeholder="bv. Kaartenkelder" /></Veld>
+        : <Veld label="Waarvoor (optioneel)"><input value={wat} onChange={(e) => setWat(e.target.value)} placeholder={soort === "in" ? "bv. extra wisselgeld" : "bv. naar huis, lunch"} /></Veld>}
+      <button className="knop groot" disabled={!ok || oudSchema} onClick={boek}>
+        <Icoon naam="check" maat={20} /> {soort === "wissel" ? `SumUp ${ok ? euro(b) : ""} in, cash eruit` : soort === "in" ? `${ok ? euro(b) : "Bedrag"} in de koffer` : `${ok ? euro(b) : "Bedrag"} uit de koffer`}
+      </button>
     </Sheet>
   );
 }
@@ -596,7 +694,10 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart 
     };
     Object.assign(vorigeKlantKaart, { taal: v.taal, conditie: v.conditie });
     // Prijs 0: het bod (percentage × marktwaarde, afgerond) verdeelt straks over alle kaarten.
-    inMandje(regelIn(nieuw, 0, markt != null && markt > 0 ? markt : null));
+    const bron = !(markt != null && markt > 0) ? null
+      : v.graded ? "laatste verkopen (zelf opgezocht)"
+        : !aangeraakt && voorstel != null ? `Cardmarket trend${v.conditie !== "NM" ? `, ${v.conditie}` : ""}` : "eigen schatting";
+    inMandje({ ...regelIn(nieuw, 0, markt != null && markt > 0 ? markt : null), referentie_bron: bron });
     onKlaar();
   };
 
@@ -657,6 +758,7 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar }: { kaart: CatalogusKaart 
             {kaart?.cardmarket
               ? <a className="knop zacht klein" href={cardmarketLink(kaart.cardmarket, v.taal)} target="_blank" rel="noreferrer"><Icoon naam="link" maat={14} /> Zelf kijken op Cardmarket</a>
               : <a className="knop zacht klein" href={`https://www.cardmarket.com/en/Pokemon/Products/Search?${new URLSearchParams({ searchString: [v.naam, v.nummer].filter(Boolean).join(" ") })}`} target="_blank" rel="noreferrer"><Icoon naam="link" maat={14} /> Zoek op Cardmarket</a>}
+            {!cardmarketKentTaal(v.taal) && <span className="zacht klein">Cardmarket kent geen {TALEN.find((t) => t.code === v.taal)?.label.toLowerCase() ?? v.taal}e kaarten als aparte taal: de link toont alle talen.</span>}
           </>
         )}
       </div>
@@ -680,9 +782,17 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
   const { mandje, instellingen } = useApp();
   const regels = mandje.regels;
   const n = netto(regels);
-  const [wijze, setWijze] = useState<"cash" | "sumup" | "beide">("cash");
+  const teVeelCash = Math.abs(n) > CASH_GRENS;
+  const [wijze, setWijze] = useState<"cash" | "sumup" | "beide" | "bank">(teVeelCash && n > 0 ? "sumup" : "cash");
+  const [uitbetalen, setUitbetalen] = useState<"cash" | "bank">(teVeelCash ? "bank" : "cash");
   const [gegeven, setGegeven] = useState("");
   const [cashDeel, setCashDeel] = useState("");
+  // Bij een inkoop of ruil: wie de kaarten verkoopt (voor het borderel). Mag ook later.
+  const koopt = regels.some((r) => r.richting === "in");
+  const nieuw = kanNieuweBoekhouding(); // overschrijving en borderel pas met het nieuwe schema
+  const [tp, setTp] = useState<Tegenpartij>({ type: "particulier" });
+  const [borderelOpen, setBorderelOpen] = useState(false);
+  const [tekenen, setTekenen] = useState(false);
 
   const waarschuwingen = regels.flatMap((r) => {
     const w: string[] = [];
@@ -693,13 +803,15 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
   });
 
   let betaling: Betaling | null;
-  if (n <= 0) betaling = { cash: n, sumup: 0 };
-  else if (wijze === "cash") betaling = { cash: n, sumup: 0 };
+  if (n < 0) betaling = uitbetalen === "bank" && nieuw ? { cash: 0, sumup: 0, bank: n } : { cash: n, sumup: 0 };
+  else if (n === 0 || wijze === "cash") betaling = { cash: n, sumup: 0 };
   else if (wijze === "sumup") betaling = { cash: 0, sumup: n };
+  else if (wijze === "bank" && nieuw) betaling = { cash: 0, sumup: 0, bank: n };
   else {
     const c = getal(cashDeel);
     betaling = c != null && c >= 0 && c <= n ? { cash: Math.round(c * 100) / 100, sumup: Math.round((n - c) * 100) / 100 } : null;
   }
+  const cashTeHoog = !!betaling && Math.abs(betaling.cash) > CASH_GRENS;
   const g = getal(gegeven);
   const cashTeOntvangen = betaling && betaling.cash > 0 ? betaling.cash : 0;
   const wisselgeld = cashTeOntvangen && g != null && g >= cashTeOntvangen ? Math.round((g - cashTeOntvangen) * 100) / 100 : null;
@@ -709,10 +821,11 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
     return [...new Set(opties)].filter((x) => x >= cashTeOntvangen).slice(0, 5);
   }, [cashTeOntvangen]);
 
+  const ingevuld = !!(tp.naam?.trim() || tp.handtekening);
   const bevestig = () => {
     if (!betaling) return meld("Vul het cash-deel in", "fout");
     try {
-      const t = afrekenen(betaling);
+      const t = afrekenen(betaling, null, koopt && nieuw && ingevuld ? { ...tp, naam: tp.naam?.trim() || null } : null);
       onKlaar(t, wisselgeld);
     } catch (e) {
       meld(e instanceof Error ? e.message : String(e), "fout");
@@ -723,7 +836,7 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
     <Sheet titel="Afrekenen" onSluit={onSluit}>
       <div className="afreken-overzicht">
         {totaalUit(regels) > 0 && <div><span>Uit onze voorraad</span><strong>{euro(totaalUit(regels))}</strong></div>}
-        {regels.some((r) => r.richting === "in") && <div><span>Van de klant</span><strong>− {euro(totaalIn(regels))}</strong></div>}
+        {koopt && <div><span>Van de klant</span><strong>− {euro(totaalIn(regels))}</strong></div>}
         <div className="afreken-netto"><span>{n > 0 ? "Klant betaalt" : n < 0 ? "Wij betalen de klant" : "Te betalen"}</span><strong>{euro(Math.abs(n))}</strong></div>
       </div>
       {instellingen.toonMarge && totaalUit(regels) > 0 && <MargeRij regels={regels} />}
@@ -737,8 +850,9 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
 
       {n > 0 && (
         <>
-          <Segment<"cash" | "sumup" | "beide"> waarde={wijze} onKies={setWijze} opties={[
+          <Segment<"cash" | "sumup" | "beide" | "bank"> waarde={wijze} onKies={setWijze} opties={[
             { waarde: "cash", label: "Cash" }, { waarde: "sumup", label: "SumUp" }, { waarde: "beide", label: "Beide" },
+            ...(nieuw ? [{ waarde: "bank" as const, label: "Bank" }] : []),
           ]} />
           {wijze === "beide" && (
             <Veld label="Deel in cash (€)" hint={betaling ? `SumUp: ${euro(betaling.sumup)}` : `Tussen 0 en ${euro(n)}`}>
@@ -746,7 +860,8 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
             </Veld>
           )}
           {wijze === "sumup" && <p className="zacht">Reken {euro(n)} af op het SumUp-toestel. Gelukt? Tik dan op Betaald.</p>}
-          {cashTeOntvangen > 0 && (
+          {wijze === "bank" && <p className="zacht">De klant schrijft {euro(n)} over. Tik op Betaald als het op de rekening staat (of als je de bevestiging zag).</p>}
+          {cashTeOntvangen > 0 && !cashTeHoog && (
             <div className="wisselgeld">
               <span className="veld-label">Klant geeft (optioneel)</span>
               <div className="kiezer">
@@ -758,12 +873,43 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
           )}
         </>
       )}
-      {n < 0 && <p>Geef de klant <strong>{euro(-n)}</strong> uit de cashkoffer.</p>}
+      {n < 0 && (
+        <>
+          {nieuw && <Segment<"cash" | "bank"> waarde={uitbetalen} onKies={setUitbetalen} opties={[{ waarde: "cash", label: "Cash" }, { waarde: "bank", label: "Overschrijving" }]} />}
+          {uitbetalen === "cash" ? <p>Geef de klant <strong>{euro(-n)}</strong> uit de cashkoffer.</p> : <p>Schrijf <strong>{euro(-n)}</strong> over naar de rekening van de klant (noteer het rekeningnummer niet in de app).</p>}
+        </>
+      )}
       {n === 0 && <p className="zacht">Er gaat geen geld over en weer.</p>}
+      {cashTeHoog && <p className="nakijken">Cash kan hoogstens {euro(CASH_GRENS, true)} zijn (wettelijke grens). {n > 0 ? "Laat de rest met SumUp of een overschrijving betalen." : "Betaal met een overschrijving."}</p>}
 
-      <button className="knop groot" disabled={!betaling} onClick={bevestig}>
+      {koopt && !nieuw && <p className="zacht klein">Het borderel kan pas na de update van de database. Noteer naam en adres van de verkoper tot dan op papier.</p>}
+      {koopt && nieuw && (
+        <section className={`blok afreken-borderel${borderelOpen ? " open" : ""}`}>
+          <button className="afreken-borderel-kop" onClick={() => setBorderelOpen(!borderelOpen)} aria-expanded={borderelOpen}>
+            <span><strong>Borderel</strong> <span className="zacht klein">{ingevuld ? `${tp.naam || "getekend"}${tp.handtekening ? " · getekend" : ""}` : "naam en handtekening van de verkoper (mag ook later)"}</span></span>
+            <Icoon naam="chevron" maat={16} />
+          </button>
+          {borderelOpen && (
+            <>
+              <TegenpartijVelden waarde={tp} onChange={setTp} />
+              <div className="handtekening-mini">
+                {tp.handtekening ? <HandtekeningBeeld pad={tp.handtekening} klein /> : null}
+                <button className="knop zacht klein" onClick={() => setTekenen(true)}>{tp.handtekening ? "Opnieuw laten tekenen" : "Laten tekenen"}</button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      <button className="knop groot" disabled={!betaling || cashTeHoog} onClick={bevestig}>
         <Icoon naam="check" maat={20} /> {n > 0 ? (wijze === "sumup" ? "Betaald met SumUp" : "Betaald") : n < 0 ? "Uitbetaald" : "Bevestigen"}
       </button>
+
+      {tekenen && (
+        <HandtekeningPad titel="Handtekening van de verkoper" uitleg="De verkoper bevestigt dat de kaarten van hem zijn, dat hij ze als particulier verkoopt en het bedrag ontvangt."
+          onSluit={() => setTekenen(false)}
+          onKlaar={(pad) => { setTp({ ...tp, handtekening: pad, getekend_op: pad ? new Date().toISOString() : null }); setTekenen(false); }} />
+      )}
     </Sheet>
   );
 }
@@ -772,11 +918,12 @@ function Gelukt({ t, wisselgeld, onVolgende }: { t: Transactie; wisselgeld: numb
   const { exemplaren, transacties } = useApp();
   const huidigT = transacties.find((x) => x.id === t.id) ?? t;
   const [kanTerug, setKanTerug] = useState(true);
+  const [borderel, setBorderel] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => { timer.current = setTimeout(() => setKanTerug(false), 5000); return () => clearTimeout(timer.current); }, []);
   const nieuwIds = t.regels.filter((r) => r.nieuw?.id).map((r) => r.nieuw!.id);
   const tePrinten = exemplaren.filter((e) => nieuwIds.includes(e.id) && e.label_status === "te printen");
-  const titel = t.soort === "verkoop" ? "Verkocht" : t.soort === "inkoop" ? "Ingekocht" : "Ruil geboekt";
+  const titel = t.soort === "verkoop" ? "Verkocht" : t.soort === "inkoop" ? "Ingekocht" : t.soort === "ruil" ? "Ruil geboekt" : "Geboekt";
   return (
     <div className="gelukt">
       <img src="img/eend.png" alt="" width={110} height={110} />
@@ -786,9 +933,17 @@ function Gelukt({ t, wisselgeld, onVolgende }: { t: Transactie; wisselgeld: numb
         {t.totaal > 0 ? `${euro(t.totaal)} ontvangen` : t.totaal < 0 ? `${euro(-t.totaal)} uitbetaald` : "zonder geld"}
         {t.cash > 0 && t.sumup > 0 && <span className="zacht"> ({euro(t.cash)} cash, {euro(t.sumup)} SumUp)</span>}
         {t.sumup > 0 && !t.cash && <span className="zacht"> via SumUp</span>}
+        {!!t.bank && <span className="zacht"> per overschrijving</span>}
       </p>
       {wisselgeld != null && wisselgeld > 0 && <p className="wisselgeld-bedrag">Wisselgeld <strong>{euro(wisselgeld)}</strong></p>}
       {huidigT.status === "conflict" && <button className="knop zacht rood" onClick={() => openTransactie(t.id)}>Conflict nakijken</button>}
+      {heeftBorderel(huidigT) && (
+        <button className={`borderel-knop${borderelOntbreekt(huidigT).length ? " mist" : ""}`} onClick={() => setBorderel(true)}>
+          <Icoon naam={borderelOntbreekt(huidigT).length ? "waarschuwing" : "check"} maat={18} />
+          <span><strong>Borderel {borderelNummer(huidigT)}</strong><span className="zacht klein">{borderelOntbreekt(huidigT).length ? `nog nodig: ${borderelOntbreekt(huidigT).join(", ")}` : "volledig"}</span></span>
+        </button>
+      )}
+      {borderel && <BorderelSheet id={t.id} onSluit={() => setBorderel(false)} />}
       <div className="knoppenrij">
         {tePrinten.length > 0 && huidigT.status !== "ongedaan" && (
           <button className="knop" onClick={() => void print(tePrinten.map((e) => e.id))}><Icoon naam="printer" maat={18} /> Print {tePrinten.length === 1 ? "label" : `${tePrinten.length} labels`}</button>

@@ -77,7 +77,12 @@ test("fotobronnen: TCGdex eerst, dan Limitless, dan pokemontcg.io", () => {
   ]);
   // Japans: geen pokemontcg.io (enkel Engels), Limitless met de Japanse set-id.
   const jp = fotoBronnen({ set_code: "SV2a", nummer: "6", kaart_id: "SV2a-006", catalogus: "asia" });
-  assert.deepEqual(jp, ["https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/tpc/SV2a/SV2a_006_R_JP_SM.png"]);
+  assert.deepEqual(jp, ["https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/tpc/SV2a/SV2a_6_R_JP_SM.png"]);
+  // Japanse promo's: zonder streepje in de setcode (M-P 133 → MP_133).
+  const promo = fotoBronnen({ set_code: "M-P", nummer: "133", taal: "JP" }, "groot");
+  assert.deepEqual(promo, ["https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/tpc/MP/MP_133_R_JP_LG.png"]);
+  // Een eigen foto gaat voor alles.
+  assert.equal(fotoBronnen({ foto: "data:image/jpeg;base64,AAAA", set_code: "OBF", nummer: "125" })[0], "data:image/jpeg;base64,AAAA");
   // Zonder setcode of met een nummer als "TG05": enkel wat kan.
   assert.deepEqual(fotoBronnen({ nummer: "TG05" }), []);
   assert.deepEqual(uitCatalogus({ id: "sv03-125", setCode: "OBF", setId: "sv03", nummer: "125", catalogus: "en" }).set_code, "OBF");
@@ -120,12 +125,16 @@ test("graded: eBay-link, certificaat en schatting uit verkopen", async () => {
   const zoek = gradedZoektekst({ naam: "Charizard ex", nummer: "199", setTotaal: 165, grader: "PSA", grade: "10" });
   assert.equal(zoek, "Charizard ex 199/165 PSA 10");
   assert.equal(ebaySoldLink(zoek), "https://www.ebay.com/sch/i.html?_nkw=Charizard+ex+199%2F165+PSA+10&LH_Sold=1&LH_Complete=1&_sop=13");
-  assert.match(ebaySoldLink(zoek, "be"), /^https:\/\/www\.benl\.ebay\.be\//);
   assert.equal(certLink("PSA", "12 345 678"), "https://www.psacard.com/cert/12345678");
   assert.equal(certLink("PSA", "abc"), null);
   const nu = Date.parse("2026-10-15T12:00:00Z");
   assert.equal(schattingUitVerkopen([{ datum: "2026-10-01", prijs: 180 }, { datum: "2026-09-20", prijs: 170 }, { datum: "2026-10-10", prijs: 195 }], nu), 180);
   assert.equal(schattingUitVerkopen([], nu), null);
   assert.match(cardmarketSealedLink(123, "Booster"), /idProduct=123&sellerCountry=2,23/);
+  // Nederlandse kaarten: Cardmarket kent die taal niet, dus zonder taalfilter (alle talen).
+  const { cardmarketLink, cardmarketKentTaal } = await import("../src/lib/markt");
+  assert.equal(cardmarketKentTaal("NL"), false);
+  assert.doesNotMatch(cardmarketLink(42, "NL"), /language=/);
+  assert.match(cardmarketLink(42, "JP"), /language=7/);
   assert.match(cardmarketSealedLink(null, "Ascended Heroes booster"), /Products\/Search\?searchString=Ascended\+Heroes\+booster/);
 });

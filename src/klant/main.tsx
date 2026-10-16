@@ -16,7 +16,7 @@ import { TECHNIEKEN } from "../lib/categorie";
 import { fotoBronnen, setLogo, type FotoKaart } from "../lib/foto";
 import { SetKiezer } from "../gedeeld/SetKiezer";
 import {
-  groepeer, groepSleutel, isNieuw, pastFilters, pastZoek, perSet, SNELFILTERS, SORTERINGEN, setIdVan, sorteer, zoekTekst, zoekWoorden,
+  groepeer, groepSleutel, isNieuw, pastFilters, pastZoek, perSet, SNELFILTERS, SORTERINGEN, setIdVan, setNaam, setTaal, sorteer, zoekTekst, zoekWoorden,
   type Groep, type SetInfo, type Snelfilter, type Sortering, type Toonbaar,
 } from "../lib/weergave";
 
@@ -41,6 +41,7 @@ interface VitrineRij {
   catalogus?: "en" | "asia" | null;
   sinds: string | null;       // datum van het hartje
   toegevoegd?: string | null; // sinds wanneer in de catalogus (nieuwer schema)
+  foto?: string | null;       // eigen foto als er nergens een foto van de kaart is (sinds 0.6, apart geladen)
 }
 interface ArtikelRij {
   id: string; naam: string; soort: string; prijs: number | string; aantal: number;
@@ -56,7 +57,7 @@ interface Stuk extends Toonbaar {
   afbeelding: string | null;
   aantal: number;
   catalogus?: "en" | "asia" | null;
-  foto?: string | null;                 // eigen foto van een artikel
+  foto?: string | null;                 // eigen foto (artikel, of een kaart zonder foto)
   binder?: Pick<ArtikelRij, "merk" | "grootte" | "toploader" | "techniek" | "artwork"> | null;
   uitgestald?: boolean;                 // artikel ligt op de stand (binders in de vault: "vraag ernaar")
 }
@@ -80,7 +81,7 @@ function vanKaart(k: VitrineRij): Stuk {
     id: k.code, bron: "kaart", kaart_id: k.kaart_id, soort: k.soort, naam: k.naam, naam_origineel: k.naam_origineel,
     set_naam: k.set_naam, set_code: k.set_code, nummer: k.nummer, taal: k.taal, conditie: k.conditie, variant: k.variant || "normaal",
     grader: k.grader, grade: k.grade, prijs: Number(k.prijs), toegevoegd: k.toegevoegd ?? k.sinds, afbeelding: k.afbeelding, aantal: 1,
-    catalogus: k.catalogus ?? null,
+    catalogus: k.catalogus ?? null, foto: veiligeFoto(k.foto),
   };
 }
 function vanArtikel(a: ArtikelRij): Stuk {
@@ -173,21 +174,27 @@ function Catalogus() {
   useEffect(() => {
     fetch(`${BASIS}data/sets.json`).then((r) => (r.ok ? r.json() : null)).then(setSets).catch(() => setSets(null));
     if (demo) { setData(demo); return; }
-    // Eerst alles zonder foto's (snel, ook op 4G aan de stand); de foto's van artikels komen daarna.
+    // Eerst alles zonder foto's (snel, ook op 4G aan de stand); de eigen foto's komen daarna.
     const artikelKolommen = "id,naam,soort,prijs,aantal,type,merk,grootte,toploader,techniek,artwork,uitgestald";
+    const kaartKolommen = "kaart_id,catalogus,afbeelding,soort,naam,set_naam,set_code,nummer,taal,conditie,variant,grader,grade,prijs,code,naam_origineel,sinds,toegevoegd";
     Promise.all([
-      haal<VitrineRij[]>("publieke_vitrine?select=*"),
+      haal<VitrineRij[]>(`publieke_vitrine?select=${kaartKolommen}`).catch(() => haal<VitrineRij[]>("publieke_vitrine?select=*")),
       haal<ArtikelRij[]>(`publieke_artikelen?select=${artikelKolommen}`).catch(() => haal<ArtikelRij[]>("publieke_artikelen?select=*")).catch(() => []),
       haal<{ sleutel: string; waarde: unknown }[]>("publieke_instellingen?select=*").catch(() => []),
       haal<KomendeBeurs[]>("publieke_beurzen?select=*").catch(() => []),
     ]).then(([kaarten, artikelen, inst, beurzen]) => {
       const ig = inst.find((x) => x.sleutel === "instagram")?.waarde;
       setData({ stukken: [...kaarten.map(vanKaart), ...artikelen.map(vanArtikel)], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, beurzen });
+      const vulFotos = (bron: Stuk["bron"], fotos: { id: string; foto: string | null }[]) => {
+        const per = new Map(fotos.map((f) => [f.id, veiligeFoto(f.foto)]));
+        if (per.size) setData((d) => d && { ...d, stukken: d.stukken.map((x) => (x.bron === bron && per.get(x.id) ? { ...x, foto: per.get(x.id) } : x)) });
+      };
       if (artikelen.length) {
-        haal<{ id: string; foto: string | null }[]>("publieke_artikelen?select=id,foto&foto=not.is.null").then((fotos) => {
-          const per = new Map(fotos.map((f) => [f.id, veiligeFoto(f.foto)]));
-          if (per.size) setData((d) => d && { ...d, stukken: d.stukken.map((x) => (x.bron === "artikel" && per.get(x.id) ? { ...x, foto: per.get(x.id) } : x)) });
-        }).catch(() => undefined);
+        haal<{ id: string; foto: string | null }[]>("publieke_artikelen?select=id,foto&foto=not.is.null").then((f) => vulFotos("artikel", f)).catch(() => undefined);
+      }
+      if (kaarten.length) {
+        haal<{ code: string; foto: string | null }[]>("publieke_vitrine?select=code,foto&foto=not.is.null")
+          .then((f) => vulFotos("kaart", f.map((x) => ({ id: x.code, foto: x.foto })))).catch(() => undefined);
       }
     }).catch(() => setFout("De catalogus kon niet geladen worden. Probeer het straks opnieuw."));
   }, [demo]);
@@ -213,7 +220,7 @@ function Catalogus() {
       if (s.bron !== "kaart" || s.soort === "eigen product") continue;
       const id = setIdVan(s);
       if (!id) continue;
-      const x = m.get(id) ?? { id, naam: s.set_naam || sets?.[id]?.[0] || id, aantal: 0, release: sets?.[id]?.[2] ?? "" };
+      const x = m.get(id) ?? { id, naam: setNaam(id, s.set_naam, sets), aantal: 0, release: sets?.[id]?.[2] ?? "" };
       x.aantal++;
       m.set(id, x);
     }
@@ -338,7 +345,7 @@ function Catalogus() {
             </div>
             <div className="chips" aria-label="Filters">
               {setLijst.length > 1 && (
-                <SetKiezer sets={setLijst.map((x) => ({ ...x, logo: setLogo(x.id, sets?.[x.id]), code: sets?.[x.id]?.[1] || null }))} gekozen={set} onKies={setSet} />
+                <SetKiezer sets={setLijst.map((x) => ({ ...x, logo: setLogo(x.id, sets?.[x.id]), code: sets?.[x.id]?.[1] || null, taal: setTaal(sets?.[x.id]), intl: sets?.[x.id]?.[5] || null, eigen: sets?.[x.id]?.[6] || null }))} gekozen={set} onKies={setSet} />
               )}
               {SNELFILTERS.map((f) => (
                 <button key={f.id} className={`chip schakelchip${filters.has(f.id) ? " aan" : ""}`} aria-pressed={filters.has(f.id)} onClick={() => wissel(f.id)}>
@@ -370,7 +377,7 @@ function Catalogus() {
             <div className="set-groepen">
               {(() => {
                 let teller = 0;
-                return perSet(groepen, (x) => x.eerste).map((s) => {
+                return perSet(groepen, (x) => x.eerste, sets).map((s) => {
                   const start = teller;
                   teller += s.items.length;
                   return (
@@ -390,7 +397,7 @@ function Catalogus() {
 
       <Voet ig={ig} beurzen={beurzen} />
 
-      {open && <Detail g={open} beurzen={beurzen} onSluit={() => setOpen(null)} />}
+      {open && <Detail g={open} beurzen={beurzen} sets={sets} onSluit={() => setOpen(null)} />}
       {data && <Eend ig={ig} verborgen={!!open || zoekFocus || !groepen.length} />}
     </div>
   );
@@ -474,8 +481,9 @@ function Binders({ binders, onOpen }: { binders: Groep<Stuk>[]; onOpen: (g: Groe
 
 /** Kaartfoto met reservebronnen (TCGdex, dan Limitless, dan pokemontcg.io). */
 function Foto({ kaart, alt, groot = false }: { kaart: FotoKaart; alt: string; groot?: boolean }) {
-  const bronnen = useMemo(() => fotoBronnen(kaart, groot ? "groot" : "klein"), [kaart.afbeelding, kaart.set_code, kaart.nummer, kaart.kaart_id, groot]);
+  const bronnen = useMemo(() => fotoBronnen(kaart, groot ? "groot" : "klein"), [kaart.afbeelding, kaart.set_code, kaart.nummer, kaart.kaart_id, kaart.foto, kaart.taal, groot]);
   const [i, setI] = useState(0);
+  useEffect(() => setI(0), [bronnen]);
   const bron = bronnen[i];
   return (
     <div className="foto">
@@ -493,7 +501,7 @@ function datumMooi(iso: string): string {
   return `${DAGEN[d.getDay()]} ${d.getDate()} ${MAANDEN[d.getMonth()]}`;
 }
 
-function Detail({ g, beurzen, onSluit }: { g: Groep<Stuk>; beurzen: KomendeBeurs[]; onSluit: () => void }) {
+function Detail({ g, beurzen, sets, onSluit }: { g: Groep<Stuk>; beurzen: KomendeBeurs[]; sets: SetInfo | null; onSluit: () => void }) {
   const s = g.eerste;
   const n = aantalVan(g);
   useEffect(() => {
@@ -541,7 +549,7 @@ function Detail({ g, beurzen, onSluit }: { g: Groep<Stuk>; beurzen: KomendeBeurs
                 </>
               ) : (
                 <>
-                  {s.set_naam && <><dt>Set</dt><dd>{s.set_naam}</dd></>}
+                  {(s.set_naam || s.set_code) && <><dt>Set</dt><dd>{setNaam(setIdVan(s), s.set_naam, sets)}{sets?.[setIdVan(s)]?.[5] ? <span className="zacht"> (≈ {sets[setIdVan(s)][5]})</span> : null}</dd></>}
                   {(s.set_code || s.nummer) && <><dt>Nummer</dt><dd>{[s.set_code, s.nummer].filter(Boolean).join(" ")}</dd></>}
                   {s.soort === "slab" ? <><dt>Grade</dt><dd>{[s.grader, s.grade].filter(Boolean).join(" ")}</dd></> : s.conditie && <><dt>Conditie</dt><dd>{CONDITIE[s.conditie] ?? s.conditie}</dd></>}
                   {s.soort !== "eigen product" && <><dt>Taal</dt><dd>{taalNaam(s.taal)}</dd></>}

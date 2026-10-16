@@ -7,11 +7,11 @@ import { useSyncExternalStore } from "react";
 import { isNetwerkFout, type Alles, type Backend, type PrijsMarkering } from "./store/backend";
 import { DemoBackend } from "./store/demo";
 import { SupabaseBackend } from "./store/supabase";
-import type { Aanwezig, Artikel, ArtikelType, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Transactie } from "./types";
+import type { Aanwezig, Artikel, ArtikelType, Bedrijf, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Tegenpartij, Transactie } from "./types";
 import { bewaarPin, controleerPin, isVergrendeld, leesPin, markeerActief, wisPin, VERGRENDEL_NA_MS } from "./lib/pin";
 import { laadPrijsgids, type Prijsgids } from "./lib/prices";
 import { prijscheck, STANDAARD_INSTELLINGEN, type Instellingen, type TeWijzigen } from "./lib/pricing";
-import { vandaag } from "./lib/format";
+import { euro, vandaag } from "./lib/format";
 import { HARTJES_OK, kies } from "./lib/grapjes";
 import { laadTestset } from "./lib/testset";
 import { printLabels, printerNaam, verbindPrinter, ontkoppelPrinter } from "./lib/printer";
@@ -20,11 +20,11 @@ import { laadOcr } from "./lib/ocr";
 import { uuid } from "./lib/uuid";
 import { inVoorraad, metVitrineSinds, schoonArtikel, schoonExemplaar, standaardArtikel, standaardExemplaar } from "./lib/exemplaar";
 import {
-  aanvaardConflict, losConflictOp, maakOngedaan, nieuweRetour, nieuweTransactie, pasToe, pasTotaalAan, stand,
+  aanvaardConflict, losConflictOp, maakOngedaan, nieuweKasbeweging, nieuweRetour, nieuweTransactie, pasToe, pasTotaalAan, stand,
   type Betaling,
 } from "./lib/kassa";
 import { toonCode } from "./lib/code";
-import { bodBedrag, marktwaarde, pasBodToe, PCT_MAX, PCT_MIN, type BodInstelling } from "./lib/bod";
+import { bodVanExact, exactBod, marktwaarde, pasBodToe, PCT_MAX, PCT_MIN, type BodInstelling } from "./lib/bod";
 import { INSTAGRAM } from "./config";
 
 export interface Toast {
@@ -34,7 +34,7 @@ export interface Toast {
   actie?: { label: string; doe: () => void };
 }
 
-export type Tab = "catalogus" | "vault" | "scan" | "kassa" | "meer";
+export type Tab = "catalogus" | "vault" | "scan" | "kassa" | "profiel";
 
 export type Open =
   | { soort: "exemplaar"; id: string }
@@ -45,6 +45,10 @@ export type Open =
   | { soort: "transactie"; id: string }
   | { soort: "beurs"; id: string }
   | { soort: "overzicht" }
+  | { soort: "instellingen" }
+  | { soort: "boekhouding" }
+  | { soort: "inzichten" }
+  | { soort: "historiek" }
   | null;
 
 export interface Mandje {
@@ -66,6 +70,8 @@ export interface State {
   prijscheckOp: string | null;
   instellingen: Instellingen;
   instagram: string;
+  /** Boekhouding (gedeeld via de database): bedrijfsgegevens en welke dagen al in Dexxter staan, per omgeving. */
+  boekhouding: { bedrijven: Record<string, Bedrijf>; ingegeven: Record<string, Record<string, boolean>> };
   toasts: Toast[];
   online: boolean;
   wachtrij: number;
@@ -100,7 +106,8 @@ function schrijf(sleutel: string, waarde: unknown) {
 
 function beginTab(): Tab {
   const h = (typeof location !== "undefined" ? location.hash.replace("#", "") : "") as Tab;
-  return ["catalogus", "vault", "scan", "kassa", "meer"].includes(h) ? h : "catalogus";
+  if ((h as string) === "meer") return "profiel"; // oude links
+  return ["catalogus", "vault", "scan", "kassa", "profiel"].includes(h) ? h : "catalogus";
 }
 
 let state: State = {
@@ -116,6 +123,7 @@ let state: State = {
   prijscheckOp: null,
   instellingen: leesJson(INSTELLINGEN, STANDAARD_INSTELLINGEN),
   instagram: INSTAGRAM,
+  boekhouding: { bedrijven: {}, ingegeven: {} },
   toasts: [],
   online: typeof navigator === "undefined" ? true : navigator.onLine,
   wachtrij: 0,
@@ -256,6 +264,10 @@ export function openLabels() { zet({ open: { soort: "labels" } }); }
 export function openTransactie(id: string) { zet({ open: { soort: "transactie", id } }); }
 export function openBeurs(id: string) { zet({ open: { soort: "beurs", id } }); }
 export function openOverzicht() { zet({ open: { soort: "overzicht" } }); }
+export function openInstellingen() { zet({ open: { soort: "instellingen" } }); }
+export function openBoekhouding() { zet({ open: { soort: "boekhouding" } }); }
+export function openInzichten() { zet({ open: { soort: "inzichten" } }); }
+export function openHistoriek() { zet({ open: { soort: "historiek" } }); }
 export function sluit() { zet({ open: null }); }
 
 // ── Kopie op het toestel (Supabase): om offline te kunnen starten ────────────
@@ -269,7 +281,9 @@ function bewaarKopieLater() {
     // Zonder foto's (die zijn groot en komen terug van de server): zo blijft er plaats voor de wachtrij.
     const alles = alleRijen();
     schrijf(kopieSleutel(b), {
-      op: new Date().toISOString(), ...alles, artikelen: alles.artikelen.map(({ foto: _f, ...a }) => a),
+      op: new Date().toISOString(), ...alles,
+      artikelen: alles.artikelen.map(({ foto: _f, ...a }) => a),
+      exemplaren: alles.exemplaren.map((e) => (e.foto ? { ...e, foto: undefined } : e)),
       omgevingen: state.omgevingen, omgeving: state.omgeving, serverTijd,
     });
   }, 800);
@@ -296,6 +310,7 @@ type Op =
   | { soort: "ongedaan"; id: string }
   | { soort: "conflictOplossen"; id: string; oud: string; nieuw: string }
   | { soort: "conflictAanvaarden"; id: string; item: string }
+  | { soort: "tegenpartij"; id: string; tegenpartij: Tegenpartij | null }
   | { soort: "instelling"; sleutel: string; waarde: unknown }
   | { soort: "prijzen"; omgeving: string | null; lijst: PrijsMarkering[] }
   | { soort: "omgeving"; omgeving: Omgeving };
@@ -356,6 +371,7 @@ async function voerUit(op: Op) {
     case "ongedaan": vervangTransactie(await b.maakOngedaan(op.id)); break;
     case "conflictOplossen": vervangTransactie(await b.losConflictOp(op.id, op.oud, op.nieuw)); break;
     case "conflictAanvaarden": vervangTransactie(await b.aanvaardConflict(op.id, op.item)); break;
+    case "tegenpartij": await b.zetTegenpartij(op.id, op.tegenpartij); break;
   }
 }
 
@@ -406,7 +422,18 @@ export async function spoel(): Promise<boolean> {
   }
 }
 
+/** Staat er voor deze transactie nog een borderel in de wachtrij? Dan is dat de nieuwste versie. */
+function wachtendeTegenpartij(id: string): { tegenpartij: Transactie["tegenpartij"] } | null {
+  for (let i = rij.length - 1; i >= 0; i--) {
+    const op = rij[i].op;
+    if (op.soort === "tegenpartij" && op.id === id) return { tegenpartij: op.tegenpartij };
+  }
+  return null;
+}
+
 function vervangTransactie(t: Transactie) {
+  const wacht = wachtendeTegenpartij(t.id);
+  if (wacht) t = { ...t, tegenpartij: wacht.tegenpartij };
   // Een transactie van een andere omgeving (geboekt vóór je wisselde) blijft daar.
   if (buiten.transacties.some((x) => x.id === t.id)) {
     buiten = { ...buiten, transacties: buiten.transacties.map((x) => (x.id === t.id ? { ...x, ...t } : x)) };
@@ -578,14 +605,15 @@ async function gebruik(backend: Backend) {
     zet({ omgevingen, omgeving, mandje: leesMandje(omgeving, omgevingen) });
     await spoel();
     const [alles, gids, beheerders, gedeeld] = await Promise.all([
-      backend.laadAlles(), laadPrijsgids(), backend.laadBeheerders().catch(() => []), backend.laadInstellingen().catch(() => ({})),
+      backend.laadAlles(), laadPrijsgids(), backend.laadBeheerders().catch(() => []), backend.laadInstellingen().catch(() => null),
     ]);
     serverTijd = laatsteTijd(alles);
     laatsteVolledig = Date.now();
     zet({ ...splits(alles), gids, beheerders: Object.fromEntries(beheerders.map((b) => [b.user_id, b.naam])), fase: "klaar" });
     // Loopt er een beurs? Dan opent de app op de kassa (tenzij een ander tabblad gevraagd werd).
     if (typeof location !== "undefined" && !location.hash && state.beurzen.some((b) => b.status === "actief")) zet({ tab: "kassa" });
-    pasGedeeldToe(gedeeld);
+    // Mislukt het laden van de gedeelde instellingen, dan niets overschrijven (anders wist de volgende wijziging alles).
+    if (gedeeld) pasGedeeldToe(gedeeld);
     bewaarKopieLater();
     void meldAanwezig();
     if ((backend as { schemaOud?: boolean }).schemaOud) {
@@ -626,6 +654,16 @@ function leesMandje(omgeving: string | null, omgevingen: Omgeving[]): Mandje {
 function pasGedeeldToe(g: Record<string, unknown>) {
   const pr = g.prijsregels as Partial<Instellingen> | undefined;
   const deel: Partial<State> = { instagram: typeof g.instagram === "string" && g.instagram ? g.instagram : INSTAGRAM };
+  const bedrijven: Record<string, Bedrijf> = {};
+  const ingegeven: Record<string, Record<string, boolean>> = {};
+  for (const [k, v] of Object.entries(g)) {
+    // dexxter:<omgeving>:<dag> = true/false (één rij per dag: zo overschrijven twee gsm's elkaar niet)
+    const dag = /^dexxter:(.+):(\d{4}-\d{2}-\d{2})$/.exec(k);
+    if (dag) { if (v === true) (ingegeven[dag[1]] ??= {})[dag[2]] = true; continue; }
+    if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+    if (k.startsWith("bedrijf:")) bedrijven[k.slice(8)] = v as Bedrijf;
+  }
+  deel.boekhouding = { bedrijven, ingegeven };
   if (pr && Array.isArray(pr.drempels)) {
     const i = {
       ...state.instellingen, drempels: pr.drempels,
@@ -746,8 +784,11 @@ export async function meldAanwezig() {
 export async function herlaad() {
   if (!state.backend || rij.length) return;
   try {
-    const [alles, omgevingen] = await Promise.all([state.backend.laadAlles(), state.backend.laadOmgevingen().catch(() => state.omgevingen)]);
+    const [alles, omgevingen, gedeeld] = await Promise.all([
+      state.backend.laadAlles(), state.backend.laadOmgevingen().catch(() => state.omgevingen), state.backend.laadInstellingen().catch(() => null),
+    ]);
     if (rij.length) return; // ondertussen iets gewijzigd: volgende keer
+    if (gedeeld) pasGedeeldToe(gedeeld);
     laatsteVolledig = Date.now();
     serverTijd = laatsteTijd(alles);
     if (omgevingen.length) {
@@ -961,6 +1002,28 @@ export function zetInstellingen(i: Partial<Instellingen>) {
   }
 }
 
+/** De sleutel van de actieve omgeving voor gedeelde instellingen (de demo zonder omgevingen: "standaard"). */
+const gedeeldeSleutel = () => state.omgeving ?? "standaard";
+
+export function bedrijfVan(s: State = state): Bedrijf {
+  return s.boekhouding.bedrijven[s.omgeving ?? "standaard"] ?? {};
+}
+
+export function zetBedrijf(b: Bedrijf) {
+  const id = gedeeldeSleutel();
+  zet({ boekhouding: { ...state.boekhouding, bedrijven: { ...state.boekhouding.bedrijven, [id]: b } } });
+  inRij({ soort: "instelling", sleutel: `bedrijf:${id}`, waarde: b });
+}
+
+/** Een dag aanvinken als "ingegeven in Dexxter" (voor alle beheerders zichtbaar). */
+export function zetIngegeven(datum: string, aan: boolean) {
+  const id = gedeeldeSleutel();
+  const nu = { ...(state.boekhouding.ingegeven[id] ?? {}) };
+  if (aan) nu[datum] = true; else delete nu[datum];
+  zet({ boekhouding: { ...state.boekhouding, ingegeven: { ...state.boekhouding.ingegeven, [id]: nu } } });
+  inRij({ soort: "instelling", sleutel: `dexxter:${id}:${datum}`, waarde: aan });
+}
+
 export function zetInstagram(naam: string) {
   const schoon = naam.trim().replace(/^@/, "").replace(/^https?:\/\/(www\.)?instagram\.com\//, "").replace(/\/.*$/, "");
   zet({ instagram: schoon });
@@ -1077,16 +1140,38 @@ function zetRegels(regels: Regel[], gekozen: BodInstelling | null | undefined = 
   // Een zelf getypt bedrag hoort bij die kaarten: komt er een kaart bij of gaat er een weg,
   // dan rekenen we opnieuw met het percentage (anders betaal je 70 euro voor één kaart van 40).
   if (bod?.afronding === "eigen" && gekozen === state.mandje.bod && marktwaarde(regels).totaal !== marktwaarde(state.mandje.regels).totaal) {
-    bod = { pct: bod.pct, afronding: "exact" };
+    bod = { ...bod, afronding: "exact", eigen: null };
     meld("Andere kaarten: het bod is opnieuw berekend met het percentage", "info");
   }
   const m: Mandje = { regels, bod };
   if (bod && metMarkt) {
-    const markt = marktwaarde(regels).totaal;
-    m.regels = pasBodToe(regels, bodBedrag(markt, bodPct(m), bod));
+    const pct = bodPct(m);
+    m.regels = pasBodToe(regels, bodVanExact(exactBod(regels, pct), bod), pct);
   }
   if (!regels.some((r) => r.richting === "in")) m.bod = null;
   zet({ mandje: m });
+}
+
+/**
+ * Per kaart een eigen percentage (bv. 70% voor een vintage kaart terwijl de rest op 80% staat).
+ * Gelijk aan het algemene percentage = geen eigen percentage meer. Een zelf getypt bod vervalt:
+ * het percentage moet effect hebben.
+ */
+export function zetRegelPct(i: number, pct: number | null) {
+  const regels = state.mandje.regels.slice();
+  const r = regels[i];
+  if (!r || r.richting !== "in") return;
+  const b: BodInstelling = { afronding: "exact", ...(state.mandje.bod ?? {}), perKaart: true };
+  const alg = bodPct({ ...state.mandje, bod: b });
+  const p = pct == null ? null : Math.min(PCT_MAX, Math.max(PCT_MIN, Math.round(pct / 5) * 5));
+  regels[i] = { ...r, pct: p == null || p === alg ? null : p };
+  zetRegels(regels, b.afronding === "eigen" ? { ...b, afronding: "exact", eigen: null } : b);
+}
+
+/** Per kaart aan of uit. Uit = alle kaarten weer op het algemene percentage. */
+export function zetPerKaart(aan: boolean) {
+  const b: BodInstelling = { afronding: "exact", ...(state.mandje.bod ?? {}), perKaart: aan };
+  zetRegels(aan ? state.mandje.regels : state.mandje.regels.map((r) => (r.pct != null ? { ...r, pct: null } : r)), b);
 }
 
 /** Het bod kiezen: percentage (slider) en afronding. */
@@ -1161,9 +1246,9 @@ function boek(t: Transactie): Transactie {
 }
 
 /** Rekent het mandje af. Geeft de transactie terug; 5 seconden lang kan ze ongedaan. */
-export function afrekenen(b: Betaling, opmerking: string | null = null): Transactie {
+export function afrekenen(b: Betaling, opmerking: string | null = null, tegenpartij: Tegenpartij | null = null): Transactie {
   const beurs = actieveBeurs();
-  const t = boek(nieuweTransactie(state.mandje.regels, b, beurs?.id ?? null, opmerking));
+  const t = boek(nieuweTransactie(state.mandje.regels, b, beurs?.id ?? null, opmerking, undefined, tegenpartij));
   leegMandje();
   // Het scherm "Verkocht" toont zelf het bedrag en de knop Ongedaan maken; enkel een conflict krijgt een melding.
   if (t.status === "conflict") meld("Let op: niet alles kon afgeboekt worden. Bekijk de transactie.", "fout", { label: "Bekijk", doe: () => openTransactie(t.id) }, 8000);
@@ -1180,9 +1265,39 @@ export function ongedaanMaken(id: string) {
   meld("Ongedaan gemaakt");
 }
 
-export function retour(regels: Regel[], terug: number) {
+/** Retour of een deal terugdraaien: onze stukken komen terug (terugIn), hun stukken gaan terug (terugUit). */
+export function retour(terugIn: Regel[], terug: number, terugUit: Regel[] = [], perBank = false) {
   const beurs = actieveBeurs();
-  return boek(nieuweRetour(regels, terug, beurs?.id ?? null));
+  return boek(nieuweRetour(terugIn, terug, beurs?.id ?? null, undefined, terugUit, perBank));
+}
+
+/**
+ * Kan wat nieuw is in 0.6 (kas, overschrijving, borderel, deal terugdraaien, eigen kaartfoto) al naar
+ * de database? Bij een oude database niet: de knoppen zeggen dan dat het schema eerst bijgewerkt moet
+ * worden, zodat er niets in de wachtrij blijft hangen. De demo kan alles.
+ */
+export function kanNieuweBoekhouding(s: State = state): boolean {
+  const b = s.backend;
+  if (!b || b.soort !== "supabase") return true;
+  const v = (b as SupabaseBackend).versie;
+  return v == null || v >= 5;
+}
+export const OUD_SCHEMA = "Dit kan pas na de update van de database: voer supabase/schema.sql opnieuw uit in Supabase (zie de README).";
+
+/** Geld in of uit de cashkoffer zonder verkoop (wisselgeld, bijleggen, afhalen). */
+export function kasbeweging(b: { cash: number; sumup?: number }, omschrijving: string | null, tegenpartij: Tegenpartij | null = null) {
+  const beurs = actieveBeurs();
+  const t = boek(nieuweKasbeweging(b, beurs?.id ?? null, omschrijving, tegenpartij));
+  meld(t.sumup > 0 ? `SumUp ${euro(t.sumup)} ontvangen, ${euro(-t.cash)} cash gegeven` : t.cash > 0 ? `${euro(t.cash)} in de kas` : `${euro(-t.cash)} uit de kas`);
+  return t;
+}
+
+/** Het borderel aanvullen: naam, adres, handtekeningen (na het afrekenen of later). */
+export function zetTegenpartij(id: string, tegenpartij: Tegenpartij | null) {
+  const t = state.transacties.find((x) => x.id === id) ?? buiten.transacties.find((x) => x.id === id);
+  if (!t) return;
+  inRij({ soort: "tegenpartij", id, tegenpartij }); // eerst in de wachtrij: dat is de nieuwste versie
+  vervangTransactie({ ...t, tegenpartij });
 }
 
 export function conflictOplossen(id: string, oud: string, nieuw: string) {

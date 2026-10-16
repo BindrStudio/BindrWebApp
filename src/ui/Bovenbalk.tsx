@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { actieveBeurs, actieveOmgeving, naarTab, useApp, wisselOmgeving } from "../state";
+import { actieveBeurs, actieveOmgeving, naarTab, openInstellingen, useApp, wisselOmgeving } from "../state";
 import { Icoon, Sheet } from "./common";
 
-const SCHERM: Record<string, string> = { catalogus: "catalogus", vault: "vault", scan: "scannen", kassa: "kassa", meer: "meer" };
+const SCHERM: Record<string, string> = { catalogus: "catalogus", vault: "vault", scan: "scannen", kassa: "kassa", profiel: "profiel", meer: "profiel" };
 
 function initialen(naam: string): string {
   const d = naam.trim().split(/\s+/);
@@ -45,6 +45,9 @@ export function Bovenbalk() {
             {s.omgevingen.length > 1 && <Icoon naam="chevron" maat={14} />}
           </button>
         )}
+        <button className="tandwiel-knop" onClick={openInstellingen} aria-label="Instellingen" title="Instellingen">
+          <Icoon naam="tandwiel" maat={22} />
+        </button>
       </div>
       {open && (
         <Sheet titel="Omgeving en team" onSluit={() => setOpen(false)}>

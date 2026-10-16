@@ -1,4 +1,4 @@
--- Bind'r Stock & Beurs App — databaseschema (versie 0.5: omgevingen, artikels met foto, graded)
+-- Bind'r Stock & Beurs App — databaseschema (versie 0.6: eigen kaartfoto's en boekhouding)
 --
 -- Uitvoeren: Supabase-dashboard › SQL Editor › New query › dit hele bestand plakken › Run.
 -- Het script mag gerust een tweede keer lopen; het overschrijft geen gegevens.
@@ -227,6 +227,24 @@ alter table public.artikelen add constraint artikelen_foto_check
 alter table public.artikelen drop constraint if exists artikelen_details_check;
 alter table public.artikelen add constraint artikelen_details_check check (jsonb_typeof(details) = 'object');
 
+-- ── Versie 0.6: eigen kaartfoto's en boekhouding ────────────────────────────
+-- Een eigen foto voor een kaart waarvan nergens een foto bestaat (bv. een nieuwe Japanse promo).
+alter table public.exemplaren add column if not exists foto text;
+alter table public.exemplaren drop constraint if exists exemplaren_foto_check;
+alter table public.exemplaren add constraint exemplaren_foto_check
+  check (foto is null or (length(foto) <= 600000 and foto ~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$'));
+-- Overschrijving (boven de cashgrens van € 3.000) en de tegenpartij voor het aankoop- of ruilborderel:
+-- naam, adres, particulier of handelaar, identiteit nagekeken, handtekeningen (SVG-pad). Nooit publiek.
+alter table public.transacties add column if not exists bank numeric(10, 2) not null default 0;
+alter table public.transacties add column if not exists tegenpartij jsonb;
+alter table public.transacties drop constraint if exists transacties_tegenpartij_check;
+alter table public.transacties add constraint transacties_tegenpartij_check
+  check (tegenpartij is null or (jsonb_typeof(tegenpartij) = 'object' and length(tegenpartij::text) <= 40000));
+-- "kas": geld in of uit de cashkoffer zonder verkoop (wisselgeld, bijleggen, afhalen). Geen omzet.
+alter table public.transacties drop constraint if exists transacties_soort_check;
+alter table public.transacties add constraint transacties_soort_check
+  check (soort in ('verkoop', 'ruil', 'inkoop', 'retour', 'kas'));
+
 -- ── Wie is er bezig? Elk toestel meldt zich om de minuut ────────────────────
 create table if not exists public.aanwezig (
   user_id     uuid primary key default auth.uid() references auth.users (id) on delete cascade,
@@ -333,6 +351,11 @@ drop trigger if exists transacties_gewijzigd on public.transacties;
 create trigger transacties_gewijzigd before insert or update on public.transacties
   for each row execute function public.zet_gewijzigd();
 
+-- De transacties zijn het dagontvangstenboek: elke wijziging blijft zichtbaar in het logboek.
+drop trigger if exists transacties_log on public.transacties;
+create trigger transacties_log after insert or update or delete on public.transacties
+  for each row execute function public.log_wijziging();
+
 drop trigger if exists exemplaren_gewijzigd on public.exemplaren;
 create trigger exemplaren_gewijzigd before insert or update on public.exemplaren
   for each row execute function public.zet_gewijzigd();
@@ -400,9 +423,18 @@ drop policy if exists "beheerders alles" on public.beurzen;
 create policy "beheerders alles" on public.beurzen
   for all to authenticated using (public.is_beheerder()) with check (public.is_beheerder());
 
+-- Transacties worden nooit gewist (verbeteren gebeurt met een nieuwe boeking of "ongedaan"):
+-- lezen, toevoegen en wijzigen wel, verwijderen niet.
 drop policy if exists "beheerders alles" on public.transacties;
-create policy "beheerders alles" on public.transacties
-  for all to authenticated using (public.is_beheerder()) with check (public.is_beheerder());
+drop policy if exists "beheerders lezen" on public.transacties;
+drop policy if exists "beheerders toevoegen" on public.transacties;
+drop policy if exists "beheerders wijzigen" on public.transacties;
+create policy "beheerders lezen" on public.transacties
+  for select to authenticated using (public.is_beheerder());
+create policy "beheerders toevoegen" on public.transacties
+  for insert to authenticated with check (public.is_beheerder());
+create policy "beheerders wijzigen" on public.transacties
+  for update to authenticated using (public.is_beheerder()) with check (public.is_beheerder());
 
 -- ── Rechten voor de app (REST-API) ───────────────────────────────────────────
 -- Nieuwere Supabase-projecten geven nieuwe tabellen niet altijd automatisch vrij
@@ -448,12 +480,45 @@ begin
   for r in select value from jsonb_array_elements(coalesce(t->'regels', '[]'::jsonb)) loop
     n := coalesce((r->>'aantal')::integer, 1);
 
-    if v_soort = 'retour' then
+    if v_soort = 'kas' then
+      continue; -- geld in of uit de koffer: geen voorraad
+    end if;
+
+    if v_soort = 'retour' and r->>'richting' = 'uit' then
+      -- Een ruil of inkoop terugdraaien: we geven hun stuk terug (het moet nog in voorraad zijn).
       if r->>'exemplaar_id' is not null then
-        update public.exemplaren set status = 'in voorraad', transactie_id = null, afgeboekt_op = null
-         where id = (r->>'exemplaar_id')::uuid;
+        select * into e from public.exemplaren where id = (r->>'exemplaar_id')::uuid for update;
         if not found then
           conflicten := conflicten || jsonb_build_object('exemplaar_id', r->>'exemplaar_id', 'reden', 'onbekend exemplaar');
+        elsif e.status <> 'in voorraad' then
+          conflicten := conflicten || jsonb_build_object('exemplaar_id', r->>'exemplaar_id', 'reden', 'al ' || e.status);
+        else
+          update public.exemplaren set status = 'weg', transactie_id = tid, afgeboekt_op = v_tijd where id = e.id;
+        end if;
+      elsif r->>'artikel_id' is not null then
+        select aantal into a_aantal from public.artikelen where id = (r->>'artikel_id')::uuid for update;
+        if not found then
+          conflicten := conflicten || jsonb_build_object('artikel_id', r->>'artikel_id', 'reden', 'onbekend artikel');
+        else
+          if a_aantal < n then
+            conflicten := conflicten || jsonb_build_object('artikel_id', r->>'artikel_id', 'reden', 'nog maar ' || a_aantal || ' in voorraad');
+          end if;
+          update public.artikelen set aantal = greatest(0, aantal - n) where id = (r->>'artikel_id')::uuid;
+        end if;
+      end if;
+      continue;
+    end if;
+
+    if v_soort = 'retour' then
+      if r->>'exemplaar_id' is not null then
+        select * into e from public.exemplaren where id = (r->>'exemplaar_id')::uuid for update;
+        if not found then
+          conflicten := conflicten || jsonb_build_object('exemplaar_id', r->>'exemplaar_id', 'reden', 'onbekend exemplaar');
+        elsif e.status = 'in voorraad' then
+          -- Twee keer terugnemen kan niet.
+          conflicten := conflicten || jsonb_build_object('exemplaar_id', r->>'exemplaar_id', 'reden', 'al in voorraad');
+        else
+          update public.exemplaren set status = 'in voorraad', transactie_id = null, afgeboekt_op = null where id = e.id;
         end if;
       elsif r->>'artikel_id' is not null then
         update public.artikelen set aantal = aantal + n where id = (r->>'artikel_id')::uuid;
@@ -509,9 +574,10 @@ begin
     end if;
   end loop;
 
-  insert into public.transacties (id, omgeving_id, beurs_id, soort, tijd, regels, totaal, cash, sumup, status, conflicten, opmerking)
+  insert into public.transacties (id, omgeving_id, beurs_id, soort, tijd, regels, totaal, cash, sumup, bank, tegenpartij, status, conflicten, opmerking)
   values (tid, v_omgeving, nullif(t->>'beurs_id', '')::uuid, v_soort, v_tijd, coalesce(t->'regels', '[]'::jsonb),
           coalesce((t->>'totaal')::numeric, 0), coalesce((t->>'cash')::numeric, 0), coalesce((t->>'sumup')::numeric, 0),
+          coalesce((t->>'bank')::numeric, 0), case when jsonb_typeof(t->'tegenpartij') = 'object' then t->'tegenpartij' end,
           case when jsonb_array_length(conflicten) > 0 then 'conflict' else 'ok' end, conflicten, t->>'opmerking')
   returning * into uitkomst;
   return uitkomst;
@@ -541,11 +607,21 @@ begin
 
   for r in select value from jsonb_array_elements(t.regels) loop
     n := coalesce((r->>'aantal')::integer, 1);
-    if t.soort = 'retour' then
-      if r->>'exemplaar_id' is not null then
+    if t.soort = 'retour' and r->>'richting' = 'uit' then
+      -- Het teruggegeven stuk komt weer in voorraad.
+      if r->>'exemplaar_id' is not null and not (r->>'exemplaar_id' = any (in_conflict)) then
+        update public.exemplaren
+           set status = 'in voorraad', transactie_id = null, afgeboekt_op = null
+         where id = (r->>'exemplaar_id')::uuid and transactie_id = tid;
+      elsif r->>'artikel_id' is not null then
+        update public.artikelen set aantal = aantal + n where id = (r->>'artikel_id')::uuid;
+      end if;
+    elsif t.soort = 'retour' then
+      if r->>'exemplaar_id' is not null and not (r->>'exemplaar_id' = any (in_conflict)) then
         update public.exemplaren
            set status = case when r->>'vorige_status' in ('verkocht', 'geruild', 'weg') then r->>'vorige_status' else 'verkocht' end,
-               afgeboekt_op = t.tijd
+               afgeboekt_op = coalesce(nullif(r->>'vorige_afgeboekt_op', '')::timestamptz, t.tijd),
+               transactie_id = coalesce(nullif(r->>'vorige_transactie_id', '')::uuid, transactie_id)
          where id = (r->>'exemplaar_id')::uuid;
       elsif r->>'artikel_id' is not null then
         update public.artikelen set aantal = greatest(0, aantal - n) where id = (r->>'artikel_id')::uuid;
@@ -600,7 +676,8 @@ begin
   end if;
 
   update public.exemplaren
-     set status = case when t.soort = 'ruil' then 'geruild' else 'verkocht' end, transactie_id = tid, afgeboekt_op = t.tijd
+     set status = case when t.soort = 'ruil' then 'geruild' when t.soort = 'retour' then 'weg' else 'verkocht' end,
+         transactie_id = tid, afgeboekt_op = t.tijd
    where id = e.id;
 
   select coalesce(jsonb_agg(c), '[]'::jsonb) into nieuwe_conflicten
@@ -694,7 +771,8 @@ drop view if exists public.publieke_vitrine;
 create view public.publieke_vitrine as
   select kaart_id, catalogus, afbeelding, soort, naam, set_naam, set_code, nummer, taal, conditie,
          variant, grader, grade, hartjesprijs as prijs,
-         code, naam_origineel, hartjesdatum as sinds, vitrine_sinds as toegevoegd
+         code, naam_origineel, hartjesdatum as sinds, vitrine_sinds as toegevoegd,
+         foto  -- eigen foto (enkel als er nergens een foto van de kaart is); de klantenpagina laadt ze apart
     from public.exemplaren
    where opslag = 'vitrine' and status = 'in voorraad' and hartjesprijs is not null and nieuw_hartje is null
      and label_status = 'gestickerd'

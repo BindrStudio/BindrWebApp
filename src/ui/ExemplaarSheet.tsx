@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { bevestigLabel, openExemplaar, openToevoegen, print, sluit, useApp, wijzig, zetHartje } from "../state";
+import { bevestigLabel, kanNieuweBoekhouding, OUD_SCHEMA, openExemplaar, openToevoegen, print, sluit, useApp, wijzig, zetHartje } from "../state";
 import type { Exemplaar } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
 import { dagenGeleden, datumKort, euro, getal } from "../lib/format";
@@ -10,16 +10,20 @@ import { huidigeMaat } from "../lib/printer";
 import { Badges, Hartje, Icoon, KaartFoto, Kiezer, OnderAankoop, onderAankoop, Sheet, Veld } from "./common";
 import { MandjeActie } from "./MandjeActie";
 import { PLAATS } from "../lib/categorie";
-import { setIdVan } from "../lib/weergave";
+import { setIdVan, setNaam } from "../lib/weergave";
+import { useSets } from "./Voorraad";
 import { MarktBlok } from "./Markt";
 import { kantelVrij } from "../lib/kantel";
 import { VerkopenBlok } from "./Graded";
 import { gradedZoektekst } from "../lib/markt";
+import { FotoKiezer } from "./FotoKiezer";
 
 export function ExemplaarSheet({ id }: { id: string }) {
   const { exemplaren, gids, instellingen, teWijzigen, printer } = useApp();
+  const sets = useSets();
   const ex = exemplaren.find((e) => e.id === id);
   const [bewerk, setBewerk] = useState(false);
+  const [geenFoto, setGeenFoto] = useState(false);
   if (!ex) return null;
   const voorstel = voorstelVoor(ex, gids, instellingen);
   const wijzigNodig = teWijzigen.get(ex.id);
@@ -34,22 +38,24 @@ export function ExemplaarSheet({ id }: { id: string }) {
             {ex.soort === "slab" ? (
               <div className="slab-hoes groot">
                 <span className="slab-label"><b>{ex.grader || "Graded"}</b><em>{ex.grade}</em></span>
-                <KaartFoto src={ex.afbeelding} kaart={ex} groot alt={ex.naam} />
+                <KaartFoto src={ex.afbeelding} kaart={ex} groot alt={ex.naam} onGeenFoto={setGeenFoto} />
               </div>
-            ) : <KaartFoto src={ex.afbeelding} kaart={ex} groot alt={ex.naam} />}
+            ) : <KaartFoto src={ex.afbeelding} kaart={ex} groot alt={ex.naam} onGeenFoto={setGeenFoto} />}
             <span className="glans" />
           </div>
         </div>
         <div className="detail-titel">
           <h2>{ex.naam}</h2>
           {ex.naam_origineel && <div className="naam-origineel">{ex.naam_origineel}</div>}
-          <div className="detail-set">{[ex.set_naam, [ex.set_code, ex.nummer].filter(Boolean).join(" ")].filter(Boolean).join(" · ")}</div>
+          <div className="detail-set">{[sets ? setNaam(setIdVan(ex), ex.set_naam, sets) : ex.set_naam, [ex.set_code, ex.nummer].filter(Boolean).join(" ")].filter(Boolean).join(" · ")}</div>
           <Badges ex={ex} />
           <div className="detail-plaats">
             <OpslagKnop ex={ex} />
           </div>
         </div>
       </div>
+
+      {(geenFoto || ex.foto || bewerk) && <EigenFoto ex={ex} geen={geenFoto} />}
 
       <MandjeActie ex={ex} />
       <KlantZiet ex={ex} />
@@ -119,6 +125,22 @@ export function ExemplaarSheet({ id }: { id: string }) {
         <UitVoorraad ex={ex} />
       </div>
     </Sheet>
+  );
+}
+
+/**
+ * Geen foto te vinden (bv. een nieuwe Japanse promo)? Neem er zelf een. Ze gaat voor op de
+ * andere bronnen, ook op de klantenpagina. Liefst de kaart recht van voren, zonder sleeve.
+ */
+function EigenFoto({ ex, geen }: { ex: Exemplaar; geen: boolean }) {
+  const kan = kanNieuweBoekhouding();
+  return (
+    <section className={`blok eigen-foto${geen && !ex.foto ? " geen" : ""}`}>
+      <h3>{ex.foto ? "Eigen foto" : "Geen foto gevonden"}</h3>
+      {!ex.foto && <p className="zacht klein">{kan ? "Neem een foto van de kaart, recht van voren. Ze komt ook op de klantenpagina." : OUD_SCHEMA}</p>}
+      {kan && <FotoKiezer foto={ex.foto} max={560} wat="de kaart"
+        onFoto={(foto) => void wijzig(ex.id, { foto }, foto ? "Foto bewaard" : "Foto weg", true)} />}
+    </section>
   );
 }
 
@@ -315,7 +337,7 @@ function UitVoorraad({ ex }: { ex: Exemplaar }) {
     <div className="uit-keuze">
       <p className="zacht">Verkopen en ruilen gaan via de kassa (In het mandje). Hier haal je een kaart uit de voorraad zonder verkoop: kwijt, beschadigd of voor de eigen collectie.</p>
       <div className="knoppenrij">
-        <button className="knop zacht rood" onClick={() => { void wijzig(ex.id, { status: "weg" }, "Uit de voorraad gehaald", true); sluit(); }}>Uit voorraad halen</button>
+        <button className="knop zacht rood" onClick={() => { void wijzig(ex.id, { status: "weg", afgeboekt_op: new Date().toISOString() }, "Uit de voorraad gehaald", true); sluit(); }}>Uit voorraad halen</button>
         <button className="tekstknop" onClick={() => setOpen(false)}>Annuleer</button>
       </div>
     </div>

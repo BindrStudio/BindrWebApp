@@ -1,4 +1,4 @@
-import type { Aanwezig, Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Transactie } from "../types";
+import type { Aanwezig, Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
 
 export interface Beheerder {
   user_id: string;
@@ -44,6 +44,8 @@ export interface Backend {
   maakOngedaan(id: string): Promise<Transactie>;
   losConflictOp(id: string, oud: string, nieuw: string): Promise<Transactie>;
   aanvaardConflict(id: string, item: string): Promise<Transactie>;
+  /** Het borderel van een transactie aanvullen (tegenpartij, handtekeningen). */
+  zetTegenpartij(id: string, tegenpartij: Tegenpartij | null): Promise<void>;
 
   /** Het wachtwoord (de pincode) van de ingelogde beheerder wijzigen. */
   wijzigPincode(pin: string): Promise<void>;

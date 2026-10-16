@@ -23,15 +23,12 @@ export function GradedVelden({ grader, grade, cert, onChange }: {
   );
 }
 
-/** Knoppen naar de verkochte advertenties (eBay, 130point) en het certificaat. */
+/** Knop naar de verkochte advertenties op eBay (en het certificaat, als we het nummer hebben). */
 export function SoldLinks({ zoek, grader, cert }: { zoek: string; grader?: string | null; cert?: string | null }) {
   const c = certLink(grader, cert);
   return (
     <div className="sold-links">
-      <a className="knop zacht klein" href={ebaySoldLink(zoek, "com")} target="_blank" rel="noreferrer"><Icoon naam="link" maat={14} /> eBay sold</a>
-      <a className="knop zacht klein" href={ebaySoldLink(zoek, "de")} target="_blank" rel="noreferrer">eBay.de</a>
-      <a className="knop zacht klein" href={ebaySoldLink(zoek, "be")} target="_blank" rel="noreferrer">eBay.be</a>
-      <a className="knop zacht klein" href="https://130point.com/sales/" target="_blank" rel="noreferrer" title={`Plak: ${zoek}`}>130point</a>
+      <a className="knop zacht klein" href={ebaySoldLink(zoek)} target="_blank" rel="noreferrer"><Icoon naam="link" maat={14} /> Verkochte op eBay</a>
       {c && <a className="knop zacht klein" href={c} target="_blank" rel="noreferrer">Certificaat</a>}
     </div>
   );
@@ -75,7 +72,7 @@ export function VerkopenBlok({ verkopen, onChange, zoek, grader, cert, onSchatti
         <span className="euro-invoer mini"><span>€</span><input inputMode="decimal" value={v.prijs} onChange={(e) => setV({ ...v, prijs: e.target.value })} placeholder="prijs" aria-label="Prijs"
           onKeyDown={(e) => e.key === "Enter" && voegToe()} /></span>
         <select value={v.bron} onChange={(e) => setV({ ...v, bron: e.target.value })} aria-label="Bron">
-          {["eBay", "130point", "Cardmarket", "Vinted", "Beurs", "Andere"].map((b) => <option key={b}>{b}</option>)}
+          {["eBay", "Cardmarket", "Vinted", "Beurs", "Andere"].map((b) => <option key={b}>{b}</option>)}
         </select>
         <button className="knop klein" onClick={voegToe} disabled={!(getal(v.prijs) ?? 0)}>Voeg toe</button>
       </div>

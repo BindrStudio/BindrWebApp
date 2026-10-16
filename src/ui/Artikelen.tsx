@@ -1,6 +1,6 @@
 // Artikels: alles wat per aantal gaat en geen eigen label krijgt. Onze binders (hoofdproduct),
 // sealed (met de prijs van Cardmarket), 3D-prints en andere. Te vinden in Meer › Artikels.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { inMandje, meld, naarTab, openArtikel, openArtikelen, sluit, useApp, voegArtikelToe, wijzigArtikel } from "../state";
 import type { Artikel, ArtikelDetails, ArtikelType, Techniek } from "../types";
 export { artikelOmschrijving };
@@ -9,8 +9,9 @@ import { regelArtikelUit } from "../lib/kassa";
 import { ARTIKEL_TYPES, artikelOmschrijving, artikelType, PLAATS, soortVoorType, TECHNIEKEN } from "../lib/categorie";
 import { cardmarketSealedLink } from "../lib/markt";
 import { laadSealed, zoekSealed, type SealedProduct } from "../lib/sealed";
-import { veiligeFoto, verkleinFoto } from "../lib/eigenfoto";
+import { veiligeFoto } from "../lib/eigenfoto";
 import { Icoon, Kiezer, Sheet, Veld } from "./common";
+import { FotoKiezer } from "./FotoKiezer";
 
 const ICOON: Record<ArtikelType, string> = { binder: "binder", sealed: "doos", "3d-print": "print3d", andere: "tag" };
 const GROOTTES = ["4-pocket", "9-pocket", "12-pocket", "16-pocket"];
@@ -89,29 +90,6 @@ export function Artikelen({ type: start }: { type?: ArtikelType }) {
 // ── Eén artikel: bekijken, aanpassen of nieuw ────────────────────────────────
 
 /** Foto nemen of kiezen; wordt verkleind en meteen getoond. */
-function FotoKiezer({ foto, onFoto }: { foto: string | null; onFoto: (f: string | null) => void }) {
-  const invoer = useRef<HTMLInputElement>(null);
-  const [bezig, setBezig] = useState(false);
-  const kies = async (f: File | undefined) => {
-    if (!f) return;
-    setBezig(true);
-    try { onFoto(await verkleinFoto(f)); } catch (e) { meld(e instanceof Error ? e.message : String(e), "fout"); } finally { setBezig(false); }
-  };
-  const f = veiligeFoto(foto);
-  return (
-    <div className="foto-kiezer">
-      {f ? <img src={f} alt="Foto van het artikel" /> : <span className="foto-kiezer-leeg"><Icoon naam="foto" maat={30} /></span>}
-      <div className="foto-kiezer-knoppen">
-        <button type="button" className="knop zacht klein" disabled={bezig} onClick={() => invoer.current?.click()}>
-          <Icoon naam="camera" maat={16} /> {bezig ? "Bezig…" : f ? "Andere foto" : "Foto nemen of kiezen"}
-        </button>
-        {f && <button type="button" className="tekstknop klein" onClick={() => onFoto(null)}>Foto weg</button>}
-      </div>
-      <input ref={invoer} type="file" accept="image/*" hidden onChange={(e) => { void kies(e.target.files?.[0]); e.target.value = ""; }} />
-    </div>
-  );
-}
-
 /** Sealed opzoeken in de productlijst van Cardmarket (prijs en link). */
 function SealedZoeker({ naam, onKies }: { naam: string; onKies: (p: SealedProduct) => void }) {
   const [q, setQ] = useState(naam);

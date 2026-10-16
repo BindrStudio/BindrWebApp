@@ -48,14 +48,34 @@ export function bodVoorstellen(exact: number, max = Infinity): number[] {
   return uniek.sort((a, b) => Math.abs(a - exact) - Math.abs(b - exact)).slice(0, 3).sort((a, b) => a - b);
 }
 
+/** Wat één kaart weegt in het bod: marktwaarde × (het eigen percentage van die kaart, of het algemene). */
+export function bodGewicht(r: Regel, algemeen: number): number {
+  return metRef(r) ? ((r.referentie ?? 0) * (r.pct ?? algemeen)) / 100 : 0;
+}
+
+/** Het exacte bod: per kaart de marktwaarde × het percentage, samen. */
+export function exactBod(regels: Regel[], algemeen: number): number {
+  return rond2(regels.reduce((s, r) => s + bodGewicht(r, algemeen), 0));
+}
+
+/** Heeft minstens één kaart een eigen percentage? */
+export const heeftEigenPct = (regels: Regel[]) => regels.some((r) => metRef(r) && r.pct != null);
+
+/** Het percentage van alles samen, met de eigen percentages per kaart (bv. 80, 80 en 70 → 77). */
+export function samenPct(regels: Regel[], algemeen: number): number {
+  const m = marktwaarde(regels).totaal;
+  return m > 0 ? Math.round((exactBod(regels, algemeen) / m) * 100) : algemeen;
+}
+
 /**
- * Een bod verdelen over de kaarten met een marktprijs, in verhouding tot die prijs (op de cent,
- * het verschil naar de duurste). Kaarten zonder marktprijs houden de waarde die je zelf gaf.
+ * Een bod verdelen over de kaarten met een marktprijs, in verhouding tot marktwaarde × percentage
+ * (op de cent, het verschil naar de duurste). Kaarten zonder marktprijs houden de waarde die je zelf gaf.
+ * Zonder eigen percentages per kaart is dat gewoon in verhouding tot de marktwaarde.
  */
-export function pasBodToe(regels: Regel[], bod: number): Regel[] {
+export function pasBodToe(regels: Regel[], bod: number, algemeen = 100): Regel[] {
   const idx = regels.map((r, i) => (metRef(r) ? i : -1)).filter((i) => i >= 0);
   if (!idx.length) return regels;
-  const delen = verdeelTotaal(idx.map((i) => regels[i].referentie ?? 0), rond2(bod));
+  const delen = verdeelTotaal(idx.map((i) => bodGewicht(regels[i], algemeen)), rond2(bod));
   const uit = regels.slice();
   idx.forEach((i, j) => { uit[i] = { ...uit[i], prijs: delen[j] }; });
   return uit;
@@ -70,6 +90,7 @@ export interface BodInstelling {
   pct?: number | null;       // 65–95, in stappen van 5 (leeg = standaard voor inkoop of ruil)
   afronding: Afronding;
   eigen?: number | null;     // bij "eigen"
+  perKaart?: boolean;        // per kaart een eigen percentage kiezen (Regel.pct)
 }
 
 export const PCT_MIN = 65;
@@ -87,10 +108,15 @@ export function afgerond(exact: number, a: Exclude<Afronding, "eigen">): number 
   }
 }
 
-/** Wat we bieden voor de kaarten met een marktwaarde. */
+/** Wat we bieden voor de kaarten met een marktwaarde (marktwaarde × percentage, dan afgerond). */
 export function bodBedrag(markt: number, pct: number, b: BodInstelling): number {
+  return bodVanExact(rond2((markt * pct) / 100), b);
+}
+
+/** Het exacte bod afronden zoals gekozen (of het eigen bedrag). */
+export function bodVanExact(exactBedrag: number, b: BodInstelling): number {
   if (b.afronding === "eigen" && b.eigen != null && b.eigen >= 0) return rond2(b.eigen);
-  const exact = rond2((markt * pct) / 100);
+  const exact = rond2(exactBedrag);
   let a: Exclude<Afronding, "eigen"> = b.afronding === "eigen" ? "exact" : b.afronding;
   // Op 5 euro afronden enkel vanaf 20 euro; en nooit naar 0 euro voor kaarten die iets waard zijn.
   if (exact < 20 && a === "omlaag5") a = "omlaag";

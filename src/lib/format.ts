@@ -6,6 +6,13 @@ export function euro(n: number | null | undefined, heel = false): string {
   return (heel || Number.isInteger(n) ? euroHeel : euroFmt).format(n);
 }
 
+/** De dag (in België) van een tijdstip: JJJJ-MM-DD. Zo ligt een verkoop om 00:30 op de juiste dag. */
+export function dagVan(iso: string): string {
+  const p = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Brussels", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(iso));
+  const v = (t: string) => p.find((x) => x.type === t)?.value ?? "";
+  return `${v("year")}-${v("month")}-${v("day")}`;
+}
+
 export function vandaag(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

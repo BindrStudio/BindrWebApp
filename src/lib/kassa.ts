@@ -2,10 +2,11 @@
 // conflicten oplossen en de cijfers van een beurs. Zonder netwerk of opslag, zodat
 // de demo, de offline wachtrij en de tests exact dezelfde regels volgen als de
 // databasefunctie boek_transactie in supabase/schema.sql.
-import type { Artikel, Beurs, Conflict, Exemplaar, NieuwExemplaar, Regel, Stand, Transactie, TransactieSoort } from "../types";
+import type { Artikel, Beurs, Conflict, Exemplaar, NieuwExemplaar, Regel, Stand, Tegenpartij, Transactie, TransactieSoort } from "../types";
 import { inVoorraad, standaardExemplaar } from "./exemplaar";
 import { verdeelTotaal } from "./pricing";
 import { uuid } from "./uuid";
+import { dagVan } from "./format";
 
 export interface Voorraad {
   exemplaren: Exemplaar[];
@@ -50,7 +51,7 @@ export function bepaalSoort(regels: Regel[]): TransactieSoort {
   return uit ? "verkoop" : "inkoop";
 }
 
-const datumVan = (iso: string) => iso.slice(0, 10);
+const datumVan = dagVan; // de dag in België, zoals de server (Europe/Brussels)
 
 // ── Regels maken ─────────────────────────────────────────────────────────────
 
@@ -101,32 +102,69 @@ export function pasTotaalAan(regels: Regel[], richting: "uit" | "in", nieuwTotaa
 export interface Betaling {
   cash: number;
   sumup: number;
+  bank?: number; // overschrijving
 }
+
+/** Wettelijke grens voor cash bij de aankoop of verkoop van goederen (art. 67 witwaswet): € 3.000. */
+export const CASH_GRENS = 3000;
 
 /** Controleert de betaling: samen moet ze exact het netto bedrag zijn. */
 export function betalingKlopt(regels: Regel[], b: Betaling): string | null {
   const n = netto(regels);
-  if (n < 0 && (b.sumup !== 0 || rond2(b.cash) !== n)) return "Terugbetalen gaat enkel cash";
-  if (n >= 0 && (b.cash < 0 || b.sumup < 0)) return "Bedragen kunnen niet negatief zijn";
-  if (rond2(b.cash + b.sumup) !== n) return `Cash en SumUp moeten samen ${n.toFixed(2)} zijn`;
+  const bank = b.bank ?? 0;
+  if (n < 0 && (b.sumup !== 0 || b.cash > 0 || bank > 0)) return "Terugbetalen gaat enkel cash of met een overschrijving";
+  if (n >= 0 && (b.cash < 0 || b.sumup < 0 || bank < 0)) return "Bedragen kunnen niet negatief zijn";
+  if (rond2(b.cash + b.sumup + bank) !== n) return `Cash, SumUp en overschrijving moeten samen ${n.toFixed(2)} zijn`;
+  if (Math.abs(b.cash) > CASH_GRENS) return `Cash mag hoogstens ${CASH_GRENS} euro zijn (wettelijke grens). Betaal de rest met SumUp of een overschrijving.`;
   return null;
 }
 
-export function nieuweTransactie(regels: Regel[], b: Betaling, beursId: string | null, opmerking: string | null = null, tijd = new Date().toISOString()): Transactie {
+export function nieuweTransactie(regels: Regel[], b: Betaling, beursId: string | null, opmerking: string | null = null, tijd = new Date().toISOString(), tegenpartij: Tegenpartij | null = null): Transactie {
   const fout = betalingKlopt(regels, b);
   if (fout) throw new Error(fout);
   return {
     id: uuid(), beurs_id: beursId, soort: bepaalSoort(regels), tijd, regels,
-    totaal: netto(regels), cash: rond2(b.cash), sumup: rond2(b.sumup),
-    status: "ok", conflicten: [], opmerking,
+    totaal: netto(regels), cash: rond2(b.cash), sumup: rond2(b.sumup), bank: rond2(b.bank ?? 0),
+    status: "ok", conflicten: [], opmerking, tegenpartij,
   };
 }
 
-/** Een retour: de klant brengt iets terug en krijgt cash terug. */
-export function nieuweRetour(regels: Regel[], terug: number, beursId: string | null, tijd = new Date().toISOString()): Transactie {
+/**
+ * Een retour of een deal terugdraaien. `terugIn` = onze stukken die terugkomen (de klant krijgt
+ * zijn geld terug), `terugUit` = hun stukken die we teruggeven (bij een ruil of inkoop; dan
+ * betalen zij ons terug). `terug` = wat wij uitbetalen (negatief: wat zij ons betalen). Cash, of per
+ * overschrijving (boven de cashgrens van € 3.000 verplicht).
+ */
+export function nieuweRetour(terugIn: Regel[], terug: number, beursId: string | null, tijd = new Date().toISOString(), terugUit: Regel[] = [], perBank = false): Transactie {
+  if (!perBank && Math.abs(terug) > CASH_GRENS) throw new Error(`Cash mag hoogstens ${CASH_GRENS} euro zijn (wettelijke grens). Kies een overschrijving.`);
+  const regels: Regel[] = [
+    ...terugIn.map((r) => ({ ...r, richting: "in" as const, nieuw: null })),
+    ...terugUit.map((r) => ({ ...r, richting: "uit" as const, exemplaar_id: r.exemplaar_id ?? r.nieuw?.id ?? null, nieuw: null })),
+  ];
   return {
-    id: uuid(), beurs_id: beursId, soort: "retour", tijd, regels: regels.map((r) => ({ ...r, richting: "in" as const })),
-    totaal: -rond2(terug), cash: -rond2(terug), sumup: 0, status: "ok", conflicten: [], opmerking: null,
+    id: uuid(), beurs_id: beursId, soort: "retour", tijd, regels,
+    totaal: -rond2(terug), cash: perBank ? 0 : -rond2(terug), sumup: 0, bank: perBank ? -rond2(terug) : 0, status: "ok", conflicten: [], opmerking: null,
+  };
+}
+
+/** Wat een retour standaard kost: de prijs van wat terugkomt min wat we teruggeven. */
+export function retourBedrag(terugIn: Regel[], terugUit: Regel[] = []): number {
+  return rond2(terugIn.reduce((s, r) => s + r.prijs, 0) - terugUit.reduce((s, r) => s + r.prijs, 0));
+}
+
+/**
+ * Geld in of uit de cashkoffer zonder verkoop: geld bijleggen (+), afhalen (−), of een andere stand
+ * betaalt met SumUp en krijgt cash (sumup +, cash −). Geen omzet en geen kost.
+ */
+export function nieuweKasbeweging(b: { cash: number; sumup?: number }, beursId: string | null, omschrijving: string | null, tegenpartij: Tegenpartij | null = null, tijd = new Date().toISOString()): Transactie {
+  const cash = rond2(b.cash);
+  const sumup = rond2(b.sumup ?? 0);
+  if (sumup < 0) throw new Error("Een SumUp-bedrag in de kas kan niet negatief zijn");
+  if (sumup > 0 && rond2(cash + sumup) !== 0) throw new Error("Wie met SumUp betaalt, krijgt hetzelfde bedrag in cash");
+  if (cash === 0 && sumup === 0) throw new Error("Vul een bedrag in");
+  return {
+    id: uuid(), beurs_id: beursId, soort: "kas", tijd, regels: [], totaal: 0, cash, sumup, bank: 0,
+    status: "ok", conflicten: [], opmerking: omschrijving?.trim() || null, tegenpartij,
   };
 }
 
@@ -138,10 +176,28 @@ export function pasToe(v: Voorraad, t: Transactie): { voorraad: Voorraad; transa
   const nieuweVolgorde: Exemplaar[] = [];
 
   for (const r of t.regels) {
+    if (t.soort === "kas") continue;
+    if (t.soort === "retour" && r.richting === "uit") {
+      // We geven hun stuk terug (een ruil of inkoop terugdraaien): het moet nog in voorraad zijn.
+      if (r.exemplaar_id) {
+        const e = exemplaren.get(r.exemplaar_id);
+        if (!e || !inVoorraad(e)) { conflicten.push({ exemplaar_id: r.exemplaar_id, reden: e ? `al ${e.status}` : "onbekend exemplaar" }); continue; }
+        exemplaren.set(e.id, { ...e, status: "weg", transactie_id: t.id, afgeboekt_op: t.tijd, gewijzigd_op: t.tijd });
+      } else if (r.artikel_id) {
+        const a = artikelen.get(r.artikel_id);
+        const n = r.aantal ?? 1;
+        if (!a) { conflicten.push({ artikel_id: r.artikel_id, reden: "onbekend artikel" }); continue; }
+        if (a.aantal < n) conflicten.push({ artikel_id: a.id, reden: `nog maar ${a.aantal} in voorraad` });
+        artikelen.set(a.id, { ...a, aantal: Math.max(0, a.aantal - n) });
+      }
+      continue;
+    }
     if (t.soort === "retour") {
       if (r.exemplaar_id) {
         const e = exemplaren.get(r.exemplaar_id);
         if (!e) { conflicten.push({ exemplaar_id: r.exemplaar_id, reden: "onbekend exemplaar" }); continue; }
+        // Twee keer terugnemen kan niet: wat al in voorraad ligt, wordt een conflict.
+        if (inVoorraad(e)) { conflicten.push({ exemplaar_id: r.exemplaar_id, reden: "al in voorraad" }); continue; }
         exemplaren.set(e.id, { ...e, status: "in voorraad", transactie_id: null, afgeboekt_op: null, gewijzigd_op: t.tijd });
       } else if (r.artikel_id) {
         const a = artikelen.get(r.artikel_id);
@@ -209,11 +265,22 @@ export function maakOngedaan(v: Voorraad, t: Transactie): { voorraad: Voorraad; 
   const inConflict = new Set(t.conflicten.map((c) => c.exemplaar_id).filter(Boolean) as string[]);
 
   for (const r of t.regels) {
+    if (t.soort === "kas") continue;
+    if (t.soort === "retour" && r.richting === "uit") {
+      if (r.exemplaar_id && !inConflict.has(r.exemplaar_id)) {
+        const e = exemplaren.get(r.exemplaar_id);
+        if (e && e.transactie_id === t.id) exemplaren.set(e.id, { ...e, status: "in voorraad", transactie_id: null, afgeboekt_op: null });
+      } else if (r.artikel_id) {
+        const a = artikelen.get(r.artikel_id);
+        if (a) artikelen.set(a.id, { ...a, aantal: a.aantal + (r.aantal ?? 1) });
+      }
+      continue;
+    }
     if (t.soort === "retour") {
-      if (r.exemplaar_id) {
+      if (r.exemplaar_id && !inConflict.has(r.exemplaar_id)) {
         const e = exemplaren.get(r.exemplaar_id);
         const vorig = r.vorige_status && ["verkocht", "geruild", "weg"].includes(r.vorige_status) ? r.vorige_status : "verkocht";
-        if (e) exemplaren.set(e.id, { ...e, status: vorig, afgeboekt_op: t.tijd });
+        if (e) exemplaren.set(e.id, { ...e, status: vorig, afgeboekt_op: r.vorige_afgeboekt_op ?? t.tijd, transactie_id: r.vorige_transactie_id ?? e.transactie_id });
       } else if (r.artikel_id) {
         const a = artikelen.get(r.artikel_id);
         if (a) artikelen.set(a.id, { ...a, aantal: Math.max(0, a.aantal - (r.aantal ?? 1)) });
@@ -233,7 +300,9 @@ export function maakOngedaan(v: Voorraad, t: Transactie): { voorraad: Voorraad; 
         if (a) artikelen.set(a.id, { ...a, aantal: a.aantal + (r.aantal ?? 1) });
       }
     } else if (r.nieuw?.id) {
-      weg.add(r.nieuw.id);
+      // Zoals de server: enkel weg als het nog in voorraad ligt (anders werd het intussen verkocht).
+      const e = exemplaren.get(r.nieuw.id);
+      if (!e || inVoorraad(e)) weg.add(r.nieuw.id);
     } else if (r.artikel_id) {
       const a = artikelen.get(r.artikel_id);
       if (a) artikelen.set(a.id, { ...a, aantal: Math.max(0, a.aantal - (r.aantal ?? 1)) });
@@ -263,7 +332,7 @@ export function losConflictOp(v: Voorraad, t: Transactie, oudId: string, nieuwId
       : r,
   );
   const exemplaren = v.exemplaren.map((e) =>
-    e.id === nieuw.id ? { ...e, status: (t.soort === "ruil" ? "geruild" : "verkocht") as Exemplaar["status"], transactie_id: t.id, afgeboekt_op: t.tijd } : e,
+    e.id === nieuw.id ? { ...e, status: (t.soort === "ruil" ? "geruild" : t.soort === "retour" ? "weg" : "verkocht") as Exemplaar["status"], transactie_id: t.id, afgeboekt_op: t.tijd } : e,
   );
   const conflicten = t.conflicten.filter((c) => c.exemplaar_id !== oudId);
   return {
@@ -310,8 +379,8 @@ export function beursCijfers(beurs: Pick<Beurs, "startkas"> | null, transacties:
   const geldig = transacties.filter((t) => t.status !== "ongedaan");
   let korting = 0, marge = 0, metMarge = 0, verkocht = 0, weggeruild = 0, viaRuil = 0, viaInkoop = 0, omzet = 0, uit = 0;
   for (const t of geldig) {
-    if (t.cash > 0) omzet += t.cash; else uit -= t.cash;
-    if (t.sumup > 0) omzet += t.sumup; else uit -= t.sumup;
+    if (t.soort === "kas") continue; // geld in of uit de koffer: telt wel in de kas, niet als omzet
+    for (const x of [t.cash, t.sumup, t.bank ?? 0]) { if (x > 0) omzet += x; else uit -= x; }
     for (const r of t.regels) {
       if (t.soort === "retour") continue;
       if (r.richting === "uit") {
@@ -338,7 +407,7 @@ export function beursCijfers(beurs: Pick<Beurs, "startkas"> | null, transacties:
     weggeruild,
     nieuwViaRuil: viaRuil,
     nieuwViaInkoop: viaInkoop,
-    transacties: geldig.length,
+    transacties: geldig.filter((t) => t.soort !== "kas").length,
     conflicten: geldig.filter((t) => t.status === "conflict").length,
   };
 }
@@ -376,7 +445,7 @@ export function beursOverzicht(transacties: Transactie[], soortVan: (r: Regel) =
   const retour = leeg();
   const trades = { aantal: 0, weg: 0, binnen: 0, bijbetaaldDoorKlant: 0, bijbetaaldDoorOns: 0 };
   for (const t of transacties) {
-    if (t.status === "ongedaan") continue;
+    if (t.status === "ongedaan" || t.soort === "kas") continue;
     if (t.soort === "retour") { retour.aantal++; retour.bedrag += -t.totaal; continue; }
     if (t.soort === "ruil") {
       trades.aantal++;

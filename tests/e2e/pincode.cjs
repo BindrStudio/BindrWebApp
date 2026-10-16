@@ -104,10 +104,11 @@ async function nabootsen(route) {
   stap("samen werken: aanwezig gemeld (antwoord zonder inhoud) en instelling bewaard");
   await page.waitForTimeout(500);
   assert.ok(server.aanwezig >= 1, "aanwezig gemeld");
-  await page.locator(".tabbalk button").filter({ hasText: "Meer" }).click();
+  await page.getByRole("button", { name: "Instellingen" }).click();
   await page.locator(".instagram-veld input").fill("bindr.pin");
   await page.locator(".instagram-veld").getByRole("button", { name: "Bewaar" }).click();
   await page.waitForTimeout(600);
+  await page.keyboard.press("Escape");
   assert.equal(server.instellingen.instagram, "bindr.pin");
   assert.equal(await page.getByText(/Niet bewaard/).count(), 0, "geen valse foutmelding bij een leeg antwoord");
   assert.equal(await wachtrij(), 0);
@@ -124,10 +125,11 @@ async function nabootsen(route) {
 
   stap("sessie ingetrokken op de server: opnieuw inloggen, de wachtrij blijft");
   server.modus = "offline";
-  await page.locator(".tabbalk button").filter({ hasText: "Meer" }).click();
+  await page.getByRole("button", { name: "Instellingen" }).click();
   await page.locator(".instagram-veld input").fill("bindr.offline");
   await page.locator(".instagram-veld").getByRole("button", { name: "Bewaar" }).click();
   await page.waitForTimeout(400);
+  await page.keyboard.press("Escape");
   assert.equal(await wachtrij(), 1, "offline: de wijziging wacht");
   server.modus = "ingetrokken";
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
@@ -160,7 +162,7 @@ async function nabootsen(route) {
   assert.ok(await p2.evaluate(() => !!localStorage.getItem("bindr-pin-v1")), "pincode bewaard op de tweede gsm");
 
   stap("pincode wijzigen vraagt eerst de huidige");
-  await page.locator(".tabbalk button").filter({ hasText: "Meer" }).click();
+  await page.locator(".tabbalk button").filter({ hasText: "Profiel" }).click();
   await page.getByRole("button", { name: "Pincode wijzigen" }).click();
   await page.getByRole("heading", { name: "Huidige pincode" }).waitFor();
   await page.keyboard.type("111222");

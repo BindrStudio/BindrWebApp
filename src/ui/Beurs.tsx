@@ -1,18 +1,21 @@
 import { useMemo, useState } from "react";
 import {
-  actieveBeurs, bewaarBeurs, conflictAanvaarden, conflictOplossen, huidig, meld, ongedaanMaken, openBeurs, openExemplaar,
+  actieveBeurs, bewaarBeurs, conflictAanvaarden, conflictOplossen, huidig, kanNieuweBoekhouding, meld, ongedaanMaken, openBeurs, openExemplaar,
   openTransactie, planBeurs, retour, schrapBeurs, sluit, sluitBeurs, startBeurs, useApp,
 } from "../state";
 import type { Beurs, Regel, Stand, Transactie } from "../types";
-import { beursCijfers, beursOverzicht, PRODUCTSOORTEN, stand } from "../lib/kassa";
+import { beursCijfers, beursOverzicht, CASH_GRENS, PRODUCTSOORTEN, retourBedrag, stand } from "../lib/kassa";
+import { borderelNummer, borderelOntbreekt, csv, heeftBorderel } from "../lib/boekhouding";
 import { datumKort, euro, getal, vandaag } from "../lib/format";
 import { normaliseerCode, toonCode } from "../lib/code";
 import { inVoorraad } from "../lib/exemplaar";
 import { Icoon, Sheet, Veld } from "./common";
-import { BeurzenEnTransacties, TransactieRij, useSoortVan } from "./Historiek";
+import { BeurzenEnTransacties, kasOmschrijving, TransactieRij, useSoortVan } from "./Historiek";
+import { BorderelSheet } from "./Boekhouding";
+import { bewaarCsv } from "./Afdruk";
 
 const tijdKort = (iso: string) => new Date(iso).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" });
-const SOORT_NAAM: Record<Transactie["soort"], string> = { verkoop: "Verkoop", ruil: "Ruil", inkoop: "Inkoop", retour: "Retour" };
+const SOORT_NAAM: Record<Transactie["soort"], string> = { verkoop: "Verkoop", ruil: "Ruil", inkoop: "Inkoop", retour: "Retour", kas: "Kas" };
 
 // ── Beurs starten en afsluiten ───────────────────────────────────────────────
 
@@ -170,69 +173,148 @@ export function BeursAfsluiten({ beurs, onSluit }: { beurs: Beurs; onSluit: () =
 export function TransactieSheet({ id }: { id: string }) {
   const { transacties, beheerders, exemplaren } = useApp();
   const t = transacties.find((x) => x.id === id);
+  // Retour: welke regels gaan terug (onze stukken komen terug, hun stukken geven we terug).
   const [retourKeuze, setRetourKeuze] = useState<Set<number> | null>(null);
+  const [eigenBedrag, setEigenBedrag] = useState<string | null>(null);
+  const [perBank, setPerBank] = useState(false);
+  const [borderel, setBorderel] = useState(false);
   if (!t) return null;
-  const uit = t.regels.map((r, i) => ({ r, i })).filter((x) => x.r.richting === "uit");
-  const retourBedrag = retourKeuze ? uit.filter((x) => retourKeuze.has(x.i)).reduce((s, x) => s + x.r.prijs, 0) : 0;
+  const nieuw = kanNieuweBoekhouding();
+  // Wat al terugging (een eerdere retour van deze transactie) kan niet nog eens terug.
+  const retours = transacties.filter((x) => x.soort === "retour" && x.status !== "ongedaan" && x.regels.some((r) => r.van === t.id));
+  const artikelTerug = (id: string, richting: Regel["richting"]) => retours.flatMap((x) => x.regels)
+    .filter((r) => r.van === t.id && r.artikel_id === id && r.richting === richting).reduce((n, r) => n + (r.aantal ?? 1), 0);
+  const kanTerug = (r: Regel) => {
+    if (r.richting === "uit") {
+      if (r.exemplaar_id) { const e = exemplaren.find((x) => x.id === r.exemplaar_id); return !!e && e.status !== "in voorraad" && e.transactie_id === t.id; }
+      return !!r.artikel_id && artikelTerug(r.artikel_id, "in") < (r.aantal ?? 1);
+    }
+    if (!nieuw) return false; // hun stukken teruggeven kan pas met het nieuwe schema
+    if (r.nieuw?.id) return exemplaren.find((x) => x.id === r.nieuw!.id)?.status === "in voorraad";
+    return !!r.artikel_id && artikelTerug(r.artikel_id, "uit") < (r.aantal ?? 1);
+  };
+  const terugbaar = t.soort !== "retour" && t.soort !== "kas" ? t.regels.map((r, i) => ({ r, i })).filter((x) => kanTerug(x.r)) : [];
+  const gekozen = retourKeuze ? terugbaar.filter((x) => retourKeuze.has(x.i)) : [];
+  const terugIn = gekozen.filter((x) => x.r.richting === "uit").map((x) => x.r);
+  const terugUit = gekozen.filter((x) => x.r.richting === "in").map((x) => x.r);
+  const standaard = retourBedrag(terugIn, terugUit);
+  const bedrag = eigenBedrag != null ? getal(eigenBedrag) : standaard;
+  const naam = (r: Regel) => `${r.naam}${r.aantal && r.aantal > 1 ? ` × ${r.aantal}` : ""}`;
 
   return (
     <Sheet titel={`${SOORT_NAAM[t.soort]} · ${datumKort(t.tijd)} ${tijdKort(t.tijd)}`} onSluit={sluit}>
       {t.status === "ongedaan" && <div className="melding-kaart neer"><Icoon naam="terug" /><div><strong>Ongedaan gemaakt</strong><span>Deze transactie telt niet mee.</span></div></div>}
       {t.conflicten.map((c) => <ConflictBlok key={c.exemplaar_id ?? c.artikel_id} t={t} conflictId={(c.exemplaar_id ?? c.artikel_id)!} reden={c.reden} isExemplaar={!!c.exemplaar_id} />)}
 
-      <section className="blok">
-        {t.regels.map((r, i) => {
-          const ex = r.exemplaar_id ? exemplaren.find((e) => e.id === r.exemplaar_id) : r.nieuw?.id ? exemplaren.find((e) => e.id === r.nieuw!.id) : null;
-          return (
-            <div key={i} className={`regel ${r.richting}`}>
-              <div className="regel-icoon"><Icoon naam={r.richting === "uit" ? "uit" : "plus"} maat={18} /></div>
-              <div className="regel-tekst">
-                <strong>{r.naam}{r.aantal && r.aantal > 1 ? ` × ${r.aantal}` : ""}</strong>
-                <span className="zacht klein">
-                  {r.richting === "uit" ? (t.soort === "retour" ? "terug" : "wij gaven") : t.soort === "retour" ? "terug" : "wij kregen"}
-                  {r.code && <> · <span className="code">{toonCode(r.code)}</span></>}
-                  {r.hartjesprijs != null && r.prijs !== r.hartjesprijs && <> · hartje {euro(r.hartjesprijs)}</>}
-                </span>
-                {ex && <button className="tekstknop klein" onClick={() => openExemplaar(ex.id)}>Bekijk exemplaar</button>}
+      {t.soort === "kas" ? (
+        <section className="blok">
+          <div className="afsluit-rij"><span>{t.opmerking || kasOmschrijving(t)}</span><strong>{euro(t.cash)} cash</strong></div>
+          {t.sumup !== 0 && <div className="afsluit-rij"><span>SumUp</span><strong>{euro(t.sumup)}</strong></div>}
+          {t.tegenpartij?.naam && <div className="afsluit-rij"><span>Met</span><strong>{t.tegenpartij.naam}</strong></div>}
+          <p className="zacht klein">Een kasbeweging is geen omzet: ze telt enkel mee in de kas.</p>
+        </section>
+      ) : (
+        <section className="blok">
+          {t.regels.map((r, i) => {
+            const ex = r.exemplaar_id ? exemplaren.find((e) => e.id === r.exemplaar_id) : r.nieuw?.id ? exemplaren.find((e) => e.id === r.nieuw!.id) : null;
+            const kiesbaar = retourKeuze && terugbaar.some((x) => x.i === i);
+            return (
+              <div key={i} className={`regel ${r.richting}`}>
+                <div className="regel-icoon"><Icoon naam={r.richting === "uit" ? "uit" : "plus"} maat={18} /></div>
+                <div className="regel-tekst">
+                  <strong>{naam(r)}</strong>
+                  <span className="zacht klein">
+                    {t.soort === "retour" ? (r.richting === "in" ? "kwam terug" : "teruggegeven aan de klant") : r.richting === "uit" ? "wij gaven" : "wij kregen"}
+                    {r.code && <> · <span className="code">{toonCode(r.code)}</span></>}
+                    {r.hartjesprijs != null && r.prijs !== r.hartjesprijs && <> · hartje {euro(r.hartjesprijs)}</>}
+                    {r.referentie != null && <> · markt {euro(r.referentie)}</>}
+                  </span>
+                  {ex && <button className="tekstknop klein" onClick={() => openExemplaar(ex.id)}>Bekijk exemplaar</button>}
+                </div>
+                <div className="regel-prijs"><strong>{euro(r.prijs)}</strong></div>
+                {kiesbaar && (
+                  <input type="checkbox" className="vinkvak" checked={retourKeuze!.has(i)} onChange={(e) => {
+                    const k = new Set(retourKeuze);
+                    if (e.target.checked) k.add(i); else k.delete(i);
+                    setRetourKeuze(k);
+                    setEigenBedrag(null);
+                  }} aria-label={`${naam(r)} terug`} />
+                )}
               </div>
-              <div className="regel-prijs"><strong>{euro(r.prijs)}</strong></div>
-              {retourKeuze && r.richting === "uit" && t.soort !== "retour" && (
-                <input type="checkbox" className="vinkvak" checked={retourKeuze.has(i)} onChange={(e) => {
-                  const k = new Set(retourKeuze);
-                  if (e.target.checked) k.add(i); else k.delete(i);
-                  setRetourKeuze(k);
-                }} aria-label="Retour" />
-              )}
-            </div>
-          );
-        })}
-      </section>
+            );
+          })}
+        </section>
+      )}
 
-      <section className="blok">
-        <div className="afsluit-rij"><span>{t.totaal >= 0 ? "Ontvangen" : "Uitbetaald"}</span><strong>{euro(Math.abs(t.totaal))}</strong></div>
-        {t.cash !== 0 && <div className="afsluit-rij"><span>Cash</span><strong>{euro(t.cash)}</strong></div>}
-        {t.sumup !== 0 && <div className="afsluit-rij"><span>SumUp</span><strong>{euro(t.sumup)}</strong></div>}
-        {t.beheerder && <div className="afsluit-rij"><span>Door</span><strong>{beheerders[t.beheerder] ?? "beheerder"}</strong></div>}
-      </section>
+      {t.soort !== "kas" && (
+        <section className="blok">
+          <div className="afsluit-rij"><span>{t.totaal >= 0 ? "Ontvangen" : "Uitbetaald"}</span><strong>{euro(Math.abs(t.totaal))}</strong></div>
+          {t.cash !== 0 && <div className="afsluit-rij"><span>Cash</span><strong>{euro(t.cash)}</strong></div>}
+          {t.sumup !== 0 && <div className="afsluit-rij"><span>SumUp</span><strong>{euro(t.sumup)}</strong></div>}
+          {!!t.bank && <div className="afsluit-rij"><span>Overschrijving</span><strong>{euro(t.bank)}</strong></div>}
+          {t.beheerder && <div className="afsluit-rij"><span>Door</span><strong>{beheerders[t.beheerder] ?? "beheerder"}</strong></div>}
+        </section>
+      )}
+      {t.soort === "kas" && t.beheerder && <div className="afsluit-rij"><span>Door</span><strong>{beheerders[t.beheerder] ?? "beheerder"}</strong></div>}
+
+      {heeftBorderel(t) && (
+        <button className={`borderel-knop${borderelOntbreekt(t).length ? " mist" : ""}`} onClick={() => setBorderel(true)}>
+          <Icoon naam={borderelOntbreekt(t).length ? "waarschuwing" : "check"} maat={18} />
+          <span><strong>Borderel {borderelNummer(t)}</strong><span className="zacht klein">{borderelOntbreekt(t).length ? `nog nodig: ${borderelOntbreekt(t).join(", ")}` : t.tegenpartij?.naam ?? "volledig"}</span></span>
+        </button>
+      )}
+      {borderel && <BorderelSheet id={t.id} onSluit={() => setBorderel(false)} />}
+
+      {retourKeuze && (
+        <section className="blok retour-blok">
+          <h3>{terugUit.length ? "Deal terugdraaien" : "Retour"}</h3>
+          <p className="zacht klein">Vink aan wat teruggaat. Onze stukken komen terug in voorraad; wat de klant ons gaf, geven we terug (dat moet nog in voorraad zijn). Altijd cash.</p>
+          <Veld label={standaard < 0 ? "De klant betaalt ons terug (€)" : "Wij betalen terug (€)"} hint={eigenBedrag != null ? `Volgens de prijzen: ${euro(Math.abs(standaard))}` : "Pas aan als je iets anders afspreekt."}>
+            <span className="euro-invoer"><span>€</span><input inputMode="decimal" value={eigenBedrag ?? String(Math.abs(standaard)).replace(".", ",")}
+              onChange={(e) => setEigenBedrag(e.target.value)} aria-label="Bedrag terug" /></span>
+          </Veld>
+          {nieuw && (
+            <label className="schakel">
+              <input type="checkbox" checked={perBank || Math.abs(bedrag ?? 0) > CASH_GRENS} disabled={Math.abs(bedrag ?? 0) > CASH_GRENS} onChange={(e) => setPerBank(e.target.checked)} />
+              <span>Per overschrijving{Math.abs(bedrag ?? 0) > CASH_GRENS ? ` (boven ${euro(CASH_GRENS, true)} kan cash niet)` : ""}</span>
+            </label>
+          )}
+          {!nieuw && <p className="zacht klein">Stukken van de klant teruggeven en per overschrijving terugbetalen kan pas na de update van de database.</p>}
+        </section>
+      )}
+      {retours.length > 0 && !retourKeuze && <p className="zacht klein">Er werd al iets van deze transactie teruggenomen. Wil je alles terugdraaien, maak dan eerst die retour ongedaan.</p>}
 
       {t.status !== "ongedaan" && (
         <div className="knoppenrij onderaan">
-          {t.soort !== "retour" && uit.length > 0 && !retourKeuze && <button className="knop zacht" onClick={() => setRetourKeuze(new Set(uit.map((x) => x.i)))}><Icoon naam="terug" maat={18} /> Retour</button>}
-          {retourKeuze && (
-            <>
-              <button className="knop" disabled={!retourKeuze.size} onClick={() => {
-                const regels: Regel[] = uit.filter((x) => retourKeuze.has(x.i)).map(({ r }) => {
-                  const ex = r.exemplaar_id ? huidig().exemplaren.find((e) => e.id === r.exemplaar_id) : null;
-                  return { ...r, vorige_status: ex?.status ?? null };
-                });
-                retour(regels, Math.round(retourBedrag * 100) / 100);
-                meld(`Retour: ${euro(retourBedrag)} cash terug`);
-                setRetourKeuze(null);
-              }}>Retour: {euro(retourBedrag)} cash terug</button>
-              <button className="tekstknop" onClick={() => setRetourKeuze(null)}>Annuleer</button>
-            </>
-          )}
-          {!retourKeuze && <button className="knop zacht rood" onClick={() => { if (confirm("Deze transactie ongedaan maken? De voorraad en de kas gaan terug.")) ongedaanMaken(t.id); }}>Ongedaan maken</button>}
+          {terugbaar.length > 0 && !retourKeuze && <button className="knop zacht" onClick={() => setRetourKeuze(new Set(terugbaar.filter((x) => x.r.richting === "uit").map((x) => x.i)))}><Icoon naam="terug" maat={18} /> Retour of terugdraaien</button>}
+          {retourKeuze && (() => {
+            // Het bedrag in het veld is altijd positief; de richting volgt uit wat er teruggaat.
+            const terug = bedrag == null ? null : (standaard < 0 ? -Math.abs(bedrag) : Math.abs(bedrag));
+            return (
+              <>
+                <button className="knop" disabled={!gekozen.length || terug == null} onClick={() => {
+                  const regelsIn = terugIn.map((r) => {
+                    const ex = r.exemplaar_id ? huidig().exemplaren.find((e) => e.id === r.exemplaar_id) : null;
+                    // Wat het was vóór de retour, om de retour later ongedaan te kunnen maken.
+                    return { ...r, van: t.id, vorige_status: ex?.status ?? null, vorige_afgeboekt_op: ex?.afgeboekt_op ?? null, vorige_transactie_id: ex?.transactie_id ?? null };
+                  });
+                  const x = Math.round(terug! * 100) / 100;
+                  const bank = nieuw && (perBank || Math.abs(x) > CASH_GRENS);
+                  try {
+                    const geboekt = retour(regelsIn, x, terugUit.map((r) => ({ ...r, van: t.id })), bank);
+                    const hoe = bank ? "per overschrijving" : "cash";
+                    meld(geboekt.status === "conflict" ? "Retour geboekt, maar niet alles kon terug: bekijk de transactie" : x > 0 ? `Retour: ${euro(x)} ${hoe} terug` : x < 0 ? `Teruggedraaid: klant betaalt ${euro(-x)} ${hoe}` : "Teruggedraaid zonder geld", geboekt.status === "conflict" ? "fout" : "ok");
+                    setRetourKeuze(null);
+                    setEigenBedrag(null);
+                  } catch (e) {
+                    meld(e instanceof Error ? e.message : String(e), "fout");
+                  }
+                }}>{terug == null ? "Bedrag?" : terug > 0 ? `${euro(terug)} ${perBank || Math.abs(terug) > CASH_GRENS ? "terug per overschrijving" : "cash terug"}` : terug < 0 ? `Klant betaalt ${euro(-terug)}` : "Terugdraaien"}</button>
+                <button className="tekstknop" onClick={() => { setRetourKeuze(null); setEigenBedrag(null); }}>Annuleer</button>
+              </>
+            );
+          })()}
+          {!retourKeuze && !retours.length && <button className="knop zacht rood" onClick={() => { if (confirm("Deze transactie ongedaan maken? De voorraad en de kas gaan terug.")) ongedaanMaken(t.id); }}>Ongedaan maken</button>}
         </div>
       )}
     </Sheet>
@@ -384,25 +466,15 @@ export function Overzicht() {
 
 function downloadCsv(naam: string, transacties: Transactie[], beheerders: Record<string, string>, beurzen: Beurs[] = huidig().beurzen) {
   const beursNaam = Object.fromEntries(beurzen.map((b) => [b.id, b.naam]));
-  const kop = ["datum", "tijd", "beurs", "soort", "status", "beheerder", "richting", "code", "naam", "aantal", "hartjesprijs", "prijs", "aankoopprijs", "transactie_totaal", "cash", "sumup", "transactie_id"];
+  const kop = ["datum", "tijd", "beurs", "soort", "status", "beheerder", "richting", "code", "naam", "aantal", "hartjesprijs", "prijs", "marktwaarde", "aankoopprijs", "transactie_totaal", "cash", "sumup", "overschrijving", "borderel", "transactie_id"];
   const rijen: (string | number | null | undefined)[][] = [kop];
   for (const t of transacties.slice().sort((a, b) => a.tijd.localeCompare(b.tijd))) {
+    const basis = [t.tijd.slice(0, 10), tijdKort(t.tijd), t.beurs_id ? beursNaam[t.beurs_id] ?? "" : "", t.soort, t.status, t.beheerder ? beheerders[t.beheerder] ?? "" : ""];
+    const geld = [t.totaal, t.cash, t.sumup, t.bank ?? 0, heeftBorderel(t) ? borderelNummer(t) : "", t.id];
+    if (!t.regels.length) rijen.push([...basis, "", "", t.opmerking ?? kasOmschrijving(t), 1, null, 0, null, null, ...geld]);
     for (const r of t.regels) {
-      rijen.push([t.tijd.slice(0, 10), tijdKort(t.tijd), t.beurs_id ? beursNaam[t.beurs_id] ?? "" : "", t.soort, t.status,
-        t.beheerder ? beheerders[t.beheerder] ?? "" : "", r.richting, r.code ? toonCode(r.code) : "", r.naam, r.aantal ?? 1,
-        r.hartjesprijs, r.prijs, r.aankoopprijs, t.totaal, t.cash, t.sumup, t.id]);
+      rijen.push([...basis, r.richting, r.code ? toonCode(r.code) : "", r.naam, r.aantal ?? 1, r.hartjesprijs, r.prijs, r.referentie, r.aankoopprijs, ...geld]);
     }
   }
-  const tekst = rijen.map((r) => r.map((v) => {
-    let x = v == null ? "" : typeof v === "number" ? String(v).replace(".", ",") : String(v);
-    // Tekst die met = + - @ begint, voert Excel uit als formule: met een ' ervoor blijft het tekst.
-    if (typeof v === "string" && /^[=+\-@\t\r]/.test(x)) x = "'" + x;
-    return /[;"\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x;
-  }).join(";")).join("\n");
-  const url = URL.createObjectURL(new Blob(["﻿" + tekst], { type: "text/csv;charset=utf-8" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = naam;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  bewaarCsv(naam, csv(rijen));
 }

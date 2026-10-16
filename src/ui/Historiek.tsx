@@ -18,6 +18,7 @@ export const SOORT: Record<TransactieSoort, { naam: string; icoon: string; uitle
   inkoop: { naam: "Inkoop", icoon: "inkoop", uitleg: "geld buiten" },
   ruil: { naam: "Ruil", icoon: "ruil", uitleg: "kaarten over en weer" },
   retour: { naam: "Retour", icoon: "terug", uitleg: "terugbetaald" },
+  kas: { naam: "Kas", icoon: "geld", uitleg: "geld in of uit de koffer" },
 };
 
 const PRODUCT_ICOON: Record<Productsoort, string> = {
@@ -46,6 +47,12 @@ export function useSoortVan(): (r: Regel) => Productsoort {
 }
 
 /** Eén transactie als rij: icoon met pijl, wat er over de toonbank ging, en het bedrag. */
+/** Wat een kasbeweging was, als er geen omschrijving bij staat. */
+export function kasOmschrijving(t: Pick<Transactie, "cash" | "sumup">): string {
+  if (t.sumup > 0) return "Wissel: SumUp in, cash uit";
+  return t.cash > 0 ? "Geld in de koffer" : t.cash < 0 ? "Geld uit de koffer" : "Wissel (cash)";
+}
+
 export function TransactieRij({ t, beheerder, compact = false }: { t: Transactie; beheerder?: string; compact?: boolean }) {
   const s = SOORT[t.soort];
   const uit = t.regels.filter((r) => r.richting === "uit");
@@ -55,22 +62,28 @@ export function TransactieRij({ t, beheerder, compact = false }: { t: Transactie
     const n = rs.map((r) => (r.aantal && r.aantal > 1 ? `${r.aantal}× ${r.naam}` : r.naam));
     return n.length > 2 ? `${n.slice(0, 2).join(", ")} en ${n.length - 2} meer` : n.join(", ");
   };
-  const geld = [t.cash ? "cash" : null, t.sumup ? "SumUp" : null].filter(Boolean).join(" + ");
+  const geld = [t.cash ? "cash" : null, t.sumup ? "SumUp" : null, t.bank ? "overschrijving" : null].filter(Boolean).join(" + ");
+  // Een kasbeweging heeft geen regels: toon wat er in of uit de koffer ging.
+  const bedrag = t.soort === "kas" ? t.cash : t.totaal;
+  const titel = t.soort === "kas" ? t.opmerking || kasOmschrijving(t)
+    : t.soort === "ruil" ? `${stuks(uit)} weg · ${stuks(binnen)} binnen`
+      : t.soort === "retour" ? namen([...binnen, ...uit]) || s.naam
+        : namen(t.soort === "inkoop" ? binnen : uit) || s.naam;
   return (
     <li>
       <button className={`transactie-rij ${t.soort} ${t.status}`} onClick={() => openTransactie(t.id)}>
         <span className={`tr-icoon ${t.soort}`}><Icoon naam={s.icoon} maat={20} /></span>
         <span className="transactie-tekst">
           <strong>
-            {t.soort === "ruil" ? `${stuks(uit)} weg · ${stuks(binnen)} binnen` : namen(t.soort === "inkoop" ? binnen : uit) || s.naam}
+            {titel}
             {t.status === "ongedaan" && <em className="tr-merk">ongedaan</em>}
             {t.status === "conflict" && <em className="tr-merk rood">conflict</em>}
           </strong>
           {t.soort === "ruil" && !compact && <span className="zacht klein">{namen(uit)} ⇄ {namen(binnen)}</span>}
           <span className="zacht klein">{tijdKort(t.tijd)} · {s.naam.toLowerCase()}{geld ? ` · ${geld}` : ""}{beheerder ? ` · ${beheerder}` : ""}</span>
         </span>
-        <span className={`transactie-bedrag ${t.totaal > 0 ? "plus" : t.totaal < 0 ? "min" : ""}`}>
-          <strong>{t.totaal > 0 ? `+${euro(t.totaal)}` : t.totaal < 0 ? `−${euro(-t.totaal)}` : "±0"}</strong>
+        <span className={`transactie-bedrag ${bedrag > 0 ? "plus" : bedrag < 0 ? "min" : ""}`}>
+          <strong>{bedrag > 0 ? `+${euro(bedrag)}` : bedrag < 0 ? `−${euro(-bedrag)}` : "±0"}</strong>
         </span>
       </button>
     </li>

@@ -40,6 +40,7 @@ export interface Exemplaar {
   cert?: string | null;          // graded: certificaatnummer op het label van de slab
   verkopen?: Verkoop[] | null;   // graded: laatste verkopen die we opzochten (eBay sold …)
   omgeving_id?: string | null;   // Bind'r of Brent
+  foto?: string | null;          // eigen foto (data-URL), enkel als er nergens een foto van de kaart is
   aangemaakt_op: string;
   gewijzigd_op: string;
 }
@@ -85,7 +86,7 @@ export type NieuwExemplaar = Partial<Exemplaar> & Pick<Exemplaar, "code" | "naam
 export interface Verkoop {
   datum: string;   // JJJJ-MM-DD
   prijs: number;   // in euro
-  bron?: string | null; // eBay, 130point, beurs …
+  bron?: string | null; // eBay, Cardmarket, beurs …
 }
 
 // ── Beurs en kassa ───────────────────────────────────────────────────────────
@@ -116,7 +117,28 @@ export interface Beurs {
   omgeving_id?: string | null;
 }
 
-export type TransactieSoort = "verkoop" | "ruil" | "inkoop" | "retour";
+/**
+ * verkoop, ruil, inkoop en retour gaan over kaarten en artikelen. "kas" is geld dat in of uit de
+ * cashkoffer gaat zonder dat er iets verkocht wordt (wisselgeld van een andere stand, geld bijleggen
+ * of afhalen): geen omzet en geen kost.
+ */
+export type TransactieSoort = "verkoop" | "ruil" | "inkoop" | "retour" | "kas";
+
+/**
+ * Met wie we zaken deden, voor het aankoop- of ruilborderel (enkel voor de beheerders, nooit publiek).
+ * Geen rijksregisternummer of kopie van de identiteitskaart: enkel een vinkje dat we ze nakeken.
+ */
+export interface Tegenpartij {
+  naam?: string | null;
+  adres?: string | null;
+  type?: "particulier" | "handelaar";
+  btw?: string | null;              // ondernemingsnummer van een handelaar
+  factuur?: string | null;          // factuurnummer van de handelaar (dan is hun factuur het bewijs)
+  id_gecontroleerd?: boolean;
+  handtekening?: string | null;     // de verkoper, als SVG-pad (getekend op de gsm)
+  handtekening_ons?: string | null; // de beheerder
+  getekend_op?: string | null;
+}
 
 /**
  * Eén regel van een transactie.
@@ -133,9 +155,15 @@ export interface Regel {
   hartjesprijs?: number | null;  // de prijs op het hartje (uit), om kortingen te zien
   prijs: number;
   aankoopprijs?: number | null;  // voor de marge (uit)
-  referentie?: number | null;    // Near Mint-referentie (in), om een totaal te verdelen
+  referentie?: number | null;    // marktwaarde (in), om het bod te verdelen
+  referentie_bron?: string | null; // waar die marktwaarde vandaan komt (Cardmarket trend, eBay-verkopen, eigen schatting)
+  pct?: number | null;           // in: eigen percentage voor deze kaart (anders het algemene van het bod)
   nieuw?: NieuwExemplaar | null; // in: het nieuwe exemplaar dat binnenkomt
   vorige_status?: Status | null; // retour: de status vóór de retour
+  vorige_afgeboekt_op?: string | null;  // retour: wanneer het de voorraad verliet (om een retour ongedaan te maken)
+  vorige_transactie_id?: string | null; // retour: de transactie waarmee het de voorraad verliet
+  van?: string | null;           // retour: uit welke transactie deze regel komt
+  // Bij een retour: "in" = ons stuk komt terug, "uit" = we geven hun stuk terug (een ruil of inkoop terugdraaien).
 }
 
 export interface Conflict {
@@ -154,10 +182,20 @@ export interface Transactie {
   totaal: number;   // + de klant betaalt ons, − wij betalen de klant
   cash: number;     // + in de cashkoffer, − eruit
   sumup: number;
+  bank?: number;    // overschrijving (+ ontvangen, − betaald), bv. boven de cashgrens van € 3.000
+  tegenpartij?: Tegenpartij | null;
   status: "ok" | "conflict" | "ongedaan";
   conflicten: Conflict[];
   opmerking: string | null;
   omgeving_id?: string | null;
+}
+
+/** Gegevens van de onderneming voor het borderel en de rapporten (per omgeving: Bind'r en Brent apart). */
+export interface Bedrijf {
+  naam?: string | null;      // naam van de zelfstandige of de onderneming
+  adres?: string | null;
+  kbo?: string | null;       // ondernemingsnummer
+  start?: string | null;     // JJJJ-MM-DD: begin van de activiteit (voor de grens van de btw-vrijstelling in het startjaar)
 }
 
 /** Een omgeving: Bind'r en Brent houden elk hun eigen stock, kassa en beurzen bij. */
@@ -208,6 +246,7 @@ export const TALEN: { code: string; label: string; asia?: boolean }[] = [
   { code: "IT", label: "Italiaans" },
   { code: "ES", label: "Spaans" },
   { code: "PT", label: "Portugees" },
+  { code: "NL", label: "Nederlands" },
   { code: "JP", label: "Japans", asia: true },
   { code: "CN-T", label: "Chinees (traditioneel)", asia: true },
   { code: "CN-S", label: "Chinees (vereenvoudigd)", asia: true },

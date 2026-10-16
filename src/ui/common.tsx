@@ -52,6 +52,10 @@ const PADEN: Record<string, ReactNode> = {
   sorteer: <path d="M7 4v16M3.5 16.5 7 20l3.5-3.5M17 20V4M13.5 7.5 17 4l3.5 3.5" />,
   link: <><path d="M14 5h5v5M19 5l-8 8" /><path d="M17 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 4 18.5v-10A1.5 1.5 0 0 1 5.5 7H10" /></>,
   tag: <><path d="M3.5 12.2V5a1.5 1.5 0 0 1 1.5-1.5h7.2l8.3 8.3a1.5 1.5 0 0 1 0 2.1l-6.9 6.9a1.5 1.5 0 0 1-2.1 0l-8-8.6Z" /><circle cx="8" cy="8" r="1.4" /></>,
+  profiel: <><circle cx="12" cy="8.5" r="4" /><path d="M4.5 20.5c.8-4 3.8-6 7.5-6s6.7 2 7.5 6" /></>,
+  tandwiel: <><circle cx="12" cy="12" r="3" /><path d="M12 2.8v2.4M12 18.8v2.4M21.2 12h-2.4M5.2 12H2.8M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7M18.5 18.5l-1.7-1.7M7.2 7.2 5.5 5.5" /><circle cx="12" cy="12" r="6.6" /></>,
+  inzicht: <><path d="M4 20V10M9.5 20V5M15 20v-7M20.5 20V8" /><path d="m3.5 7.5 5.5-4 5.5 5 6-4" /></>,
+  boek: <><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15Z" /><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3M9 7.5h6M9 11h4" /></>,
 };
 
 export function Icoon({ naam, maat = 22, className }: { naam: keyof typeof PADEN | string; maat?: number; className?: string }) {
@@ -157,11 +161,16 @@ export function Badges({ ex }: { ex: Exemplaar }) {
  * Een kaartfoto. Met `kaart` probeert hij na TCGdex ook de reservebronnen (Limitless,
  * pokemontcg.io); lukt niets, dan blijft de eerste letter van de naam staan.
  */
-export function KaartFoto({ src, alt, klein = false, kaart, groot = false }: { src: string | null; alt: string; klein?: boolean; kaart?: FotoKaart; groot?: boolean }) {
-  const bronnen = useMemo(() => (kaart ? fotoBronnen({ ...kaart, afbeelding: src }, groot ? "groot" : "klein") : src ? [src] : []), [src, kaart?.set_code, kaart?.nummer, kaart?.kaart_id, groot]);
+export function KaartFoto({ src, alt, klein = false, kaart, groot = false, onGeenFoto }: {
+  src: string | null; alt: string; klein?: boolean; kaart?: FotoKaart; groot?: boolean; onGeenFoto?: (geen: boolean) => void;
+}) {
+  const bronnen = useMemo(() => (kaart ? fotoBronnen({ ...kaart, afbeelding: src }, groot ? "groot" : "klein") : src ? [src] : []),
+    [src, kaart?.set_code, kaart?.nummer, kaart?.kaart_id, kaart?.foto, kaart?.taal, groot]);
   const [i, setI] = useState(0);
   useEffect(() => setI(0), [bronnen]);
   const bron = bronnen[i];
+  // Geen enkele bron werkte (of er was er geen): laat het weten, zodat je zelf een foto kan nemen.
+  useEffect(() => { onGeenFoto?.(!bron); }, [bron]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className={`foto${klein ? " klein" : ""}`}>
       {bron ? (

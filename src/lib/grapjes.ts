@@ -122,6 +122,7 @@ export const GELUKT = {
     "Nieuwe voorraad: de catalogus zegt dankjewel.",
   ],
   retour: ["Retour geboekt. Het gebeurt de besten.", "Terug in de voorraad, alsof er niets gebeurd is."],
+  kas: ["Kas bijgewerkt. Geen munt die ontsnapt.", "Genoteerd: de cashkoffer klopt weer."],
 } as const;
 
 /** Na het toevoegen van een of meer exemplaren. */

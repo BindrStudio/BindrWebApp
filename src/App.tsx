@@ -1,9 +1,14 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { meldAanwezig, naarTab, sluit, sluitToast, start, useApp, type Tab } from "./state";
 import { Voorraad } from "./ui/Voorraad";
 import { Scan } from "./ui/Scan";
 import { Labels } from "./ui/Labels";
-import { Meer } from "./ui/Meer";
+import { Profiel } from "./ui/Profiel";
+import { Instellingen } from "./ui/Instellingen";
+import { Boekhouding } from "./ui/Boekhouding";
+import { Inzichten } from "./ui/Inzichten";
+import { BeurzenEnTransacties } from "./ui/Historiek";
+import { AfdrukLaag } from "./ui/Afdruk";
 import { Login, PinKiezen, Slot } from "./ui/Login";
 import { Bovenbalk } from "./ui/Bovenbalk";
 import { ExemplaarSheet } from "./ui/ExemplaarSheet";
@@ -18,18 +23,33 @@ const TABS: { id: Tab; label: string; icoon: string }[] = [
   { id: "vault", label: "Vault", icoon: "doos" },
   { id: "scan", label: "Scan", icoon: "scan" },
   { id: "kassa", label: "Kassa", icoon: "kassa" },
-  { id: "meer", label: "Meer", icoon: "meer" },
+  { id: "profiel", label: "Profiel", icoon: "profiel" },
 ];
 
 export function App() {
   const { fase, open, toasts, bezig, online, backend, tab, wachtrij, mandje, beurzen } = useApp();
 
   useEffect(() => { void start(); }, []);
+  // Van welke kant komt het nieuwe scherm? Een tab naar rechts schuift van rechts binnen.
+  const vorige = useRef(tab);
+  const [richting, setRichting] = useState<"rechts" | "links" | null>(null);
   useEffect(() => {
+    const a = TABS.findIndex((t) => t.id === vorige.current);
+    const b = TABS.findIndex((t) => t.id === tab);
+    setRichting(a === b ? null : b > a ? "rechts" : "links");
+    vorige.current = tab;
     history.replaceState(null, "", tab === "catalogus" ? location.pathname : `#${tab}`);
     window.scrollTo(0, 0);
     void meldAanwezig();
   }, [tab]);
+  // De eerste keer dat de app opengaat (per sessie): een korte intro.
+  const [intro, setIntro] = useState(() => { try { return !sessionStorage.getItem("bindr-intro"); } catch { return false; } });
+  useEffect(() => {
+    if (fase !== "klaar" || !intro) return;
+    try { sessionStorage.setItem("bindr-intro", "1"); } catch { /* privé-modus */ }
+    const t = setTimeout(() => setIntro(false), 1400);
+    return () => clearTimeout(t);
+  }, [fase, intro]);
 
   if (fase === "start" || fase === "laden") {
     return (
@@ -47,7 +67,7 @@ export function App() {
   const beursBezig = beurzen.some((b) => b.status === "actief");
 
   return (
-    <div className="app">
+    <div className={`app${intro ? " intro" : ""}`}>
       {backend?.soort === "demo" && <div className="demo-band">Demo · alleen op dit toestel</div>}
       {backend?.soort === "supabase" && (!online || wachtrij > 0) && (
         <div className={`offline-band${online ? " bezig" : ""}`}>
@@ -55,14 +75,15 @@ export function App() {
         </div>
       )}
       <Bovenbalk />
-      <main key={tab} className="tab-inhoud">
+      <main key={tab} className={`tab-inhoud${richting ? ` van-${richting}` : ""}`}>
         {tab === "catalogus" && <Voorraad opslag="vitrine" />}
         {tab === "vault" && <Voorraad opslag="stockdoos" />}
         {tab === "scan" && <Scan />}
         {tab === "kassa" && <Kassa />}
-        {tab === "meer" && <Meer />}
+        {tab === "profiel" && <Profiel />}
       </main>
-      <nav className="tabbalk">
+      <nav className="tabbalk" style={{ ["--tab" as string]: TABS.findIndex((t) => t.id === tab) }}>
+        <span className={`tab-duim${tab === "scan" ? " weg" : ""}`} aria-hidden="true" />
         {TABS.map((t) => (
           <button key={t.id} className={`${tab === t.id ? "aan" : ""}${t.id === "scan" ? " scan-tab" : ""}`} onClick={() => naarTab(t.id)} aria-current={tab === t.id ? "page" : undefined}>
             <span className="tab-icoon">
@@ -82,6 +103,11 @@ export function App() {
       {open?.soort === "transactie" && <TransactieSheet id={open.id} />}
       {open?.soort === "beurs" && <BeursRapport id={open.id} />}
       {open?.soort === "overzicht" && <Overzicht />}
+      {open?.soort === "instellingen" && <Instellingen />}
+      {open?.soort === "boekhouding" && <Boekhouding onSluit={sluit} />}
+      {open?.soort === "inzichten" && <Inzichten onSluit={sluit} />}
+      {open?.soort === "historiek" && <BeurzenEnTransacties onSluit={sluit} />}
+      <AfdrukLaag />
       {bezig && (
         <div className="bezig" role="status">
           <div className="bezig-kaart"><span className="draaier" />{bezig}</div>

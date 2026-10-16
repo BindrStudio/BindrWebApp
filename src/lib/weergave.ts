@@ -130,7 +130,21 @@ export function vergelijkNummer(a: string | null, b: string | null): number {
 }
 
 /** Release van een set (jjjj-mm-dd), om sets van nieuw naar oud te tonen. */
-export type SetInfo = Record<string, [naam: string, code: string, release: string, serie?: string, taal?: string]>;
+export type SetInfo = Record<string, [naam: string, code: string, release: string, serie?: string, taal?: string, intl?: string, eigen?: string]>;
+
+/**
+ * De naam van een set om te tonen: uit sets.json (Japanse sets in het Engels, bv. "Storm Emeralda"),
+ * anders wat bij het exemplaar staat.
+ */
+export function setNaam(id: string, eigen: string | null | undefined, sets: SetInfo | null): string {
+  return sets?.[id]?.[0] || eigen || id;
+}
+
+/** Taalgroep van een set voor de setkiezer: Engels, Japans of Chinees. */
+export function setTaal(info: SetInfo[string] | undefined): "en" | "ja" | "zh" {
+  const t = info?.[4] ?? "en";
+  return t === "ja" ? "ja" : t.startsWith("zh") ? "zh" : "en";
+}
 
 export function sorteer<T>(lijst: T[], s: Sortering, k: (t: T) => Toonbaar, sets: SetInfo | null = null): T[] {
   const tijd = (t: T) => { const x = k(t).toegevoegd; return x ? Date.parse(x.length === 10 ? x + "T00:00:00" : x) || 0 : 0; };
@@ -152,14 +166,14 @@ export function sorteer<T>(lijst: T[], s: Sortering, k: (t: T) => Toonbaar, sets
 }
 
 /** Voor "Per set": opeenvolgende tegels van dezelfde set onder één kopje. */
-export function perSet<T>(lijst: T[], k: (t: T) => Toonbaar): { set: string; naam: string; items: T[] }[] {
+export function perSet<T>(lijst: T[], k: (t: T) => Toonbaar, sets: SetInfo | null = null): { set: string; naam: string; items: T[] }[] {
   const uit: { set: string; naam: string; items: T[] }[] = [];
   for (const it of lijst) {
     const x = k(it);
     const id = setIdVan(x) || "~";
     const laatste = uit[uit.length - 1];
     if (laatste && laatste.set === id) laatste.items.push(it);
-    else uit.push({ set: id, naam: x.set_naam || (x.soort === "eigen product" ? "Bind'r" : "Andere"), items: [it] });
+    else uit.push({ set: id, naam: (id !== "~" && sets?.[id]?.[0]) || x.set_naam || (x.soort === "eigen product" ? "Bind'r" : "Andere"), items: [it] });
   }
   return uit;
 }

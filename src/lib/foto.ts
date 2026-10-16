@@ -3,6 +3,8 @@
 // TCGdex heeft niet altijd meteen foto's van de nieuwste kaarten. Dan proberen we
 // Limitless TCG (heeft nieuwe sets snel, op de officiële setcode) en daarna
 // pokemontcg.io. Lukt geen enkele, dan toont de app de eerste letter van de naam.
+import { veiligeFoto } from "./eigenfoto";
+
 const TCGDEX = "https://assets.tcgdex.net";
 const LIMITLESS = "https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com";
 const PTCGIO = "https://images.pokemontcg.io";
@@ -17,6 +19,7 @@ export interface FotoKaart {
   kaart_id?: string | null;     // TCGdex-id, bv. sv03-125
   catalogus?: "en" | "asia" | null;
   taal?: string | null;
+  foto?: string | null;         // eigen foto (als er nergens een foto van de kaart bestaat)
 }
 
 /** Een kaart uit de catalogus (TCGdex) als fotokaart. */
@@ -31,18 +34,30 @@ export function ptcgioSet(tcgdexSet: string): string {
   return tcgdexSet.replace(/^([a-z]+)0*(\d+)\.5$/i, "$1$2pt5").replace(/^([a-z]+)0*(\d+)$/i, "$1$2").toLowerCase();
 }
 
-/** Alle bronnen voor één kaart, de beste eerst. */
+/** Japanse setcode zoals Limitless ze gebruikt: M-P → MP, SV-P → SVP, S-P → SP. */
+export function limitlessJpSet(code: string): string {
+  return /^[A-Za-z]+-P$/.test(code) ? code.replace("-", "") : code;
+}
+
+/** Alle bronnen voor één kaart, de beste eerst. Een eigen foto (zelf genomen) gaat voor. */
 export function fotoBronnen(k: FotoKaart, kwaliteit: "klein" | "groot" = "klein"): string[] {
   const uit: string[] = [];
+  const eigen = veiligeFoto(k.foto);
+  if (eigen) uit.push(eigen);
   if (k.afbeelding) uit.push(kwaliteit === "groot" ? groot(k.afbeelding) : k.afbeelding);
   const nr = (k.nummer ?? "").trim();
   const code = (k.set_code ?? "").trim();
   const asia = k.catalogus === "asia" || ["JP", "CN-T", "CN-S", "KR"].includes(k.taal ?? "");
   if (code && /^\d+$/.test(nr)) {
-    const n = nr.padStart(3, "0");
     const maat = kwaliteit === "groot" ? "LG" : "SM";
-    if (asia) uit.push(`${LIMITLESS}/tpc/${code}/${code}_${n}_R_JP_${maat}.png`);
-    else uit.push(`${LIMITLESS}/tpci/${code.toUpperCase()}/${code.toUpperCase()}_${n}_R_EN_${maat}.png`);
+    if (asia) {
+      // Japans: nummer zonder voorloopnullen, setcode zoals ze is (SV2a), promo's zonder streepje (M-P → MP).
+      const set = limitlessJpSet(code);
+      uit.push(`${LIMITLESS}/tpc/${set}/${set}_${Number(nr)}_R_JP_${maat}.png`);
+    } else {
+      const n = nr.padStart(3, "0");
+      uit.push(`${LIMITLESS}/tpci/${code.toUpperCase()}/${code.toUpperCase()}_${n}_R_EN_${maat}.png`);
+    }
   }
   if (!asia && k.kaart_id && nr) {
     const set = k.kaart_id.endsWith("-" + nr) ? k.kaart_id.slice(0, -(nr.length + 1)) : null;
@@ -52,7 +67,7 @@ export function fotoBronnen(k: FotoKaart, kwaliteit: "klein" | "groot" = "klein"
 }
 
 /** Het logo van een set op TCGdex (taal en reeks uit sets.json). */
-export function setLogo(setId: string, info?: readonly [string, string, string, string?, string?] | null): string | null {
+export function setLogo(setId: string, info?: readonly [string, string, string, string?, string?, string?, string?] | null): string | null {
   if (!info || !info[3]) return null;
   return `${TCGDEX}/${info[4] || "en"}/${info[3]}/${setId}/logo.png`;
 }

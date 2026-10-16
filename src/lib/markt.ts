@@ -97,6 +97,9 @@ export function procent(x: number): string {
 const CM_TAAL: Record<string, number> = { EN: 1, FR: 2, DE: 3, ES: 4, IT: 5, "CN-S": 6, JP: 7, PT: 8, KR: 10, "CN-T": 11 };
 export const CM_LAND = { BE: 2, NL: 23 } as const;
 
+/** Kent Cardmarket deze kaarttaal? (Nederlandse Pokémonkaarten bestaan er niet als aparte taal.) */
+export const cardmarketKentTaal = (taal: string) => taal in CM_TAAL;
+
 export function cardmarketLink(cardmarketId: number, taal: string, landen: (keyof typeof CM_LAND)[] = ["BE", "NL"], minConditie = 2): string {
   const q = new URLSearchParams({ idProduct: String(cardmarketId) });
   const t = CM_TAAL[taal];
@@ -124,11 +127,10 @@ export function gradedZoektekst(k: { naam: string; nummer?: string | null; setTo
   return [k.naam, nr, k.grader, k.grade].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 }
 
-/** Verkochte (afgelopen) advertenties op eBay, nieuwste eerst. */
-export function ebaySoldLink(zoek: string, site: "com" | "de" | "nl" | "be" = "com"): string {
-  const host = site === "be" ? "www.benl.ebay.be" : `www.ebay.${site}`;
+/** Verkochte (afgelopen) advertenties op eBay.com, nieuwste eerst. */
+export function ebaySoldLink(zoek: string): string {
   const q = new URLSearchParams({ _nkw: zoek, LH_Sold: "1", LH_Complete: "1", _sop: "13" });
-  return `https://${host}/sch/i.html?${q}`;
+  return `https://www.ebay.com/sch/i.html?${q}`;
 }
 
 /** Het certificaat van een slab bij de grader (PSA, CGC, BGS), als we het nummer hebben. */

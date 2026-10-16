@@ -1,7 +1,7 @@
 // Demomodus: alles blijft op dit toestel (localStorage). Handig om de app uit te
 // proberen met de testset, zonder account en zonder de echte voorraad te raken.
 // De kassa gebruikt dezelfde rekenkern als de offline wachtrij (src/lib/kassa.ts).
-import type { Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Transactie } from "../types";
+import type { Artikel, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
 import { Fout, type Alles, type Backend, type PrijsMarkering } from "./backend";
 import { metVitrineSinds, schoonArtikel, schoonExemplaar, standaardArtikel, standaardExemplaar } from "../lib/exemplaar";
 import { aanvaardConflict, losConflictOp, maakOngedaan, pasToe } from "../lib/kassa";
@@ -186,6 +186,11 @@ export class DemoBackend implements Backend {
     this.zetTransactie(r.transactie);
     this.bewaar();
     return r.transactie;
+  }
+
+  async zetTegenpartij(id: string, tegenpartij: Tegenpartij | null) {
+    this.zetTransactie({ ...this.vind(id), tegenpartij });
+    this.bewaar();
   }
 
   async maakOngedaan(id: string) {

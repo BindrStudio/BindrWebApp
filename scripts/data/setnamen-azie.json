@@ -1,0 +1,590 @@
+{
+"CP1": {
+"en": "Team Magma vs Team Aqua: Double Crisis",
+"intl": "Double Crisis"
+},
+"CP2": {
+"en": "Legendary Holo Collection"
+},
+"E1": {
+"en": "Base Expansion Pack",
+"intl": "Expedition Base Set"
+},
+"E2": {
+"en": "The Town on No Map",
+"intl": "Aquapolis"
+},
+"E3": {
+"en": "Wind from the Sea",
+"intl": "Aquapolis"
+},
+"E4": {
+"en": "Split Earth",
+"intl": "Skyridge"
+},
+"E5": {
+"en": "Mysterious Mountains",
+"intl": "Skyridge"
+},
+"M-P": {
+"en": "MEGA Promo Cards"
+},
+"M1L": {
+"en": "Mega Brave",
+"intl": "Mega Evolution"
+},
+"M1S": {
+"en": "Mega Symphonia",
+"intl": "Mega Evolution"
+},
+"M2": {
+"en": "Inferno X",
+"intl": "Phantasmal Flames"
+},
+"M2a": {
+"en": "MEGA Dream ex",
+"intl": "Ascended Heroes"
+},
+"M3": {
+"en": "Nihil Zero",
+"intl": "Perfect Order"
+},
+"M4": {
+"en": "Ninja Spinner",
+"intl": "Chaos Rising"
+},
+"M5": {
+"en": "Abyss Eye",
+"intl": "Pitch Black"
+},
+"M6": {
+"en": "Storm Emeralda",
+"intl": "Delta Reign"
+},
+"M6a": {
+"en": "30th Celebration",
+"intl": "30th Celebration"
+},
+"MC": {
+"en": "Start Deck 100 Battle Collection"
+},
+"MF": {
+"en": "30th Celebration Premium Deck Set Espeon & Umbreon"
+},
+"PCG1": {
+"en": "Flight of Legends",
+"intl": "EX FireRed & LeafGreen"
+},
+"PCG2": {
+"en": "Clash of the Blue Sky",
+"intl": "EX Deoxys"
+},
+"PCG3": {
+"en": "Rocket Gang Strikes Back",
+"intl": "EX Team Rocket Returns"
+},
+"PCG4": {
+"en": "Golden Sky, Silvery Ocean",
+"intl": "EX Unseen Forces"
+},
+"PCG5": {
+"en": "Mirage Forest",
+"intl": "EX Legend Maker"
+},
+"PCG6": {
+"en": "Holon Research Tower",
+"intl": "EX Delta Species"
+},
+"PCG7": {
+"en": "Holon Phantom",
+"intl": "EX Holon Phantoms"
+},
+"PCG8": {
+"en": "Miracle Crystal",
+"intl": "EX Crystal Guardians"
+},
+"PCG9": {
+"en": "Offense and Defense of the Furthest Ends",
+"intl": "EX Dragon Frontiers"
+},
+"PMCG1": {
+"en": "Expansion Pack",
+"intl": "Base Set"
+},
+"PMCG2": {
+"en": "Pokémon Jungle",
+"intl": "Jungle"
+},
+"PMCG3": {
+"en": "Mystery of the Fossils",
+"intl": "Fossil"
+},
+"PMCG4": {
+"en": "Rocket Gang",
+"intl": "Team Rocket"
+},
+"PMCG5": {
+"en": "Leaders' Stadium",
+"intl": "Gym Heroes"
+},
+"PMCG6": {
+"en": "Challenge from the Darkness",
+"intl": "Gym Challenge"
+},
+"S-P": {
+"en": "Sword & Shield Promo Cards"
+},
+"S10D": {
+"en": "Time Gazer",
+"intl": "Astral Radiance"
+},
+"S10P": {
+"en": "Space Juggler",
+"intl": "Astral Radiance"
+},
+"S10a": {
+"en": "Dark Phantasma",
+"intl": "Lost Origin"
+},
+"S10b": {
+"en": "Pokémon GO",
+"intl": "Pokémon GO"
+},
+"S11": {
+"en": "Lost Abyss",
+"intl": "Lost Origin"
+},
+"S11a": {
+"en": "Incandescent Arcana",
+"intl": "Silver Tempest"
+},
+"S12": {
+"en": "Paradigm Trigger",
+"intl": "Silver Tempest"
+},
+"S12a": {
+"en": "VSTAR Universe",
+"intl": "Crown Zenith"
+},
+"S4": {
+"en": "Amazing Volt Tackle",
+"intl": "Vivid Voltage"
+},
+"S4a": {
+"en": "Shiny Star V",
+"intl": "Shining Fates"
+},
+"S5I": {
+"en": "Single Strike Master",
+"intl": "Battle Styles"
+},
+"S5R": {
+"en": "Rapid Strike Master",
+"intl": "Battle Styles"
+},
+"S5a": {
+"en": "Matchless Fighters",
+"intl": "Chilling Reign"
+},
+"S6H": {
+"en": "Silver Lance",
+"intl": "Chilling Reign"
+},
+"S6K": {
+"en": "Jet-Black Spirit",
+"intl": "Chilling Reign"
+},
+"S6a": {
+"en": "Eevee Heroes",
+"intl": "Evolving Skies"
+},
+"S7D": {
+"en": "Skyscraping Perfection",
+"intl": "Evolving Skies"
+},
+"S7R": {
+"en": "Blue Sky Stream",
+"intl": "Evolving Skies"
+},
+"S8": {
+"en": "Fusion Arts",
+"intl": "Fusion Strike"
+},
+"S8a": {
+"en": "25th Anniversary Collection",
+"intl": "Celebrations"
+},
+"S8b": {
+"en": "VMAX Climax"
+},
+"S9": {
+"en": "Star Birth",
+"intl": "Brilliant Stars"
+},
+"S9a": {
+"en": "Battle Region",
+"intl": "Astral Radiance"
+},
+"SC1D": {
+"en": "Sword & Shield",
+"intl": "Sword & Shield"
+},
+"SC1a": {
+"en": "Sword & Shield Set A",
+"intl": "Sword & Shield"
+},
+"SC1b": {
+"en": "Sword & Shield Set B",
+"intl": "Sword & Shield"
+},
+"SDL": {
+"en": "Charizard Starter Deck"
+},
+"SDM": {
+"en": "Mewtwo Starter Deck"
+},
+"SDP": {
+"en": "Pikachu Starter Deck"
+},
+"SH": {
+"en": "Family Pokémon Card Game"
+},
+"SI": {
+"en": "Start Deck 100"
+},
+"SJ": {
+"en": "Special Deck Set Zacian & Zamazenta vs Eternatus"
+},
+"SK": {
+"en": "VSTAR Premium Trainer Box"
+},
+"SLD": {
+"en": "Starter Set Darkrai VSTAR"
+},
+"SLL": {
+"en": "Starter Set Lucario VSTAR"
+},
+"SM10": {
+"en": "Double Blaze",
+"intl": "Unbroken Bonds"
+},
+"SM10a": {
+"en": "GG End",
+"intl": "Unified Minds"
+},
+"SM10b": {
+"en": "Sky Legend",
+"intl": "Unified Minds"
+},
+"SM11": {
+"en": "Miracle Twin",
+"intl": "Unified Minds"
+},
+"SM11a": {
+"en": "Remix Bout",
+"intl": "Cosmic Eclipse"
+},
+"SM11b": {
+"en": "Dream League",
+"intl": "Cosmic Eclipse"
+},
+"SM12": {
+"en": "Alter Genesis",
+"intl": "Cosmic Eclipse"
+},
+"SM12a": {
+"en": "Tag All Stars"
+},
+"SM1M": {
+"en": "Collection Moon",
+"intl": "Sun & Moon"
+},
+"SM1S": {
+"en": "Collection Sun",
+"intl": "Sun & Moon"
+},
+"SM1p": {
+"en": "Sun & Moon+"
+},
+"SM2K": {
+"en": "Islands Await You",
+"intl": "Guardians Rising"
+},
+"SM2L": {
+"en": "Alolan Moonlight",
+"intl": "Guardians Rising"
+},
+"SM2p": {
+"en": "Facing a New Trial"
+},
+"SM3H": {
+"en": "To Have Seen the Battle Rainbow",
+"intl": "Burning Shadows"
+},
+"SM3N": {
+"en": "Darkness that Consumes Light",
+"intl": "Burning Shadows"
+},
+"SM3p": {
+"en": "Shining Legends",
+"intl": "Shining Legends"
+},
+"SM4A": {
+"en": "Ultradimensional Beasts",
+"intl": "Crimson Invasion"
+},
+"SM4S": {
+"en": "Awakened Heroes",
+"intl": "Crimson Invasion"
+},
+"SM4p": {
+"en": "GX Battle Boost"
+},
+"SM5M": {
+"en": "Ultra Moon",
+"intl": "Ultra Prism"
+},
+"SM5S": {
+"en": "Ultra Sun",
+"intl": "Ultra Prism"
+},
+"SM5p": {
+"en": "Ultra Force"
+},
+"SM6": {
+"en": "Forbidden Light",
+"intl": "Forbidden Light"
+},
+"SM6a": {
+"en": "Dragon Storm",
+"intl": "Dragon Majesty"
+},
+"SM6b": {
+"en": "Champion Road",
+"intl": "Celestial Storm"
+},
+"SM7": {
+"en": "Sky-Splitting Charisma",
+"intl": "Celestial Storm"
+},
+"SM7a": {
+"en": "Thunderclap Spark",
+"intl": "Lost Thunder"
+},
+"SM7b": {
+"en": "Fairy Rise",
+"intl": "Lost Thunder"
+},
+"SM8": {
+"en": "Super-Burst Impact",
+"intl": "Lost Thunder"
+},
+"SM8a": {
+"en": "Dark Order",
+"intl": "Team Up"
+},
+"SM8b": {
+"en": "GX Ultra Shiny"
+},
+"SM9": {
+"en": "Tag Bolt",
+"intl": "Team Up"
+},
+"SM9a": {
+"en": "Night Unison",
+"intl": "Unbroken Bonds"
+},
+"SM9b": {
+"en": "Full Metal Wall",
+"intl": "Unbroken Bonds"
+},
+"SN": {
+"en": "Start Deck 100 CoroCoro ver."
+},
+"SP5": {
+"en": "V-UNION Special Card Sets"
+},
+"SP6": {
+"en": "VSTAR Special Set"
+},
+"SPD": {
+"en": "VSTAR & VMAX High-Class Deck Deoxys"
+},
+"SPZ": {
+"en": "VSTAR & VMAX High-Class Deck Zeraora"
+},
+"SV-P": {
+"en": "Scarlet & Violet Promo Cards"
+},
+"SV10": {
+"en": "Glory of Team Rocket",
+"intl": "Destined Rivals"
+},
+"SV11B": {
+"en": "Black Bolt",
+"intl": "Black Bolt"
+},
+"SV11W": {
+"en": "White Flare",
+"intl": "White Flare"
+},
+"SV1S": {
+"en": "Scarlet ex",
+"intl": "Scarlet & Violet"
+},
+"SV1V": {
+"en": "Violet ex",
+"intl": "Scarlet & Violet"
+},
+"SV1a": {
+"en": "Triplet Beat",
+"intl": "Paldea Evolved"
+},
+"SV2D": {
+"en": "Clay Burst",
+"intl": "Paldea Evolved"
+},
+"SV2P": {
+"en": "Snow Hazard",
+"intl": "Paldea Evolved"
+},
+"SV2a": {
+"en": "Pokémon Card 151",
+"intl": "Scarlet & Violet—151"
+},
+"SV3": {
+"en": "Ruler of the Black Flame",
+"intl": "Obsidian Flames"
+},
+"SV3a": {
+"en": "Raging Surf",
+"intl": "Paradox Rift"
+},
+"SV4K": {
+"en": "Ancient Roar",
+"intl": "Paradox Rift"
+},
+"SV4M": {
+"en": "Future Flash",
+"intl": "Paradox Rift"
+},
+"SV4a": {
+"en": "Shiny Treasure ex",
+"intl": "Paldean Fates",
+"eigen": "シャイニートレジャーex"
+},
+"SV5K": {
+"en": "Wild Force",
+"intl": "Temporal Forces"
+},
+"SV5M": {
+"en": "Cyber Judge",
+"intl": "Temporal Forces"
+},
+"SV5a": {
+"en": "Crimson Haze",
+"intl": "Twilight Masquerade"
+},
+"SV6": {
+"en": "Mask of Change",
+"intl": "Twilight Masquerade"
+},
+"SV6a": {
+"en": "Night Wanderer",
+"intl": "Shrouded Fable"
+},
+"SV7": {
+"en": "Stellar Miracle",
+"intl": "Stellar Crown"
+},
+"SV7a": {
+"en": "Paradise Dragona",
+"intl": "Surging Sparks"
+},
+"SV8": {
+"en": "Super Electric Breaker",
+"intl": "Surging Sparks"
+},
+"SV8a": {
+"en": "Terastal Festival ex",
+"intl": "Prismatic Evolutions"
+},
+"SV9": {
+"en": "Battle Partners",
+"intl": "Journey Together"
+},
+"SV9a": {
+"en": "Heat Wave Arena",
+"intl": "Destined Rivals"
+},
+"SVAL": {
+"en": "ex Starter Set Fuecoco & Ampharos ex"
+},
+"SVAM": {
+"en": "ex Starter Set Sprigatito & Lucario ex"
+},
+"SVAW": {
+"en": "ex Starter Set Quaxly & Mimikyu ex"
+},
+"SVB": {
+"en": "Premium Trainer Box ex"
+},
+"SVC": {
+"en": "ex Starter Set Pikachu ex & Pawmot"
+},
+"SVD": {
+"en": "ex Starter Decks"
+},
+"SVEL": {
+"en": "Terastal Starter Set Skeledirge ex"
+},
+"SVEM": {
+"en": "Terastal Starter Set Mewtwo ex"
+},
+"SVF": {
+"en": "Deck Build Box Ruler of the Black Flame"
+},
+"SVHK": {
+"en": "Ancient Koraidon ex Starter Deck & Build Set"
+},
+"SVHM": {
+"en": "Future Miraidon ex Starter Deck & Build Set"
+},
+"SVK": {
+"en": "Stellar Miracle Deck Build Box"
+},
+"SVLN": {
+"en": "Stellar Tera Type Starter Set Sylveon ex"
+},
+"SVLS": {
+"en": "Stellar Tera Type Starter Set Ceruledge ex"
+},
+"SVP1": {
+"en": "ex Special Set"
+},
+"VS1": {
+"en": "Pokémon Card ★VS"
+},
+"WCS23": {
+"en": "World Championships 2023 Yokohama Deck: Pikachu"
+},
+"neo1": {
+"en": "Gold, Silver, to a New World...",
+"intl": "Neo Genesis"
+},
+"neo2": {
+"en": "Crossing the Ruins...",
+"intl": "Neo Discovery"
+},
+"neo3": {
+"en": "Awakening Legends",
+"intl": "Neo Revelation"
+},
+"neo4": {
+"en": "Darkness, and to Light...",
+"intl": "Neo Destiny"
+},
+"web1": {
+"en": "Pokémon Card ★web"
+}
+}
