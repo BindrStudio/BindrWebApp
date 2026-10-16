@@ -96,7 +96,7 @@ async function nabootsen(route) {
     return pg;
   };
   const page = await nieuweGsm();
-  const stap = (t) => console.log("·", t);
+  const stap = (t) => { globalThis.laatsteStap = t; console.log("·", t); };
   const foto = (n, pg = page) => pg.screenshot({ path: path.join(SHOTS, `${n}.png`) });
   const wachtrij = () => page.evaluate(() => Object.entries(localStorage).filter(([k]) => k.startsWith("bindr-wachtrij-v1-supabase")).reduce((n, [, v]) => n + JSON.parse(v).length, 0));
   const pinRecord = (pg = page) => pg.evaluate(() => JSON.parse(localStorage.getItem("bindr-pin-v1") || "null"));
@@ -356,4 +356,9 @@ async function nabootsen(route) {
   assert.deepEqual(fouten, [], "geen JavaScript-fouten");
   await browser.close();
   console.log("Inloggen in orde. Screenshots in", SHOTS);
-})().catch((e) => { console.error(e); process.exit(1); });
+})().catch((e) => {
+  console.error(e);
+  // In GitHub Actions ook als melding bij de run (die zie je zonder het hele logboek te openen).
+  if (process.env.GITHUB_ACTIONS) console.log(`::error title=${require("node:path").basename(__filename)}::${globalThis.laatsteStap ? `[${globalThis.laatsteStap}] ` : ""}${String(e && e.message || e).split("\n").filter(Boolean).slice(0, 4).join(" | ").replace(/[\r%]/g, " ")}`);
+  process.exit(1);
+});

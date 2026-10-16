@@ -274,4 +274,9 @@ async function doorloop(ctx, page, motor, naam, opties) {
   const geen = uitslag.every(([, , u]) => !u.startsWith("in orde"));
   if (fout || geen) process.exit(1);
   console.log("Alle browsers in orde. Screenshots in", SHOTS);
-})().catch((e) => { console.error(e); process.exit(1); });
+})().catch((e) => {
+  console.error(e);
+  // In GitHub Actions ook als melding bij de run (die zie je zonder het hele logboek te openen).
+  if (process.env.GITHUB_ACTIONS) console.log(`::error title=${require("node:path").basename(__filename)}::${globalThis.laatsteStap ? `[${globalThis.laatsteStap}] ` : ""}${String(e && e.message || e).split("\n").filter(Boolean).slice(0, 4).join(" | ").replace(/[\r%]/g, " ")}`);
+  process.exit(1);
+});

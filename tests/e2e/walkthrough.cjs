@@ -44,7 +44,7 @@ function fouten(page) {
     const inSheet = await p.evaluate(() => [...document.querySelectorAll(".sheet-inhoud")].map((el) => el.scrollWidth - el.clientWidth).filter((x) => x > 1));
     assert.deepEqual(inSheet, [], `${waar}: een sheet is te breed`);
   };
-  const stap = (t) => console.log("·", t);
+  const stap = (t) => { globalThis.laatsteStap = t; console.log("·", t); };
 
   // ── Kassa-hulpjes ──────────────────────────────────────────────────────────
   const wijGeven = () => page.locator(".mandje-kant").nth(0);
@@ -962,4 +962,9 @@ function fouten(page) {
   assert.deepEqual(f2, [], "geen JavaScript-fouten bij scannen");
   await b2.close();
   console.log("Alles in orde: de testcase beursdag klopt. Screenshots in", SHOTS);
-})().catch((e) => { console.error(e); process.exit(1); });
+})().catch((e) => {
+  console.error(e);
+  // In GitHub Actions ook als melding bij de run (die zie je zonder het hele logboek te openen).
+  if (process.env.GITHUB_ACTIONS) console.log(`::error title=${require("node:path").basename(__filename)}::${globalThis.laatsteStap ? `[${globalThis.laatsteStap}] ` : ""}${String(e && e.message || e).split("\n").filter(Boolean).slice(0, 4).join(" | ").replace(/[\r%]/g, " ")}`);
+  process.exit(1);
+});

@@ -107,4 +107,9 @@ const toestel = { ...devices["iPhone 13"], locale: "nl-BE" };
   assert.deepEqual(fouten, [], "geen JavaScript-fouten");
   await browser.close();
   console.log("Printer in orde. Screenshots in", SHOTS);
-})().catch((e) => { console.error(e); process.exit(1); });
+})().catch((e) => {
+  console.error(e);
+  // In GitHub Actions ook als melding bij de run (die zie je zonder het hele logboek te openen).
+  if (process.env.GITHUB_ACTIONS) console.log(`::error title=${require("node:path").basename(__filename)}::${globalThis.laatsteStap ? `[${globalThis.laatsteStap}] ` : ""}${String(e && e.message || e).split("\n").filter(Boolean).slice(0, 4).join(" | ").replace(/[\r%]/g, " ")}`);
+  process.exit(1);
+});
