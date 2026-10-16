@@ -78,6 +78,17 @@ const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circ
 async function profiel(browser, motor, naam, opties) {
   const ctx = await browser.newContext({ ...opties, locale: "nl-BE" });
   const page = await ctx.newPage();
+  try {
+    await doorloop(ctx, page, motor, naam, opties);
+  } catch (e) {
+    await page.screenshot({ path: path.join(SHOTS, `${motor}-${naam}-FOUT.png`) }).catch(() => undefined);
+    throw e;
+  } finally {
+    await ctx.close().catch(() => undefined);
+  }
+}
+
+async function doorloop(ctx, page, motor, naam, opties) {
   const fouten = [];
   page.on("pageerror", (e) => fouten.push(`${e.message}`));
   page.on("dialog", (d) => d.accept());
@@ -199,7 +210,6 @@ async function profiel(browser, motor, naam, opties) {
   await nooitTeBreed("beheer na inloggen");
 
   assert.deepEqual(fouten, [], "geen JavaScript-fouten");
-  await ctx.close();
 }
 
 (async () => {
@@ -210,6 +220,7 @@ async function profiel(browser, motor, naam, opties) {
       browser = await pw[motor].launch();
     } catch (e) {
       uitslag.push([motor, "-", `niet beschikbaar: ${String(e.message).split("\n")[0]}`]);
+      if (process.env.GITHUB_ACTIONS) console.log(`::error title=${motor}::niet beschikbaar: ${String(e.message).split("\n")[0]}`);
       continue;
     }
     for (const [naam, opties] of PROFIELEN[motor]) {
@@ -218,12 +229,18 @@ async function profiel(browser, motor, naam, opties) {
         await profiel(browser, motor, naam, opties);
         uitslag.push([motor, naam, `in orde (${Math.round((Date.now() - t) / 1000)} s)`]);
       } catch (e) {
-        uitslag.push([motor, naam, `FOUT: ${String(e.message).split("\n")[0]}`]);
+        const m = String(e.message).split("\n").filter(Boolean).slice(0, 3).join(" | ");
+        uitslag.push([motor, naam, `FOUT: ${m}`]);
+        // In GitHub Actions als melding bij de run (die zie je zonder het hele logboek te openen).
+        if (process.env.GITHUB_ACTIONS) console.log(`::error title=${motor} ${naam}::${m.replace(/[\r\n%]/g, " ")}`);
       }
     }
     await browser.close();
   }
   for (const [m, n, u] of uitslag) console.log(`${m.padEnd(9)} ${n.padEnd(24)} ${u}`);
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `| Browser | Toestel | Uitslag |\n|---|---|---|\n${uitslag.map((r) => `| ${r.join(" | ")} |`).join("\n")}\n`);
+  }
   // In GitHub Actions moeten alle drie de browsers er zijn; lokaal mag het bij Chromium blijven.
   const fout = uitslag.some(([, , u]) => u.startsWith("FOUT") || (process.env.CI && u.startsWith("niet beschikbaar")));
   const geen = uitslag.every(([, , u]) => !u.startsWith("in orde"));
