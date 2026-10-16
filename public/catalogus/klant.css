@@ -247,7 +247,9 @@ body { overflow-x: hidden; }
 .sorteer:focus-within { outline: 3px solid var(--zee-donker); outline-offset: 2px; }
 @media (min-width: 520px) { .sorteer-tekst { display: inline; } }
 
-.klant-filters { display: grid; gap: 10px; }
+/* minmax(0, 1fr): anders maakt Safari de kolom zo breed als alle chips samen (en scrolt de pagina zijwaarts). */
+.klant-filters { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.klant-filters > * { min-width: 0; }
 .klant-filters .chips, .klant-filters .categorieen { margin: 0 -16px; padding: 2px 16px 4px;
   -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); }
 .schakelchip { display: inline-flex; align-items: center; gap: 7px; }
