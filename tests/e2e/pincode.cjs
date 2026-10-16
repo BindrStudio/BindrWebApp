@@ -59,6 +59,7 @@ async function nabootsen(route) {
   }
   const tabel = p.replace("/rest/v1/", "");
   if (tabel === "beheerders") return json(route, 200, [{ naam: "Jadon", user_id: GEBRUIKER }]);
+  if (tabel === "rpc/schema_versie") return json(route, 200, 9); // schema 0.9: de app vraagt het in één keer
   if (tabel === "omgevingen") return json(route, 200, server.omgevingen);
   if (tabel === "instellingen" && req.method() === "POST") {
     for (const r of req.postDataJSON()) server.instellingen[r.sleutel] = r.waarde;
@@ -104,6 +105,7 @@ async function nabootsen(route) {
   stap("samen werken: aanwezig gemeld (antwoord zonder inhoud) en instelling bewaard");
   await page.waitForTimeout(500);
   assert.ok(server.aanwezig >= 1, "aanwezig gemeld");
+  assert.equal(await page.evaluate(() => localStorage.getItem("bindr-schema-v1")), "8", "schema 0.9 herkend via schema_versie()");
   await page.getByRole("button", { name: "Instellingen" }).click();
   await page.locator(".instagram-veld input").fill("bindr.pin");
   await page.locator(".instagram-veld").getByRole("button", { name: "Bewaar" }).click();

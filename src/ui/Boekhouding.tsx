@@ -7,7 +7,7 @@ import { bedrijfVan, fotosVan, huidig, kanNieuweBoekhouding, laadFotos, meld, op
 import type { Bedrijf, Beurs, Tegenpartij, Transactie } from "../types";
 import {
   BEWIJS_GROOT, bewijsAdvies, bewijsNummer, borderelLijnen, csv, dagontvangsten, dagVan, dexxterLijnen, EIGEN_LIJN, heeftBewijs,
-  jaaromzet, kostenLijnen, voorraadOp, type Dag, type Inventaris,
+  jaaromzet, KANAAL, kostenLijnen, voorraadOp, waarGekocht, type Dag, type Inventaris,
 } from "../lib/boekhouding";
 import { beursCijfers, CASH_GRENS, rond2 } from "../lib/kassa";
 import { datumKort, euro, vandaag } from "../lib/format";
@@ -22,17 +22,7 @@ const dagLang = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString("nl-
 const tijdKort = (iso: string) => new Date(iso).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" });
 const bedrijfOk = (b: Bedrijf) => !!(b.naam?.trim() && b.adres?.trim());
 
-export const KANAAL: Record<NonNullable<Tegenpartij["kanaal"]>, string> = {
-  beurs: "Beurs", online: "Online (Facebook, Vinted …)", rommelmarkt: "Rommelmarkt", andere: "Andere",
-};
-/** Waar een aankoop gebeurde: de beurs, of het kanaal dat bij het afrekenen gekozen werd. */
-export function waarGekocht(t: Transactie, beurzen: Beurs[]): string {
-  const b = beurzen.find((x) => x.id === t.beurs_id);
-  if (b) return b.naam;
-  if (t.soort === "prive") return "uit privé";
-  const k = t.tegenpartij?.kanaal;
-  return k ? KANAAL[k].replace(/ \(.*\)/, "") : "buiten een beurs";
-}
+export { KANAAL, waarGekocht };
 
 type Tab = "dagen" | "aankopen" | "voorraad" | "uitleg";
 
@@ -119,6 +109,7 @@ export function Boekhouding({ onSluit }: { onSluit: () => void }) {
                     <strong>{dagLang(d.datum)}</strong>
                     <span className="zacht klein">
                       {[d.aankopenGeld ? `inkoop ${euro(d.aankopenGeld)}` : null, d.aankopenRuil ? `via ruil ${euro(d.aankopenRuil)}` : null,
+                        d.aankopenFactuur ? `met factuur ${euro(d.aankopenFactuur)}` : null,
                         d.inbreng ? `uit privé ${euro(d.inbreng)}` : null, d.onttrekking ? `naar privé ${euro(d.onttrekking)}` : null].filter(Boolean).join(" · ")}
                     </span>
                   </span>
@@ -307,6 +298,7 @@ function AankoopDagSheet({ dag, onSluit, onBewijs }: { dag: Dag; onSluit: () => 
         <h3>In Dexxter</h3>
         <p className="zacht klein">Uitgaven › nieuwe uitgave, datum {datumKort(dag.datum)}: aankoop van handelsgoederen, leverancier "particulieren", 0% btw. Voeg de dagstaat (pdf) toe als bijlage.</p>
         <DexxterLijnen lijnen={kostenLijnen(dag, beurzen.map((b) => b.naam).join(", ") || undefined)} />
+        {dag.aankopenFactuur !== 0 && <p className="zacht klein">Met factuur: {euro(dag.aankopenFactuur)}. Die staat niet in de lijnen hierboven: geef elke factuur apart in Dexxter in (met de factuur als bijlage).</p>}
         {dag.onttrekking !== 0 && <p className="zacht klein">Naar privé: {euro(dag.onttrekking)} aan aankoopwaarde. In Dexxter als "verkoop aan jezelf" aan die waarde; geen dagontvangst van klanten en geen omzet voor de grens (laat bevestigen door je boekhouder).</p>}
         <button className="knop" disabled={bezig} onClick={() => void print()}><Icoon naam="printer" maat={18} /> {bezig ? "Foto's laden…" : "Dagstaat aankopen (pdf)"}</button>
       </section>
@@ -338,6 +330,29 @@ function AankoopDagSheet({ dag, onSluit, onBewijs }: { dag: Dag; onSluit: () => 
  * Wie verkocht (geen verplichting aan de stand): minstens een voornaam; vanaf € 250 liefst de
  * volledige naam en de gemeente. Een handelaar geeft een factuur. Geen identiteitskaart.
  */
+/** Waar we buiten een beurs kochten: online, op een rommelmarkt of elders. */
+export function KanaalVeld({ waarde, onChange }: { waarde: Tegenpartij; onChange: (t: Tegenpartij) => void }) {
+  return (
+    <Veld label="Waar gekocht?">
+      <div className="kiezer">
+        {(["online", "rommelmarkt", "andere"] as const).map((k) => (
+          <button key={k} type="button" className={`chip${waarde.kanaal === k ? " aan" : ""}`} onClick={() => onChange({ ...waarde, kanaal: k })}>{KANAAL[k]}</button>
+        ))}
+      </div>
+    </Veld>
+  );
+}
+
+/** Op een beurs: kochten we van een andere stand? Enkel ter info (bv. om later te zien wat je bij vendors kocht). */
+export function VendorSchakel({ waarde, onChange }: { waarde: Tegenpartij; onChange: (t: Tegenpartij) => void }) {
+  return (
+    <label className="schakel rij">
+      <input type="checkbox" checked={!!waarde.vendor} onChange={(e) => onChange({ ...waarde, vendor: e.target.checked })} />
+      <span>Van een andere vendor <span className="zacht klein">(een stand op de beurs; enkel ter info)</span></span>
+    </label>
+  );
+}
+
 export function TegenpartijVelden({ waarde, onChange, groot = false, kanaal = false }: {
   waarde: Tegenpartij; onChange: (t: Tegenpartij) => void; groot?: boolean; kanaal?: boolean;
 }) {
@@ -345,24 +360,20 @@ export function TegenpartijVelden({ waarde, onChange, groot = false, kanaal = fa
   const handelaar = waarde.type === "handelaar";
   return (
     <div className="tegenpartij">
+      <label className="schakel rij">
+        <input type="checkbox" checked={!!waarde.met_factuur} onChange={(e) => zet(e.target.checked ? { met_factuur: true, type: "handelaar" } : { met_factuur: false })} />
+        <span>Met factuur <span className="zacht klein">(de factuur geef je zelf in Dexxter in; telt niet in de dagstaat)</span></span>
+      </label>
       <Segment<"particulier" | "handelaar"> waarde={handelaar ? "handelaar" : "particulier"} onKies={(type) => zet({ type })}
         opties={[{ waarde: "particulier", label: "Particulier" }, { waarde: "handelaar", label: "Handelaar" }]} />
-      {kanaal && (
-        <Veld label="Waar gekocht?">
-          <div className="kiezer">
-            {(["online", "rommelmarkt", "andere"] as const).map((k) => (
-              <button key={k} type="button" className={`chip${waarde.kanaal === k ? " aan" : ""}`} onClick={() => zet({ kanaal: k })}>{KANAAL[k]}</button>
-            ))}
-          </div>
-        </Veld>
-      )}
+      {kanaal && <KanaalVeld waarde={waarde} onChange={onChange} />}
       <Veld label={handelaar ? "Naam van de zaak" : groot ? "Naam" : "Naam (minstens een voornaam)"}>
         <input value={waarde.naam ?? ""} onChange={(e) => zet({ naam: e.target.value })} autoComplete="off" placeholder={handelaar ? "naam van de zaak" : "bv. Jan"} />
       </Veld>
       {handelaar ? (
         <>
           <Veld label="Ondernemingsnummer (optioneel)"><input value={waarde.btw ?? ""} onChange={(e) => zet({ btw: e.target.value })} autoComplete="off" placeholder="BE0123.456.789" /></Veld>
-          <Veld label="Factuurnummer" hint="Een handelaar geeft je een factuur: die is het bewijs."><input value={waarde.factuur ?? ""} onChange={(e) => zet({ factuur: e.target.value })} autoComplete="off" /></Veld>
+          <Veld label="Factuurnummer" hint={waarde.met_factuur ? "De factuur is het bewijs. Geef ze in Dexxter in als aparte uitgave." : "Een handelaar geeft je een factuur: die is het bewijs."}><input value={waarde.factuur ?? ""} onChange={(e) => zet({ factuur: e.target.value })} autoComplete="off" /></Veld>
         </>
       ) : (
         <Veld label={groot ? `Gemeente (aangeraden boven ${euro(BEWIJS_GROOT, true)})` : "Gemeente (optioneel)"}>
@@ -531,10 +542,18 @@ function verklaring(t: Transactie, b: Bedrijf): string {
 export function BedrijfVelden() {
   const s = useApp();
   const [b, setB] = useState<Bedrijf>(() => bedrijfVan(s));
-  const zelfde = JSON.stringify(b) === JSON.stringify(bedrijfVan(s));
+  const opgeslagen = bedrijfVan(s);
+  const zelfde = ["naam", "adres", "kbo", "start"].every((k) => (b[k as keyof Bedrijf] ?? null) === (opgeslagen[k as keyof Bedrijf] ?? null));
   const omg = s.omgevingen.find((o) => o.id === s.omgeving);
+  const aan = bedrijfVan(s).boekhouding !== false;
   return (
     <div className="formulier">
+      <label className="schakel rij">
+        <input type="checkbox" checked={aan} onChange={(e) => { zetBedrijf({ ...bedrijfVan(huidig()), boekhouding: e.target.checked }); meld(e.target.checked ? `Boekhouding aan${omg ? ` voor ${omg.naam}` : ""}` : `${omg?.naam ?? "Deze omgeving"} werkt nu als particulier`); }} />
+        <span>Boekhouding{omg ? ` voor ${omg.naam}` : ""} <span className="zacht klein">{aan ? "(als zaak: aankoopbewijzen, dagontvangsten, privé ⇄ zaak)" : "(uit: je werkt als particulier, zonder aankoopbewijzen of boekhouding)"}</span></span>
+      </label>
+      {!aan && <p className="zacht klein">De kassa, de kas en de beurzen werken gewoon. Profiel toont geen Boekhouding en geen Privé ⇄ zaak. Zet ze aan zodra je als zaak start: wat je al boekte, komt dan mee in de boekhouding.</p>}
+      {aan && <>
       {omg && <p className="zacht klein">Voor {omg.naam}. Elke omgeving heeft eigen gegevens.</p>}
       <Veld label="Naam (zoals in de KBO)"><input value={b.naam ?? ""} onChange={(e) => setB({ ...b, naam: e.target.value })} /></Veld>
       <Veld label="Adres"><input value={b.adres ?? ""} onChange={(e) => setB({ ...b, adres: e.target.value })} /></Veld>
@@ -542,7 +561,8 @@ export function BedrijfVelden() {
       <Veld label="Begin van de activiteit" hint="Voor de grens van de btw-vrijstelling: in het eerste jaar geldt een deel van € 25.000.">
         <input type="date" value={b.start ?? ""} onChange={(e) => setB({ ...b, start: e.target.value || null })} />
       </Veld>
-      <button className="knop" disabled={zelfde} onClick={() => { zetBedrijf({ naam: b.naam?.trim() || null, adres: b.adres?.trim() || null, kbo: b.kbo?.trim() || null, start: b.start || null }); meld("Gegevens bewaard"); }}>Bewaar</button>
+      <button className="knop" disabled={zelfde} onClick={() => { zetBedrijf({ ...bedrijfVan(huidig()), naam: b.naam?.trim() || null, adres: b.adres?.trim() || null, kbo: b.kbo?.trim() || null, start: b.start || null }); meld("Gegevens bewaard"); }}>Bewaar</button>
+      </>}
     </div>
   );
 }
@@ -627,15 +647,15 @@ function Uitleg() {
       <h3>Starten met je eigen verzameling</h3>
       <ol>
         <li>Zet de kaarten gewoon in de app (scannen, zoeken), zonder aankoopprijs: die ken je toch niet meer.</li>
-        <li>Open <em>Profiel › Privé ⇄ Bind'r › Al in de app</em>. Kies wat uit je verzameling komt; laat weg wat je met een factuur kocht (Cardmarket, winkel).</li>
-        <li>De app neemt de marktwaarde (Cardmarket-trend met de conditie, of je verkoopprijs) × je inkooppercentage. Neem een screenshot van de prijsgids als foto.</li>
+        <li>Open <em>Profiel › Privé ⇄ Bind'r › Al in de app</em>. Kies wat uit je verzameling komt. Wat je met een factuur kocht (Cardmarket, winkel), duid je aan als <em>gekocht met factuur</em>: die kost staat al in Dexxter.</li>
+        <li>De app neemt per kaart de marktwaarde (Cardmarket-trend met de conditie, bij slabs de opgezochte verkopen, anders je verkoopprijs). Klopt die niet, vul dan zelf de waarde in. Neem een screenshot van de prijsgids als foto.</li>
         <li>Eén bewijs PB-… met alle kaarten. In Dexxter: één aankoop "van jezelf als particulier" aan dat bedrag (zoals Dexxter het voor spullen van vóór de start uitlegt). Wat op 31/12 nog niet verkocht is, gaat naar de voorraad: zo wordt enkel wat je verkocht een kost.</li>
         <li>Kaarten van iemand anders (een vriend, een medebeheerder) zijn geen inbreng maar een aankoop bij een particulier: via de kassa, met bewijs.</li>
       </ol>
       <h3>Privé en Bind'r</h3>
       <ul>
         <li>In <em>Profiel › Privé</em> breng je kaarten uit je eigen verzameling in, of neem je kaarten mee naar privé. Er gaat geen geld over en weer.</li>
-        <li>Inbreng: een kost die je met privémiddelen betaalde. Bronnen raden aan te waarderen zoals bij een vreemde verkoper (marktwaarde × je gewone inkooppercentage), niet aan 100%: zo wordt een privé-meerwaarde geen aftrekbare kost.</li>
+        <li>Inbreng: een kost die je met privémiddelen betaalde, aan de marktwaarde op de dag van de inbreng (100%, niet wat je er ooit voor betaalde). Neem een realistische waarde (de trend voor die conditie, geen hoogste vraagprijs), pas ze per kaart aan als ze niet klopt en bewaar een screenshot als staving. Lager mag altijd.</li>
         <li>Naar privé: aan de aankoopwaarde. Dat neutraliseert de kost; het is geen omzet.</li>
       </ul>
       <h3>Op 31 december</h3>
@@ -716,6 +736,7 @@ function BewijsBlok({ t, beurzen }: { t: Transactie; beurzen: Beurs[] }) {
       {t.soort !== "prive" && (
         <div className="doc-klein">
           {p.type === "handelaar" ? `Handelaar: ${p.naam || "–"}${p.btw ? `, ${p.btw}` : ""}${p.factuur ? `, factuur ${p.factuur}` : ""}` : `Verkoper (particulier): ${p.naam || "niet genoteerd"}${p.adres ? `, ${p.adres}` : ""}`}
+          {p.vendor ? " · van een andere stand" : ""}{p.met_factuur ? " · met factuur (apart ingegeven)" : ""}
           {" · "}{betaalTekst(t)}{t.status === "ongedaan" ? " · ONGEDAAN GEMAAKT" : ""}
         </div>
       )}
@@ -756,6 +777,7 @@ function DagstaatAankopen({ dag, lijst, beurzen, bedrijf }: { dag: Dag; lijst: T
         <tfoot><tr><td>Totaal</td><td className="r">{euro(rond2(kosten.reduce((x, k) => x + k.bedrag, 0)))}</td></tr></tfoot>
       </table>
       {dag.onttrekking !== 0 && <p className="doc-klein">Naar privé (aankoopwaarde, geen omzet): {euro(dag.onttrekking)}.</p>}
+      {dag.aankopenFactuur !== 0 && <p className="doc-klein">Met factuur (apart ingegeven, niet in het totaal hierboven): {euro(dag.aankopenFactuur)}.</p>}
       {lijst.map((t) => <BewijsBlok key={t.id} t={t} beurzen={beurzen} />)}
       <p className="doc-klein">Marktwaarde volgens de vermelde bron op de dag van de aankoop. Elke kaart kreeg een eigen code (label), zodat ze tot deze aankoop terug te volgen is.</p>
       <footer className="doc-voet">Gemaakt met Bind'r Voorraad op {datumKort(new Date().toISOString())}</footer>

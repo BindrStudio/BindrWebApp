@@ -20,6 +20,16 @@ export interface Toonbaar {
   toegevoegd: string | null; // sinds wanneer in de catalogus
 }
 
+/**
+ * Staat een artikel op de klantenpagina? Wat je per stuk aanzet of uitzet (zichtbaar), anders zoals
+ * vroeger: wat in de catalogus ligt en al onze binders (ook die in de vault). Altijd met een prijs en
+ * op voorraad. Dezelfde regel als de publieke weergave publieke_artikelen.
+ */
+export function artikelZichtbaar(a: { zichtbaar?: boolean | null; opslag: string; aantal: number; prijs: number | string | null; details?: { type?: string | null } | null }): boolean {
+  if (!(a.aantal > 0) || a.prijs == null) return false;
+  return a.zichtbaar ?? (a.opslag === "vitrine" || a.details?.type === "binder");
+}
+
 export interface Groep<T> {
   sleutel: string;
   eerste: T;
@@ -111,6 +121,8 @@ export function zoekWoorden(q: string): string[] {
 /** De set van een kaart: TCGdex-id min het kaartnummer (me02-130 → me02). */
 export function setIdVan(k: Pick<Toonbaar, "kaart_id" | "nummer" | "set_code" | "set_naam">): string {
   if (k.kaart_id && k.nummer && k.kaart_id.endsWith("-" + k.nummer)) return k.kaart_id.slice(0, -(k.nummer.length + 1));
+  // 30th Celebration Classic Collection: het nummer is het gedrukte oude nummer (4/102), de id het eigen nummer (30th-c-001).
+  if (k.kaart_id && /^30th-c-\d{3}$/.test(k.kaart_id)) return "30th-c";
   return k.set_code || k.set_naam || "";
 }
 

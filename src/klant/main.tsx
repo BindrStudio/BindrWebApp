@@ -1,7 +1,11 @@
-// De klantencatalogus: een aparte, publieke pagina zonder login en zonder beheerfuncties.
-// Ze toont enkel wat in de catalogus (vitrine) ligt, via de publieke weergaven in Supabase.
-// Niets uit de beheer-app wordt hier geladen, enkel config, types en kleine hulpfuncties.
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+// De klantenpagina: een aparte, publieke pagina zonder login en zonder beheerfuncties.
+//
+// Opbouw: een startpagina (wie we zijn, wat we aanbieden, onze komende beurzen) en vier catalogi:
+// kaarten, binders, 3D-prints en sealed (#kaarten, #binders, #3d, #sealed). Onderaan op de gsm een
+// balk met icoontjes om ertussen te wisselen; op een groot scherm staan ze bovenaan.
+// Ze toont enkel de publieke weergaven in Supabase. Niets uit de beheer-app wordt hier geladen,
+// enkel config, types en kleine hulpfuncties.
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ToetsEvent, type PointerEvent as WijsEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { INSTAGRAM, SUPABASE_KEY, SUPABASE_URL } from "../config";
 
@@ -16,7 +20,7 @@ import { TECHNIEKEN } from "../lib/categorie";
 import { fotoBronnen, setLogo, type FotoKaart } from "../lib/foto";
 import { SetKiezer } from "../gedeeld/SetKiezer";
 import {
-  groepeer, groepSleutel, isNieuw, pastFilters, pastZoek, perSet, SNELFILTERS, SORTERINGEN, setIdVan, setNaam, setTaal, sorteer, zoekTekst, zoekWoorden,
+  artikelZichtbaar, groepeer, groepSleutel, isNieuw, pastFilters, pastZoek, perSet, SNELFILTERS, SORTERINGEN, setIdVan, setNaam, setTaal, sorteer, zoekTekst, zoekWoorden,
   type Groep, type SetInfo, type Snelfilter, type Sortering, type Toonbaar,
 } from "../lib/weergave";
 
@@ -50,55 +54,58 @@ interface ArtikelRij {
   techniek?: string | null; artwork?: string | null; uitgestald?: boolean | null;
 }
 
+/** De vier catalogi en de startpagina. */
+type Plek = "kaarten" | "binders" | "3d" | "sealed";
+type Route = "start" | Plek;
+
 /** Eén ding in de catalogus: een kaart (één exemplaar) of een artikel (met een aantal). */
 interface Stuk extends Toonbaar {
   id: string;
   bron: "kaart" | "artikel";
+  plek: Plek;
   afbeelding: string | null;
   aantal: number;
   catalogus?: "en" | "asia" | null;
   foto?: string | null;                 // eigen foto (artikel, of een kaart zonder foto)
   binder?: Pick<ArtikelRij, "merk" | "grootte" | "toploader" | "techniek" | "artwork"> | null;
   uitgestald?: boolean;                 // artikel ligt op de stand (binders in de vault: "vraag ernaar")
+  type?: string;                        // artikel: binder, sealed, 3d-print of andere
 }
 
-interface KomendeBeurs { naam: string; datum: string; locatie: string | null }
-
-type Cat = "alles" | "singles" | "slabs" | "sealed" | "bindr";
-const CATS: { id: Cat; label: string }[] = [
-  { id: "alles", label: "Alles" }, { id: "singles", label: "Singles" }, { id: "slabs", label: "Slabs" },
-  { id: "sealed", label: "Sealed" }, { id: "bindr", label: "Bind'r" },
-];
-const catVan = (s: Stuk): Cat => (s.bron === "artikel"
-  ? (s.soort === "eigen product" ? "bindr" : "sealed")
-  : s.soort === "slab" ? "slabs" : s.soort === "eigen product" ? "bindr" : "singles");
+interface KomendeBeurs { naam: string; datum: string; locatie: string | null; uren?: string | null; link?: string | null }
 
 const CONDITIE: Record<string, string> = { M: "Mint", NM: "Near Mint", EX: "Excellent", GD: "Good", LP: "Light Played", PL: "Played", PO: "Poor" };
 const taalNaam = (t: string) => TALEN.find((x) => x.code === t)?.label ?? t;
 
+/** Zonder type (ouder schema): raden op de naam, zoals in het beheer. */
+const typeVanNaam = (naam: string) => (/binder|map\b/i.test(naam) ? "binder" : /3d|print/i.test(naam) ? "3d-print" : "andere");
+
 function vanKaart(k: VitrineRij): Stuk {
+  // Eigen producten met een eigen code (een binder, een 3D-print) horen bij Bind'r, niet bij de kaarten.
+  const plek: Plek = k.soort !== "eigen product" ? "kaarten" : typeVanNaam(k.naam) === "3d-print" ? "3d" : "binders";
   return {
-    id: k.code, bron: "kaart", kaart_id: k.kaart_id, soort: k.soort, naam: k.naam, naam_origineel: k.naam_origineel,
+    id: k.code, bron: "kaart", plek, kaart_id: k.kaart_id, soort: k.soort, naam: k.naam, naam_origineel: k.naam_origineel,
     set_naam: k.set_naam, set_code: k.set_code, nummer: k.nummer, taal: k.taal, conditie: k.conditie, variant: k.variant || "normaal",
     grader: k.grader, grade: k.grade, prijs: Number(k.prijs), toegevoegd: k.toegevoegd ?? k.sinds, afbeelding: k.afbeelding, aantal: 1,
     catalogus: k.catalogus ?? null, foto: veiligeFoto(k.foto),
   };
 }
 function vanArtikel(a: ArtikelRij): Stuk {
-  const binder = a.type === "binder" || (!a.type && a.soort === "eigen product" && /binder/i.test(a.naam));
+  const type = a.type || (a.soort === "sealed" ? "sealed" : a.soort === "eigen product" ? typeVanNaam(a.naam) : "andere");
+  const plek: Plek = type === "binder" ? "binders" : type === "3d-print" ? "3d" : "sealed";
   return {
-    id: a.id, bron: "artikel", kaart_id: null, soort: a.soort === "eigen product" ? "eigen product" : "sealed", naam: a.naam,
+    id: a.id, bron: "artikel", plek, type, kaart_id: null, soort: a.soort === "eigen product" ? "eigen product" : "sealed", naam: a.naam,
     set_naam: null, set_code: null, nummer: null, taal: "", conditie: null, variant: "normaal", grader: null, grade: null,
     prijs: Number(a.prijs), toegevoegd: null, afbeelding: null, aantal: a.aantal, foto: veiligeFoto(a.foto),
-    binder: binder ? { merk: a.merk ?? null, grootte: a.grootte ?? null, toploader: a.toploader ?? null, techniek: a.techniek ?? null, artwork: a.artwork ?? null } : null,
+    binder: type === "binder" ? { merk: a.merk ?? null, grootte: a.grootte ?? null, toploader: a.toploader ?? null, techniek: a.techniek ?? null, artwork: a.artwork ?? null } : null,
     uitgestald: a.uitgestald ?? true,
   };
 }
 
 const TECHNIEK_NAAM: Record<string, string> = Object.fromEntries(TECHNIEKEN.map((t) => [t.id, t.label]));
-/** "9-pocket · toploader · lasergravure" */
-function binderTekst(b: NonNullable<Stuk["binder"]>, metArtwork = false): string {
-  return [metArtwork ? b.artwork : null, b.grootte, b.toploader ? "toploader" : null, b.techniek ? TECHNIEK_NAAM[b.techniek]?.toLowerCase() : null].filter(Boolean).join(" · ");
+/** "9-pocket, toploader, lasergravure" */
+function binderTekst(b: NonNullable<Stuk["binder"]>): string {
+  return [b.grootte, b.toploader ? "toploader" : null, b.techniek ? TECHNIEK_NAAM[b.techniek]?.toLowerCase() : null].filter(Boolean).join(", ");
 }
 
 async function haal<T>(pad: string): Promise<T> {
@@ -122,15 +129,15 @@ function laadDemo(): Data | null {
     const kaarten = (d.exemplaren as DemoEx[])
       .filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null && e.nieuw_hartje == null && e.label_status === "gestickerd" && toon(e))
       .map((e) => vanKaart({ ...e, prijs: e.hartjesprijs!, sinds: e.hartjesdatum, toegevoegd: e.vitrine_sinds ?? e.hartjesdatum }));
-    type DemoArt = ArtikelRij & { opslag: string; omgeving_id?: string | null; details?: Record<string, unknown> | null };
+    type DemoArt = ArtikelRij & { opslag: string; omgeving_id?: string | null; zichtbaar?: boolean | null; details?: Record<string, unknown> | null };
     const artikelen = (d.artikelen as DemoArt[])
-      .filter((a) => (a.opslag === "vitrine" || a.details?.type === "binder") && a.aantal > 0 && a.prijs != null && toon(a))
+      .filter((a) => artikelZichtbaar({ ...a, details: a.details as { type?: string } | null }) && toon(a))
       .map((a) => vanArtikel({ ...a, ...(a.details ?? {}), uitgestald: a.opslag === "vitrine" } as ArtikelRij));
     const ig = d.instellingen?.instagram;
     const vandaag = vandaagLokaal();
     const beurzen = ((d.beurzen ?? []) as (KomendeBeurs & { status: string; omgeving_id?: string | null })[])
       .filter((b) => (b.status === "gepland" || b.status === "actief") && b.datum >= vandaag && toon(b))
-      .map((b) => ({ naam: b.naam, datum: b.datum, locatie: b.locatie ?? null }))
+      .map((b) => ({ naam: b.naam, datum: b.datum, locatie: b.locatie ?? null, uren: b.uren ?? null, link: b.link ?? null }))
       .sort((a, b) => a.datum.localeCompare(b.datum));
     return { stukken: [...kaarten, ...artikelen], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, beurzen };
   } catch {
@@ -140,22 +147,46 @@ function laadDemo(): Data | null {
 
 const aantalVan = (g: Groep<Stuk>) => g.items.reduce((s, x) => s + x.aantal, 0);
 const igProfiel = (ig: string) => `https://www.instagram.com/${encodeURIComponent(ig)}/`;
+/** Enkel http(s)-links van een beurs (de beheerder vult ze in; nooit javascript: of zo). */
+const veiligeLink = (l: string | null | undefined) => { try { const u = new URL(l ?? ""); return u.protocol === "https:" || u.protocol === "http:" ? u.href : null; } catch { return null; } };
+const routeLink = (plaats: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(plaats)}`;
+
+// ── Routes ───────────────────────────────────────────────────────────────────
+
+const ROUTES: { id: Route; label: string; titel: string; icoon: () => ReactNode }[] = [
+  { id: "start", label: "Start", titel: "Bind'r", icoon: () => <StartIcoon /> },
+  { id: "kaarten", label: "Kaarten", titel: "Kaarten", icoon: () => <KaartenIcoon /> },
+  { id: "binders", label: "Binders", titel: "Binders", icoon: () => <BinderIcoon /> },
+  { id: "3d", label: "3D-prints", titel: "3D-prints", icoon: () => <KubusIcoon /> },
+  { id: "sealed", label: "Sealed", titel: "Sealed", icoon: () => <PackIcoon /> },
+];
+function routeVan(hash: string): Route {
+  const h = hash.replace(/^#\/?/, "").toLowerCase();
+  return (["kaarten", "binders", "3d", "sealed"] as const).find((r) => r === h) ?? "start";
+}
+const hrefVan = (r: Route) => (r === "start" ? "#" : `#${r}`);
 
 // ── De pagina ────────────────────────────────────────────────────────────────
 
-function Catalogus() {
+type Cat = "alles" | "kaart" | "slab";
+
+function KlantPagina() {
   const [data, setData] = useState<Data | null>(null);
   const [sets, setSets] = useState<SetInfo | null>(null);
   const [fout, setFout] = useState<string | null>(null);
-  const [cat, setCat] = useState<Cat>("alles");
-  const [zoek, setZoek] = useState("");
-  const [filters, setFilters] = useState<Set<Snelfilter>>(new Set());
-  const [set, setSet] = useState("");
-  const [sort, setSort] = useState<Sortering>("nieuw");
+  const [route, setRoute] = useState<Route>(() => routeVan(location.hash));
   const [open, setOpen] = useState<Groep<Stuk> | null>(null);
-  const demo = useMemo(laadDemo, []);
-  const lijstRef = useRef<HTMLDivElement>(null);
   const [zoekFocus, setZoekFocus] = useState(false);
+  const demo = useMemo(laadDemo, []);
+  // De filters van de kaarten blijven staan als je even naar de binders kijkt.
+  const [kaartFilter, setKaartFilter] = useState<KaartFilter>({ cat: "alles", zoek: "", filters: new Set(), set: "", sort: "nieuw" });
+
+  useEffect(() => {
+    const wissel = () => { setRoute(routeVan(location.hash)); setOpen(null); window.scrollTo({ top: 0 }); };
+    window.addEventListener("hashchange", wissel);
+    return () => window.removeEventListener("hashchange", wissel);
+  }, []);
+  useEffect(() => { document.title = route === "start" ? "Bind'r · Custom binders en beurscatalogus" : `${ROUTES.find((r) => r.id === route)?.titel} · Bind'r`; }, [route]);
 
   // De bovenbalk schuift weg als je naar beneden scrolt en komt terug als je omhoog scrolt.
   const [balkWeg, setBalkWeg] = useState(false);
@@ -196,71 +227,31 @@ function Catalogus() {
         haal<{ code: string; foto: string | null }[]>("publieke_vitrine?select=code,foto&foto=not.is.null")
           .then((f) => vulFotos("kaart", f.map((x) => ({ id: x.code, foto: x.foto })))).catch(() => undefined);
       }
-    }).catch(() => setFout("De catalogus kon niet geladen worden. Probeer het straks opnieuw."));
+    }).catch(() => setFout("De catalogus kon niet geladen worden. Controleer je internet en laad de pagina opnieuw."));
   }, [demo]);
 
   const stukken = data?.stukken ?? [];
   const ig = data?.instagram ?? INSTAGRAM;
   const beurzen = data?.beurzen ?? [];
-
   const telling = useMemo(() => {
-    const t: Partial<Record<Cat, number>> = {};
-    for (const s of stukken) t[catVan(s)] = (t[catVan(s)] ?? 0) + s.aantal;
+    const t: Record<Plek, number> = { kaarten: 0, binders: 0, "3d": 0, sealed: 0 };
+    for (const s of stukken) t[s.plek] += s.aantal;
     return t;
   }, [stukken]);
-  const nieuwAantal = useMemo(() => stukken.filter((s) => isNieuw(s)).length, [stukken]);
-  // Drie mooie kaarten voor de waaier in het welkomstblok (de duurste met een foto).
-  const waaier = useMemo(() => stukken.filter((s) => s.bron === "kaart" && s.afbeelding && s.soort === "kaart")
-    .sort((a, b) => b.prijs - a.prijs).slice(0, 3), [stukken]);
-
-  // Sets die in de catalogus voorkomen, nieuwste eerst.
-  const setLijst = useMemo(() => {
-    const m = new Map<string, { id: string; naam: string; aantal: number; release: string }>();
-    for (const s of stukken) {
-      if (s.bron !== "kaart" || s.soort === "eigen product") continue;
-      const id = setIdVan(s);
-      if (!id) continue;
-      const x = m.get(id) ?? { id, naam: setNaam(id, s.set_naam, sets), aantal: 0, release: sets?.[id]?.[2] ?? "" };
-      x.aantal++;
-      m.set(id, x);
-    }
-    return [...m.values()].sort((a, b) => b.release.localeCompare(a.release) || a.naam.localeCompare(b.naam));
-  }, [stukken, sets]);
-
-  // Binders apart en groot bovenaan (bij "Alles" en "Bind'r", zonder zoeken of filters); dan niet nog eens in het raster.
-  const binderVitrine = (cat === "alles" || cat === "bindr") && !zoek.trim() && !filters.size && !set;
-  const groepen = useMemo(() => {
-    const woorden = zoekWoorden(zoek);
-    const zichtbaar = stukken.filter((s) =>
-      !(binderVitrine && s.binder) &&
-      (cat === "alles" || catVan(s) === cat) &&
-      (!set || setIdVan(s) === set) &&
-      pastFilters(s, filters) &&
-      (!woorden.length || pastZoek(zoekTekst(s), woorden)));
-    const g = groepeer(zichtbaar, (s) => (s.bron === "artikel" ? `a|${s.id}` : groepSleutel(s)));
-    return sorteer(g, sort, (x) => x.eerste, sets);
-  }, [stukken, cat, set, filters, zoek, sort, sets, binderVitrine]);
-
-  const actief = filters.size + (set ? 1 : 0) + (zoek.trim() ? 1 : 0) + (cat !== "alles" ? 1 : 0);
-  const binderGroepen = useMemo(() => (binderVitrine ? groepeer(stukken.filter((s) => s.binder), (s) => `a|${s.id}`) : []), [stukken, binderVitrine]);
-  const wisAlles = () => { setFilters(new Set()); setSet(""); setZoek(""); setCat("alles"); };
-  const wissel = (f: Snelfilter) => {
-    const n = new Set(filters);
-    if (n.has(f)) n.delete(f); else n.add(f);
-    setFilters(n);
-  };
-  const naarLijst = () => lijstRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-
-  const tegels = (lijst: Groep<Stuk>[], start = 0) => lijst.map((g, i) => (
-    <KlantTegel key={g.sleutel} g={g} i={start + i} onOpen={() => setOpen(g)} />
-  ));
+  // Lege catalogi (nog geen 3D-prints online) laten we uit de navigatie; kaarten en binders staan er altijd.
+  const routes = ROUTES.filter((r) => r.id === "start" || r.id === "kaarten" || r.id === "binders" || !data || telling[r.id as Plek] > 0);
 
   return (
-    <div className={`klant${balkWeg ? " balk-weg" : ""}`}>
+    <div className={`klant route-${route}${balkWeg ? " balk-weg" : ""}`}>
       <header className="klant-balk">
-        <a href="#" className="klant-merk" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); }} aria-label="Bind'r, naar boven">
+        <a href="#" className="klant-merk" aria-label="Bind'r, naar de start">
           <img src={`${BASIS}img/logo-woord.png`} alt="Bind'r" width={150} height={66} />
         </a>
+        <nav className="klant-nav boven" aria-label="Catalogi">
+          {routes.map((r) => (
+            <a key={r.id} href={hrefVan(r.id)} aria-current={route === r.id ? "page" : undefined}>{r.icoon()}<span>{r.label}</span></a>
+          ))}
+        </nav>
         <div className="klant-balk-rechts">
           <a className="klant-ig-knop" href={igProfiel(ig)} target="_blank" rel="noreferrer" aria-label={`Instagram @${ig}`}>
             <IgIcoon /> <span>@{ig}</span>
@@ -271,109 +262,289 @@ function Catalogus() {
         </div>
       </header>
 
-      <section className="klant-held">
-        <div className="held-tekst">
-          <span className="held-label"><Sparkel /> Beurscatalogus</span>
-          <h1>Hier vind je onze volledige catalogus</h1>
-          <p>Kaarten, slabs en Bind'r-producten die je bij ons op de beurs kunt kopen.{demo ? " (Voorbeeld met de demo.)" : ""}</p>
-          <div className="held-knoppen">
-            <button className="knop klein" onClick={naarLijst}>Bekijk alles</button>
-            {nieuwAantal > 0 && (
-              <button className="knop klein zacht" onClick={() => { setFilters(new Set<Snelfilter>(["nieuw"])); setSort("nieuw"); naarLijst(); }}>
-                <Sparkel /> {nieuwAantal} nieuw binnen
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="held-beeld" aria-hidden="true">
-          {waaier.length === 3 && (
-            <div className="waaier">
-              {waaier.map((k, i) => <img key={k.id} className={`w${i}`} src={k.afbeelding!} alt="" loading="lazy" onLoad={(e) => e.currentTarget.classList.add("geladen")} onError={(e) => { e.currentTarget.style.display = "none"; }} />)}
+      <main className="klant-inhoud">
+        {fout && <p className="klant-fout">{fout}</p>}
+        {route === "start" ? (
+          <Start data={data} stukken={stukken} telling={telling} beurzen={beurzen} ig={ig} demo={!!demo} />
+        ) : route === "kaarten" ? (
+          <Kaarten data={data} stukken={stukken} sets={sets} f={kaartFilter} zetF={setKaartFilter} onOpen={setOpen} onZoekFocus={setZoekFocus} />
+        ) : (
+          <Artikels plek={route} data={data} stukken={stukken} beurzen={beurzen} sets={sets} onOpen={setOpen} />
+        )}
+      </main>
+
+      <Voet ig={ig} />
+
+      <nav className="klant-nav onder" aria-label="Catalogi">
+        {routes.map((r) => (
+          <a key={r.id} href={hrefVan(r.id)} aria-current={route === r.id ? "page" : undefined}>{r.icoon()}<span>{r.label}</span></a>
+        ))}
+      </nav>
+
+      {open && <Detail g={open} beurzen={beurzen} sets={sets} onSluit={() => setOpen(null)} />}
+      {data && <Eend ig={ig} verborgen={!!open || zoekFocus} />}
+    </div>
+  );
+}
+
+// ── Start: wie we zijn, wat we aanbieden, waar we staan ──────────────────────
+
+function Start({ data, stukken, telling, beurzen, ig, demo }: { data: Data | null; stukken: Stuk[]; telling: Record<Plek, number>; beurzen: KomendeBeurs[]; ig: string; demo: boolean }) {
+  // Drie mooie kaarten voor de waaier naast de kaft (de duurste met een foto).
+  const waaier = useMemo(() => stukken.filter((s) => s.plek === "kaarten" && s.afbeelding && s.soort === "kaart")
+    .sort((a, b) => b.prijs - a.prijs).slice(0, 3), [stukken]);
+  // Eén beeld per vak van de binderpagina: de duurste met een foto.
+  const beeld = (p: Plek) => stukken.filter((s) => s.plek === p && (p === "kaarten" ? s.afbeelding : s.foto)).sort((a, b) => b.prijs - a.prijs)[0] ?? null;
+  return (
+    <>
+      <section className="held" aria-labelledby="held-titel">
+        <div className="kaft">
+          <span className="kaft-rug" aria-hidden="true"><i /><i /><i /></span>
+          <div className="kaft-vlak">
+            <h1 id="held-titel" className="gravure"><span className="gravure-tekst">Binders die even uniek zijn als je collectie</span></h1>
+            <p>Bind'r ontwerpt custom binders voor Pokémon-verzamelaars en graveert ze met de laser. Op beurzen vind je ons ook met kaarten, slabs, sealed en 3D-prints.{demo ? " (Voorbeeld met de demo.)" : ""}</p>
+            <div className="held-knoppen">
+              <a className="knop" href="#binders">Bekijk de binders</a>
+              <a className="knop doorzichtig" href="#kaarten">Zoek in de kaarten</a>
             </div>
-          )}
-          <span className="held-bel" />
-          <img className="held-eend" src={`${BASIS}img/eend.png`} alt="" width={180} height={180} />
+          </div>
+          <img className="kaft-eend" src={`${BASIS}img/eend.png`} alt="" width={120} height={120} />
+        </div>
+        <div className="held-waaier" aria-hidden="true">
+          {waaier.length === 3 && waaier.map((k, i) => (
+            <img key={k.id} className={`w${i}`} src={k.afbeelding!} alt="" loading="lazy" onLoad={(e) => e.currentTarget.classList.add("geladen")} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+          ))}
           <span className="held-ster s1"><Sparkel /></span>
           <span className="held-ster s2"><Sparkel /></span>
-          <span className="held-ster s3"><Sparkel /></span>
         </div>
-        {data && (
-          <div className="held-cijfers">
-            {CATS.filter((c) => c.id !== "alles" && telling[c.id]).map((c) => (
-              <button key={c.id} onClick={() => { setCat(c.id); naarLijst(); }}>
-                <strong>{telling[c.id]}</strong><span>{c.label}</span>
-              </button>
-            ))}
-          </div>
-        )}
       </section>
 
-      {binderGroepen.length > 0 && <Binders binders={binderGroepen} onOpen={setOpen} />}
-
-      {fout && <p className="klant-fout">{fout}</p>}
-      {!data && !fout && (
-        <div className="raster laad-raster" aria-label="Catalogus laden">
-          {Array.from({ length: 6 }, (_, i) => <div key={i} className="tegel laad-tegel" style={{ ["--i" as string]: i }}><div className="foto" /><span /><span /></div>)}
+      <section className="aanbod" aria-labelledby="aanbod-titel">
+        <h2 id="aanbod-titel">Wat je bij ons vindt</h2>
+        <div className="pocketpagina">
+          <Pocket plek="kaarten" titel="Kaarten" tekst={data ? `${telling.kaarten} singles en slabs` : "…"} beeld={beeld("kaarten")} />
+          <Pocket plek="binders" titel="Binders" tekst={data ? (telling.binders ? `${telling.binders} ontwerpen van ons` : "Ons eigen werk") : "…"} beeld={beeld("binders")} />
+          <Pocket plek="3d" titel="3D-prints" tekst={data ? (telling["3d"] ? `${telling["3d"]} stuks` : "Aan onze stand") : "…"} beeld={beeld("3d")} />
+          <Pocket plek="sealed" titel="Sealed" tekst={data ? (telling.sealed ? `${telling.sealed} stuks` : "Aan onze stand") : "…"} beeld={beeld("sealed")} />
         </div>
-      )}
+      </section>
 
-      {data && (
+      <Beurzen beurzen={beurzen} ig={ig} geladen={!!data} />
+
+      <section className="over" aria-labelledby="over-titel">
+        <img className="over-logo" src={`${BASIS}img/logo.png`} alt="" width={240} height={160} loading="lazy" />
+        <div className="over-tekst">
+          <h2 id="over-titel">Over Bind'r</h2>
+          <p>Een gewone kaartmap wordt bij ons een stuk van je collectie. Wil je een naam of je eigen ontwerp op je binder? Vraag het ons aan de stand of op Instagram.</p>
+          <ul className="over-lijst">
+            <li><OntwerpIcoon /><span><strong>Eigen ontwerp.</strong> Elk artwork maken we zelf, geïnspireerd op Pokémon, sets en card art.</span></li>
+            <li><LaserIcoon /><span><strong>Lasergravure.</strong> Het ontwerp gaat er met de laser in, op de voorkant of op voor- én achterkant.</span></li>
+            <li><StandIcoon /><span><strong>Op de beurs.</strong> Aan onze stand verkopen we ook kaarten, slabs en sealed, en kopen en ruilen we kaarten.</span></li>
+          </ul>
+        </div>
+      </section>
+    </>
+  );
+}
+
+/** Eén vak van de binderpagina: een kaartgroot hoesje met een beeld, en een etiket eronder. */
+function Pocket({ plek, titel, tekst, beeld }: { plek: Plek; titel: string; tekst: string; beeld: Stuk | null }) {
+  return (
+    <a className={`pocket ${plek}`} href={`#${plek}`}>
+      <span className="pocket-hoes">
+        {beeld ? (
+          plek === "kaarten" ? <Foto kaart={beeld} alt="" /> : <img className="pocket-foto" src={beeld.foto!} alt="" loading="lazy" />
+        ) : <span className="pocket-leeg" aria-hidden="true">{ROUTES.find((r) => r.id === plek)?.icoon()}</span>}
+        <span className="pocket-glans" aria-hidden="true" />
+      </span>
+      <span className="pocket-etiket"><strong>{titel}</strong><span>{tekst}</span></span>
+    </a>
+  );
+}
+
+const MAANDEN = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
+const MAANDEN_LANG = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"];
+const DAGEN = ["zo", "ma", "di", "wo", "do", "vr", "za"];
+const DAGEN_LANG = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];
+const dag = (iso: string) => new Date(iso + "T12:00:00");
+function datumMooi(iso: string): string {
+  const d = dag(iso);
+  return `${DAGEN[d.getDay()]} ${d.getDate()} ${MAANDEN[d.getMonth()]}`;
+}
+/** "Vandaag", "Morgen", "Over 9 dagen", "Over 3 weken" */
+function nogTe(iso: string): string {
+  const n = Math.round((dag(iso).getTime() - dag(vandaagLokaal()).getTime()) / 86400000);
+  if (n <= 0) return "Vandaag";
+  if (n === 1) return "Morgen";
+  if (n < 21) return `Over ${n} dagen`;
+  return `Over ${Math.round(n / 7)} weken`;
+}
+
+/** Onze komende beurzen: de eerstvolgende groot als een ticket, de rest eronder. */
+function Beurzen({ beurzen, ig, geladen }: { beurzen: KomendeBeurs[]; ig: string; geladen: boolean }) {
+  const [eerste, ...rest] = beurzen;
+  return (
+    <section className="beurzen" id="beurzen" aria-labelledby="beurzen-titel">
+      <h2 id="beurzen-titel">Kom langs op onze stand</h2>
+      {!geladen ? null : !eerste ? (
+        <p className="beurzen-leeg">We plannen onze volgende beurzen. Volg ons op <a href={igProfiel(ig)} target="_blank" rel="noreferrer">Instagram</a> om niets te missen.</p>
+      ) : (
         <>
-          <div className="klant-zoekrij" ref={lijstRef}>
+          <article className="ticket" aria-label={`${eerste.naam}, ${DAGEN_LANG[dag(eerste.datum).getDay()]} ${dag(eerste.datum).getDate()} ${MAANDEN_LANG[dag(eerste.datum).getMonth()]}`}>
+            <div className="ticket-stomp">
+              <span>{DAGEN[dag(eerste.datum).getDay()]}</span>
+              <strong>{dag(eerste.datum).getDate()}</strong>
+              <span>{MAANDEN[dag(eerste.datum).getMonth()]}</span>
+            </div>
+            <div className="ticket-lijf">
+              <span className="ticket-nog">{nogTe(eerste.datum)}</span>
+              <h3>{eerste.naam}</h3>
+              {eerste.locatie && <p className="ticket-regel"><PinIcoon />{eerste.locatie}</p>}
+              {eerste.uren && <p className="ticket-regel"><KlokIcoon />{eerste.uren}</p>}
+              <div className="ticket-knoppen">
+                {eerste.locatie && <a className="knop klein" href={routeLink(eerste.locatie)} target="_blank" rel="noreferrer">Route</a>}
+                {veiligeLink(eerste.link) && <a className="knop klein doorzichtig" href={veiligeLink(eerste.link)!} target="_blank" rel="noreferrer">Website van de beurs</a>}
+              </div>
+            </div>
+          </article>
+          {rest.length > 0 && (
+            <ol className="beurs-lijst">
+              {rest.map((b) => {
+                const link = veiligeLink(b.link);
+                return (
+                  <li key={b.datum + b.naam}>
+                    <span className="beurs-datum"><strong>{dag(b.datum).getDate()}</strong><em>{MAANDEN[dag(b.datum).getMonth()]}</em></span>
+                    <span className="beurs-tekst">
+                      <strong>{b.naam}</strong>
+                      {(b.locatie || b.uren) && <span>{[b.locatie, b.uren].filter(Boolean).join(", ")}</span>}
+                    </span>
+                    {link && <a className="beurs-link" href={link} target="_blank" rel="noreferrer" aria-label={`Website van ${b.naam}`}><LinkIcoon /></a>}
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+// ── Kaarten ──────────────────────────────────────────────────────────────────
+
+interface KaartFilter { cat: Cat; zoek: string; filters: Set<Snelfilter>; set: string; sort: Sortering }
+
+function Kaarten({ data, stukken, sets, f, zetF, onOpen, onZoekFocus }: {
+  data: Data | null; stukken: Stuk[]; sets: SetInfo | null; f: KaartFilter; zetF: (f: KaartFilter) => void;
+  onOpen: (g: Groep<Stuk>) => void; onZoekFocus: (x: boolean) => void;
+}) {
+  const kaarten = useMemo(() => stukken.filter((s) => s.plek === "kaarten"), [stukken]);
+  const zet = (w: Partial<KaartFilter>) => zetF({ ...f, ...w });
+  const slabs = kaarten.filter((s) => s.soort === "slab").length;
+  const nieuwAantal = useMemo(() => kaarten.filter((s) => isNieuw(s)).length, [kaarten]);
+
+  // Sets die in de catalogus voorkomen, nieuwste eerst.
+  const setLijst = useMemo(() => {
+    const m = new Map<string, { id: string; naam: string; aantal: number; release: string }>();
+    for (const s of kaarten) {
+      const id = setIdVan(s);
+      if (!id) continue;
+      const x = m.get(id) ?? { id, naam: setNaam(id, s.set_naam, sets), aantal: 0, release: sets?.[id]?.[2] ?? "" };
+      x.aantal++;
+      m.set(id, x);
+    }
+    return [...m.values()].sort((a, b) => b.release.localeCompare(a.release) || a.naam.localeCompare(b.naam));
+  }, [kaarten, sets]);
+
+  const groepen = useMemo(() => {
+    const woorden = zoekWoorden(f.zoek);
+    const zichtbaar = kaarten.filter((s) =>
+      (f.cat === "alles" || s.soort === f.cat) &&
+      (!f.set || setIdVan(s) === f.set) &&
+      pastFilters(s, f.filters) &&
+      (!woorden.length || pastZoek(zoekTekst(s), woorden)));
+    return sorteer(groepeer(zichtbaar, groepSleutel), f.sort, (x) => x.eerste, sets);
+  }, [kaarten, f, sets]);
+
+  const actief = f.filters.size + (f.set ? 1 : 0) + (f.zoek.trim() ? 1 : 0) + (f.cat !== "alles" ? 1 : 0);
+  const wisAlles = () => zetF({ ...f, filters: new Set(), set: "", zoek: "", cat: "alles" });
+  const wissel = (x: Snelfilter) => {
+    const n = new Set(f.filters);
+    if (n.has(x)) n.delete(x); else n.add(x);
+    zet({ filters: n });
+  };
+  const tegels = (lijst: Groep<Stuk>[], start = 0) => lijst.map((g, i) => <KlantTegel key={g.sleutel} g={g} i={start + i} onOpen={() => onOpen(g)} />);
+  const totaal = groepen.reduce((s, g) => s + aantalVan(g), 0);
+
+  return (
+    <>
+      <header className="sectie-kop">
+        <h1>Kaarten</h1>
+        <p>Singles en slabs die je aan onze stand kunt kopen.</p>
+        {nieuwAantal > 0 && (
+          <button className="nieuw-knop" onClick={() => zet({ filters: new Set<Snelfilter>(["nieuw"]), sort: "nieuw" })}><Sparkel /> {nieuwAantal} nieuw binnen</button>
+        )}
+      </header>
+
+      {!data ? <LaadRaster /> : (
+        <>
+          <div className="klant-zoekrij">
             <div className="zoekbalk">
               <ZoekIcoon />
-              <input value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek een kaart of set" inputMode="search" aria-label="Zoeken"
-                onFocus={() => setZoekFocus(true)} onBlur={() => setZoekFocus(false)} />
-              {zoek && <button className="wis" onClick={() => setZoek("")} aria-label="Wissen">✕</button>}
+              <input value={f.zoek} onChange={(e) => zet({ zoek: e.target.value })} placeholder="Zoek een kaart of set" inputMode="search" aria-label="Zoeken"
+                onFocus={() => onZoekFocus(true)} onBlur={() => onZoekFocus(false)} />
+              {f.zoek && <button className="wis" onClick={() => zet({ zoek: "" })} aria-label="Wissen">✕</button>}
             </div>
             <label className="sorteer" title="Sorteren">
               <SorteerIcoon />
-              <span className="sorteer-tekst">{SORTERINGEN.find((x) => x.id === sort)?.label}</span>
-              <select value={sort} onChange={(e) => setSort(e.target.value as Sortering)} aria-label="Sorteren">
+              <span className="sorteer-tekst">{SORTERINGEN.find((x) => x.id === f.sort)?.label}</span>
+              <select value={f.sort} onChange={(e) => zet({ sort: e.target.value as Sortering })} aria-label="Sorteren">
                 {SORTERINGEN.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
               </select>
             </label>
           </div>
 
           <div className="klant-filters">
-            <div className="categorieen" role="tablist" aria-label="Soort">
-              {CATS.filter((c) => c.id === "alles" || telling[c.id]).map((c) => (
-                <button key={c.id} role="tab" aria-selected={cat === c.id} className={cat === c.id ? "aan" : ""} onClick={() => setCat(c.id)}>
-                  {c.label}{c.id !== "alles" && <span>{telling[c.id]}</span>}
-                </button>
-              ))}
-            </div>
+            {slabs > 0 && slabs < kaarten.length && (
+              <div className="categorieen" role="tablist" aria-label="Soort">
+                {([["alles", "Alles", kaarten.length], ["kaart", "Singles", kaarten.length - slabs], ["slab", "Slabs", slabs]] as const).map(([id, label, n]) => (
+                  <button key={id} role="tab" aria-selected={f.cat === id} className={f.cat === id ? "aan" : ""} onClick={() => zet({ cat: id })}>
+                    {label}{id !== "alles" && <span>{n}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="chips" aria-label="Filters">
               {setLijst.length > 1 && (
-                <SetKiezer sets={setLijst.map((x) => ({ ...x, logo: setLogo(x.id, sets?.[x.id]), code: sets?.[x.id]?.[1] || null, taal: setTaal(sets?.[x.id]), intl: sets?.[x.id]?.[5] || null, eigen: sets?.[x.id]?.[6] || null }))} gekozen={set} onKies={setSet} />
+                <SetKiezer sets={setLijst.map((x) => ({ ...x, logo: setLogo(x.id, sets?.[x.id]), code: sets?.[x.id]?.[1] || null, taal: setTaal(sets?.[x.id]), intl: sets?.[x.id]?.[5] || null, eigen: sets?.[x.id]?.[6] || null }))} gekozen={f.set} onKies={(set) => zet({ set })} />
               )}
-              {SNELFILTERS.map((f) => (
-                <button key={f.id} className={`chip schakelchip${filters.has(f.id) ? " aan" : ""}`} aria-pressed={filters.has(f.id)} onClick={() => wissel(f.id)}>
-                  <span className="schakelbol" aria-hidden="true" />{f.label}
+              {SNELFILTERS.map((x) => (
+                <button key={x.id} className={`chip schakelchip${f.filters.has(x.id) ? " aan" : ""}`} aria-pressed={f.filters.has(x.id)} onClick={() => wissel(x.id)}>
+                  <span className="schakelbol" aria-hidden="true" />{x.label}
                 </button>
               ))}
             </div>
             <div className="klant-resultaat">
-              <span>{(() => { const n = groepen.reduce((s, g) => s + aantalVan(g), 0); return `${n} ${n === 1 ? "stuk" : "stuks"}`; })()} · {SORTERINGEN.find((x) => x.id === sort)?.label.toLowerCase()}</span>
+              <span>{totaal} {totaal === 1 ? "kaart" : "kaarten"}, {SORTERINGEN.find((x) => x.id === f.sort)?.label.toLowerCase()}</span>
               {actief > 0 && <button className="tekstknop klein" onClick={wisAlles}>Wis filters</button>}
             </div>
           </div>
 
-          {!groepen.length && binderGroepen.length ? null : !groepen.length ? (
+          {!groepen.length ? (
             <div className="klant-leeg">
               <img src={`${BASIS}img/eend.png`} alt="" width={96} height={96} />
-              <p>{stukken.length ? "Niets gevonden met deze filters. Haal er een weg:" : "De catalogus is nog leeg. Kom zeker eens langs op de beurs!"}</p>
+              <p>{kaarten.length ? "Niets gevonden met deze filters. Haal er een weg:" : "Er staan nog geen kaarten online. Kom zeker eens kijken aan onze stand."}</p>
               {actief > 0 && (
                 <div className="actieve-filters">
-                  {zoek.trim() && <button className="chip aan" onClick={() => setZoek("")}>"{zoek.trim()}" ✕</button>}
-                  {cat !== "alles" && <button className="chip aan" onClick={() => setCat("alles")}>{CATS.find((c) => c.id === cat)?.label} ✕</button>}
-                  {set && <button className="chip aan" onClick={() => setSet("")}>{setLijst.find((x) => x.id === set)?.naam ?? set} ✕</button>}
-                  {[...filters].map((f) => <button key={f} className="chip aan" onClick={() => wissel(f)}>{SNELFILTERS.find((x) => x.id === f)?.label} ✕</button>)}
+                  {f.zoek.trim() && <button className="chip aan" onClick={() => zet({ zoek: "" })}>"{f.zoek.trim()}" ✕</button>}
+                  {f.cat !== "alles" && <button className="chip aan" onClick={() => zet({ cat: "alles" })}>{f.cat === "slab" ? "Slabs" : "Singles"} ✕</button>}
+                  {f.set && <button className="chip aan" onClick={() => zet({ set: "" })}>{setLijst.find((x) => x.id === f.set)?.naam ?? f.set} ✕</button>}
+                  {[...f.filters].map((x) => <button key={x} className="chip aan" onClick={() => wissel(x)}>{SNELFILTERS.find((y) => y.id === x)?.label} ✕</button>)}
                 </div>
               )}
               {actief > 1 && <button className="knop zacht" onClick={wisAlles}>Wis alle filters</button>}
             </div>
-          ) : sort === "set" ? (
+          ) : f.sort === "set" ? (
             <div className="set-groepen">
               {(() => {
                 let teller = 0;
@@ -394,11 +565,73 @@ function Catalogus() {
           )}
         </>
       )}
+    </>
+  );
+}
 
-      <Voet ig={ig} beurzen={beurzen} />
+// ── Binders, 3D-prints en sealed ─────────────────────────────────────────────
 
-      {open && <Detail g={open} beurzen={beurzen} sets={sets} onSluit={() => setOpen(null)} />}
-      {data && <Eend ig={ig} verborgen={!!open || zoekFocus || !groepen.length} />}
+const PLEK_TEKST: Record<Exclude<Plek, "kaarten">, { titel: string; uitleg: string; leeg: string }> = {
+  binders: {
+    titel: "Binders",
+    uitleg: "Ontworpen en gelaserd door Bind'r. Ligt er één niet op de stand? Vraag ernaar, we hebben ze mee.",
+    leeg: "Onze binders staan binnenkort online. Je ziet ze nu al aan onze stand en op Instagram.",
+  },
+  "3d": { titel: "3D-prints", uitleg: "Zelf geprint: standaards, deckboxen en andere handige spullen voor je kaarten.", leeg: "Er staan nog geen 3D-prints online. Kom kijken aan onze stand." },
+  sealed: { titel: "Sealed", uitleg: "Boosters, displays en ander sealed product. Zolang de voorraad strekt.", leeg: "Er staat nog geen sealed online. Kom kijken aan onze stand." },
+};
+
+function Artikels({ plek, data, stukken, beurzen, sets, onOpen }: {
+  plek: Exclude<Plek, "kaarten">; data: Data | null; stukken: Stuk[]; beurzen: KomendeBeurs[]; sets: SetInfo | null; onOpen: (g: Groep<Stuk>) => void;
+}) {
+  const t = PLEK_TEKST[plek];
+  const groepen = useMemo(() => sorteer(
+    groepeer(stukken.filter((s) => s.plek === plek), (s) => (s.bron === "artikel" ? `a|${s.id}` : groepSleutel(s))),
+    "prijs-hoog", (x) => x.eerste, sets,
+  ), [stukken, plek, sets]);
+  return (
+    <>
+      <header className="sectie-kop">
+        <h1>{t.titel}</h1>
+        <p>{t.uitleg}</p>
+      </header>
+      {!data ? <LaadRaster /> : !groepen.length ? (
+        <div className="klant-leeg">
+          <img src={`${BASIS}img/eend.png`} alt="" width={96} height={96} />
+          <p>{t.leeg}</p>
+          {beurzen[0] && <p className="zacht">Volgende beurs: {beurzen[0].naam}, {datumMooi(beurzen[0].datum)}.</p>}
+          <a className="knop zacht" href="#">Naar de start</a>
+        </div>
+      ) : plek === "binders" ? (
+        <div className="binders-rij">
+          {groepen.map((g, i) => {
+            const s = g.eerste;
+            return (
+              <button key={g.sleutel} className="binder-kaart" style={{ ["--i" as string]: Math.min(i, 12) }} onClick={() => onOpen(g)}>
+                <ArtikelBeeld s={s} />
+                <span className="binder-tekst">
+                  <strong>{s.binder?.artwork || s.naam}</strong>
+                  {s.binder && binderTekst(s.binder) && <span>{binderTekst(s.binder)}</span>}
+                </span>
+                <span className="binder-onder">
+                  <Prijs p={s.prijs} />
+                  <em>{s.uitgestald === false ? "vraag ernaar" : `nog ${aantalVan(g)}`}</em>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="raster">{groepen.map((g, i) => <KlantTegel key={g.sleutel} g={g} i={i} onOpen={() => onOpen(g)} />)}</div>
+      )}
+    </>
+  );
+}
+
+function LaadRaster() {
+  return (
+    <div className="raster laad-raster" aria-label="Laden">
+      {Array.from({ length: 6 }, (_, i) => <div key={i} className="tegel laad-tegel" style={{ ["--i" as string]: i }}><div className="foto" /><span /><span /></div>)}
     </div>
   );
 }
@@ -411,10 +644,13 @@ function KlantTegel({ g, i, onOpen }: { g: Groep<Stuk>; i: number; onOpen: () =>
   const nieuw = isNieuw(s);
   const slab = s.bron === "kaart" && s.soort === "slab";
   const holo = s.bron === "kaart" && s.prijs >= 50 && !slab;
+  const onder = s.bron === "artikel"
+    ? (s.type === "sealed" ? "Sealed" : s.type === "3d-print" ? "3D-print" : s.binder ? binderTekst(s.binder) || "Bind'r-binder" : s.soort === "eigen product" ? "Bind'r" : "")
+    : [s.set_code, s.nummer].filter(Boolean).join(" ") || (s.soort === "eigen product" ? "Bind'r" : "");
   return (
     <button className={`tegel${holo ? " holo" : ""}${slab ? " slab" : ""}${s.bron === "artikel" ? " artikel-tegel" : ""}`} style={{ ["--i" as string]: Math.min(i, 24) }} onClick={onOpen} {...kantel}
       aria-label={`${s.naam}, ${euro(s.prijs)}${n > 1 ? `, ${n} stuks` : ""}`}>
-      {s.bron === "artikel"
+      {s.bron === "artikel" || s.soort === "eigen product"
         ? <ArtikelBeeld s={s} />
         : s.soort === "slab"
           ? <div className="slab-hoes"><span className="slab-label"><b>{s.grader || "Graded"}</b><em>{s.grade}</em></span><Foto kaart={s} alt={s.naam} /></div>
@@ -424,7 +660,7 @@ function KlantTegel({ g, i, onOpen }: { g: Groep<Stuk>; i: number; onOpen: () =>
       {nieuw && <span className="nieuw-merk">Nieuw</span>}
       <div className="tegel-info">
         <div className="tegel-naam">{s.naam}</div>
-        <div className="tegel-set">{s.bron === "artikel" ? (s.binder ? binderTekst(s.binder) || "Bind'r-binder" : s.soort === "eigen product" ? "Bind'r" : "Sealed") : [s.set_code, s.nummer].filter(Boolean).join(" ") || (s.soort === "eigen product" ? "Bind'r" : "")}</div>
+        <div className="tegel-set">{onder}</div>
         <div className="tegel-onder">
           <span className="badges">
             {s.bron === "kaart" && (s.soort === "slab" ? <span className="badge">{[s.grader, s.grade].filter(Boolean).join(" ") || "Graded"}</span> : s.conditie && <span className="badge">{s.conditie}</span>)}
@@ -449,36 +685,6 @@ function ArtikelBeeld({ s }: { s: Stuk }) {
   );
 }
 
-/** Onze binders, groot in beeld: ook die niet uitgestald liggen. */
-function Binders({ binders, onOpen }: { binders: Groep<Stuk>[]; onOpen: (g: Groep<Stuk>) => void }) {
-  return (
-    <section className="binders" aria-label="Onze binders">
-      <div className="binders-kop">
-        <h2>Onze binders</h2>
-        <p>Handgemaakt door Bind'r. Staat er één niet op de stand? Vraag ernaar, we hebben ze mee.</p>
-      </div>
-      <div className="binders-rij">
-        {binders.map((g, i) => {
-          const s = g.eerste;
-          return (
-            <button key={g.sleutel} className="binder-kaart" style={{ ["--i" as string]: i }} onClick={() => onOpen(g)}>
-              <ArtikelBeeld s={s} />
-              <span className="binder-tekst">
-                <strong>{s.binder?.artwork || s.naam}</strong>
-                <span>{s.binder ? binderTekst(s.binder) : ""}</span>
-              </span>
-              <span className="binder-onder">
-                <Prijs p={s.prijs} />
-                <em>{s.uitgestald ? `nog ${aantalVan(g)}` : "vraag ernaar"}</em>
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 /** Kaartfoto met reservebronnen (TCGdex, dan Limitless, dan pokemontcg.io). */
 function Foto({ kaart, alt, groot = false }: { kaart: FotoKaart; alt: string; groot?: boolean }) {
   const bronnen = useMemo(() => fotoBronnen(kaart, groot ? "groot" : "klein"), [kaart.afbeelding, kaart.set_code, kaart.nummer, kaart.kaart_id, kaart.foto, kaart.taal, groot]);
@@ -494,22 +700,31 @@ function Foto({ kaart, alt, groot = false }: { kaart: FotoKaart; alt: string; gr
   );
 }
 
-const MAANDEN = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
-const DAGEN = ["zo", "ma", "di", "wo", "do", "vr", "za"];
-function datumMooi(iso: string): string {
-  const d = new Date(iso + "T12:00:00");
-  return `${DAGEN[d.getDay()]} ${d.getDate()} ${MAANDEN[d.getMonth()]}`;
-}
-
 function Detail({ g, beurzen, sets, onSluit }: { g: Groep<Stuk>; beurzen: KomendeBeurs[]; sets: SetInfo | null; onSluit: () => void }) {
   const s = g.eerste;
   const n = aantalVan(g);
+  const [groot, setGroot] = useState(false);
+  const grootRef = useRef(groot);
+  grootRef.current = groot;
+  // Tikken (niet draaien) op de foto toont ze over het hele scherm.
+  const tik = useRef<{ x: number; y: number; t: number } | null>(null);
   useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onSluit();
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { if (grootRef.current) setGroot(false); else onSluit(); } };
     window.addEventListener("keydown", esc);
     document.body.classList.add("geen-scroll");
     return () => { window.removeEventListener("keydown", esc); document.body.classList.remove("geen-scroll"); };
   }, [onSluit]);
+  const vergroot = {
+    role: "button", tabIndex: 0, "aria-label": `${s.naam} in het groot`,
+    onPointerDown: (e: WijsEvent) => { tik.current = { x: e.clientX, y: e.clientY, t: Date.now() }; },
+    onPointerUp: (e: WijsEvent) => { const t0 = tik.current; tik.current = null; if (t0 && Math.hypot(e.clientX - t0.x, e.clientY - t0.y) < 10 && Date.now() - t0.t < 500) setGroot(true); },
+    onKeyDown: (e: ToetsEvent) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setGroot(true); } },
+  } as const;
+  const beeld = () => (s.bron === "kaart" && s.soort !== "eigen product"
+    ? s.soort === "slab"
+      ? <div className="slab-hoes groot"><span className="slab-label"><b>{s.grader || "Graded"}</b><em>{s.grade}</em></span><Foto kaart={s} alt={s.naam} groot /></div>
+      : <Foto kaart={s} alt={s.naam} groot />
+    : <ArtikelBeeld s={s} />);
   return (
     <div className="sheet-achtergrond" onClick={(e) => e.target === e.currentTarget && onSluit()}>
       <div className="sheet klant-sheet" role="dialog" aria-modal="true" aria-label={s.naam}>
@@ -521,42 +736,39 @@ function Detail({ g, beurzen, sets, onSluit }: { g: Groep<Stuk>; beurzen: Komend
         <div className="sheet-inhoud">
           <div className="klant-detail">
             <div className="klant-detail-links">
-            {s.bron === "kaart" ? (
-              <div className={`klant-detail-foto zweeft${s.prijs >= 50 && s.soort !== "slab" ? " holo" : ""}`}><div className="kantel-vlak" {...kantelVrij}>
-                {s.soort === "slab"
-                  ? <div className="slab-hoes groot"><span className="slab-label"><b>{s.grader || "Graded"}</b><em>{s.grade}</em></span><Foto kaart={s} alt={s.naam} groot /></div>
-                  : <Foto kaart={s} alt={s.naam} groot />}
-              </div></div>
-            ) : (
-              <div className="klant-detail-foto zweeft"><div className="kantel-vlak" {...kantelVrij}><ArtikelBeeld s={s} /></div></div>
-            )}
+              <div className={`klant-detail-foto zweeft${s.bron === "kaart" && s.prijs >= 50 && s.soort === "kaart" ? " holo" : ""}`} {...vergroot}>
+                <div className="kantel-vlak" {...kantelVrij}>{beeld()}</div>
+              </div>
+              <span className="vergroot-hint">Tik op de foto om ze groter te zien</span>
             </div>
             <div className="klant-detail-rechts">
-            <div className="detail-prijsrij">
-              {n > 1 && <span className="aantal-label">{n} beschikbaar</span>}
-              {isNieuw(s) && <span className="nieuw-label">Nieuw binnen</span>}
-            </div>
-            {s.naam_origineel && <p className="naam-origineel">{s.naam_origineel}</p>}
-            <dl className="gegevens">
-              {s.bron === "artikel" ? (
-                <>
-                  <dt>Soort</dt><dd>{s.binder ? "Bind'r-binder" : s.soort === "eigen product" ? "Bind'r-product" : "Sealed"}</dd>
-                  {s.binder?.artwork && <><dt>Artwork</dt><dd>{s.binder.artwork}</dd></>}
-                  {s.binder?.techniek && <><dt>Techniek</dt><dd>{TECHNIEK_NAAM[s.binder.techniek] ?? s.binder.techniek}</dd></>}
-                  {s.binder?.grootte && <><dt>Grootte</dt><dd>{s.binder.grootte}{s.binder.toploader ? ", voor toploaders" : ""}</dd></>}
-                  {s.binder?.merk && <><dt>Binder</dt><dd>{s.binder.merk}</dd></>}
-                  <dt>Beschikbaar</dt><dd>{n > 5 ? "ja" : `nog ${n}`}{s.uitgestald === false ? " (niet uitgestald: vraag ernaar aan onze stand)" : ""}</dd>
-                </>
-              ) : (
-                <>
-                  {(s.set_naam || s.set_code) && <><dt>Set</dt><dd>{setNaam(setIdVan(s), s.set_naam, sets)}{sets?.[setIdVan(s)]?.[5] ? <span className="zacht"> (≈ {sets[setIdVan(s)][5]})</span> : null}</dd></>}
-                  {(s.set_code || s.nummer) && <><dt>Nummer</dt><dd>{[s.set_code, s.nummer].filter(Boolean).join(" ")}</dd></>}
-                  {s.soort === "slab" ? <><dt>Grade</dt><dd>{[s.grader, s.grade].filter(Boolean).join(" ")}</dd></> : s.conditie && <><dt>Conditie</dt><dd>{CONDITIE[s.conditie] ?? s.conditie}</dd></>}
-                  {s.soort !== "eigen product" && <><dt>Taal</dt><dd>{taalNaam(s.taal)}</dd></>}
-                  {s.variant && s.variant !== "normaal" && <><dt>Variant</dt><dd>{s.variant}</dd></>}
-                </>
-              )}
-            </dl>
+              <div className="detail-prijsrij">
+                {n > 1 && <span className="aantal-label">{n} beschikbaar</span>}
+                {isNieuw(s) && <span className="nieuw-label">Nieuw binnen</span>}
+              </div>
+              {s.naam_origineel && <p className="naam-origineel">{s.naam_origineel}</p>}
+              <dl className="gegevens">
+                {s.bron === "artikel" ? (
+                  <>
+                    <dt>Soort</dt><dd>{s.binder ? "Bind'r-binder" : s.type === "3d-print" ? "3D-print van Bind'r" : s.type === "sealed" ? "Sealed" : s.soort === "eigen product" ? "Bind'r-product" : "Artikel"}</dd>
+                    {s.binder?.artwork && <><dt>Artwork</dt><dd>{s.binder.artwork}</dd></>}
+                    {s.binder?.techniek && <><dt>Techniek</dt><dd>{TECHNIEK_NAAM[s.binder.techniek] ?? s.binder.techniek}</dd></>}
+                    {s.binder?.grootte && <><dt>Grootte</dt><dd>{s.binder.grootte}{s.binder.toploader ? ", voor toploaders" : ""}</dd></>}
+                    {s.binder?.merk && <><dt>Binder</dt><dd>{s.binder.merk}</dd></>}
+                    <dt>Beschikbaar</dt><dd>{n > 5 ? "ja" : `nog ${n}`}{s.uitgestald === false ? " (niet uitgestald: vraag ernaar aan onze stand)" : ""}</dd>
+                  </>
+                ) : s.soort === "eigen product" ? (
+                  <><dt>Soort</dt><dd>Bind'r-product</dd><dt>Beschikbaar</dt><dd>{n > 1 ? `nog ${n}` : "één stuk"}</dd></>
+                ) : (
+                  <>
+                    {(s.set_naam || s.set_code) && <><dt>Set</dt><dd>{setNaam(setIdVan(s), s.set_naam, sets)}{sets?.[setIdVan(s)]?.[5] ? <span className="zacht"> (≈ {sets[setIdVan(s)][5]})</span> : null}</dd></>}
+                    {(s.set_code || s.nummer) && <><dt>Nummer</dt><dd>{[s.set_code, s.nummer].filter(Boolean).join(" ")}</dd></>}
+                    {s.soort === "slab" ? <><dt>Grade</dt><dd>{[s.grader, s.grade].filter(Boolean).join(" ")}</dd></> : s.conditie && <><dt>Conditie</dt><dd>{CONDITIE[s.conditie] ?? s.conditie}</dd></>}
+                    <dt>Taal</dt><dd>{taalNaam(s.taal)}</dd>
+                    {s.variant && s.variant !== "normaal" && <><dt>Variant</dt><dd>{s.variant}</dd></>}
+                  </>
+                )}
+              </dl>
             </div>
           </div>
         </div>
@@ -566,12 +778,19 @@ function Detail({ g, beurzen, sets, onSluit }: { g: Groep<Stuk>; beurzen: Komend
             <strong>Interesse? Vraag ernaar aan onze stand.</strong>
             <span>{beurzen.length
               ? beurzen[0].datum === vandaagLokaal()
-                ? <>Vandaag op {beurzen[0].naam}{beurzen[0].locatie ? ` · ${beurzen[0].locatie}` : ""}</>
-                : <>Volgende beurs: {beurzen[0].naam}, {datumMooi(beurzen[0].datum)}{beurzen[0].locatie ? ` · ${beurzen[0].locatie}` : ""}</>
+                ? <>Vandaag op {beurzen[0].naam}{beurzen[0].locatie ? `, ${beurzen[0].locatie}` : ""}</>
+                : <>Volgende beurs: {beurzen[0].naam}, {datumMooi(beurzen[0].datum)}</>
               : "Je vindt ons op de komende beurzen."}</span>
           </div>
         </div>
       </div>
+      {groot && (
+        <div className="foto-groot" role="dialog" aria-modal="true" aria-label={s.naam} onClick={() => setGroot(false)}>
+          <button className="rond-knop foto-groot-sluit" onClick={() => setGroot(false)} aria-label="Sluiten" autoFocus>✕</button>
+          <div className="foto-groot-kaart">{beeld()}</div>
+          <div className="foto-groot-tekst"><strong>{s.naam}</strong>{s.bron === "kaart" && s.soort !== "eigen product" && <span>{[s.set_code, s.nummer].filter(Boolean).join(" ")}</span>}</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -585,34 +804,20 @@ function Prijs({ p, groot = false }: { p: number; groot?: boolean }) {
   );
 }
 
-// ── Instagram: onderaan de pagina en de eend ─────────────────────────────────
+// ── Onderaan: Instagram en het logo ──────────────────────────────────────────
 
-function Voet({ ig, beurzen }: { ig: string; beurzen: KomendeBeurs[] }) {
+function Voet({ ig }: { ig: string }) {
   return (
     <footer className="klant-voet">
-      <section className="komende-beurzen">
-        <h2>Bezoek onze stand</h2>
-        {beurzen.length ? (
-          <ul>
-            {beurzen.slice(0, 6).map((b) => (
-              <li key={b.datum + b.naam}>
-                <span className="beurs-datum"><strong>{new Date(b.datum + "T12:00:00").getDate()}</strong><em>{MAANDEN[new Date(b.datum + "T12:00:00").getMonth()]}</em></span>
-                <span className="beurs-tekst"><strong>{b.naam}</strong>{b.locatie && <span>{b.locatie}</span>}</span>
-              </li>
-            ))}
-          </ul>
-        ) : <p>De volgende beurzen staan binnenkort hier. Volg ons op Instagram om niets te missen.</p>}
-      </section>
       <a className="ig-blok" href={igProfiel(ig)} target="_blank" rel="noreferrer">
         <span className="ig-blok-icoon"><IgIcoon maat={28} /></span>
         <span className="ig-blok-tekst">
           <strong>Volg ons op Instagram</strong>
-          <span>Onze nieuwste custom binders, lasergravures en kaarten. @{ig}</span>
+          <span>Onze nieuwste binders, lasergravures en kaarten, en waar we binnenkort staan. @{ig}</span>
         </span>
-        <span className="ig-blok-pijl" aria-hidden="true">→</span>
       </a>
       <img src={`${BASIS}img/logo-woord.png`} alt="Bind'r" className="voet-logo" width={120} height={53} />
-      <p>Collectibles · Crafts · 3D prints</p>
+      <p>Collectibles, crafts en 3D-prints</p>
       <p className="zacht">Prijzen in euro, zolang de voorraad strekt.</p>
     </footer>
   );
@@ -678,6 +883,18 @@ const SlotIcoon = () => <Svg maat={16}><rect x="5" y="11" width="14" height="9" 
 const IgIcoon = ({ maat = 20 }: { maat?: number }) => <Svg maat={maat}><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><circle cx="12" cy="12" r="4" /><path d="M17 7h.01" /></Svg>;
 const ZoekIcoon = () => <Svg maat={18}><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></Svg>;
 const SorteerIcoon = () => <Svg maat={18}><path d="M7 4v16M3.5 16.5 7 20l3.5-3.5M17 20V4M13.5 7.5 17 4l3.5 3.5" /></Svg>;
+const PinIcoon = () => <Svg maat={16}><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11Z" /><circle cx="12" cy="10" r="2.4" /></Svg>;
+const KlokIcoon = () => <Svg maat={16}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></Svg>;
+const LinkIcoon = () => <Svg maat={18}><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1" /><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" /></Svg>;
+// Navigatie: start (het hartje uit de B van het logo), kaarten, een binder met stiksel, een kubus, een boosterpack.
+const StartIcoon = () => <Svg maat={22}><path d="M12 19.5s-7-4.3-7-9.6A3.9 3.9 0 0 1 12 7.6a3.9 3.9 0 0 1 7 2.3c0 5.3-7 9.6-7 9.6Z" /></Svg>;
+const KaartenIcoon = () => <Svg maat={22}><rect x="7.5" y="4" width="11" height="15" rx="1.8" transform="rotate(10 13 11.5)" /><rect x="4.5" y="5" width="11" height="15" rx="1.8" /></Svg>;
+const BinderIcoon = () => <Svg maat={22}><rect x="5" y="3.5" width="14" height="17" rx="2.2" /><path d="M8.5 3.5v17" /><path d="M11.5 7h4.5M11.5 7v10M16 7v10M11.5 17h4.5" strokeDasharray="1.6 1.8" /></Svg>;
+const KubusIcoon = () => <Svg maat={22}><path d="M12 3.5 19.5 7.6v8.8L12 20.5l-7.5-4.1V7.6Z" /><path d="M4.5 7.6 12 11.7l7.5-4.1M12 11.7v8.8" /></Svg>;
+const PackIcoon = () => <Svg maat={22}><path d="M6 3.5h12l-.9 1.5.9 1.5v11l-.9 1.5.9 1.5H6l.9-1.5L6 17.5v-11L6.9 5Z" /><path d="M9.5 12h5" /></Svg>;
+const OntwerpIcoon = () => <Svg maat={22}><path d="m14.5 5.5 4 4L9 19H5v-4Z" /><path d="m12.5 7.5 4 4" /></Svg>;
+const LaserIcoon = () => <Svg maat={22}><path d="M9 3.5h6v5H9Z" /><path d="M12 8.5v6" /><path d="M8.5 17.5 12 14.5l3.5 3M6 20.5h12" /></Svg>;
+const StandIcoon = () => <Svg maat={22}><path d="M3.5 9.5 6 4.5h12l2.5 5" /><path d="M3.5 9.5a2.8 2.8 0 0 0 5.67 0 2.8 2.8 0 0 0 5.66 0 2.8 2.8 0 0 0 5.67 0" /><path d="M5 12v8h14v-8" /></Svg>;
 const Sparkel = () => <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2c.6 4.6 2.4 7.4 10 10-7.6 2.6-9.4 5.4-10 10-.6-4.6-2.4-7.4-10-10 7.6-2.6 9.4-5.4 10-10Z" /></svg>;
 
-createRoot(document.getElementById("app")!).render(<Catalogus />);
+createRoot(document.getElementById("app")!).render(<KlantPagina />);

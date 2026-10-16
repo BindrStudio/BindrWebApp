@@ -34,8 +34,8 @@ export function Instellingen() {
         </Groep>
 
         <Groep titel="Boekhouding">
-          <p className="groep-uitleg">Komt op elk aankoopborderel en rapport (Profiel › Boekhouding).</p>
-          <BedrijfVelden />
+          <p className="groep-uitleg">Per omgeving: werk je als zaak (met boekhouding) of als particulier? De gegevens komen op elk aankoopbewijs en rapport (Profiel › Boekhouding).</p>
+          <BedrijfVelden key={s.omgeving ?? "standaard"} />
         </Groep>
 
         <Groep titel="Prijzen">
@@ -149,7 +149,7 @@ function Klantencatalogus() {
   const bekijk = klantUrl(backend?.soort === "demo");
   return (
     <Groep titel="Klantencatalogus">
-      <p className="groep-uitleg">De pagina die klanten zien via onze link, zonder login: wat in de catalogus van de aangevinkte omgevingen ligt, met foto, conditie en prijs. Kaarten waarvan het hartje eerst moet wisselen, blijven verborgen tot het nieuwe hartje bewaard is. Rechtsboven staat de knop Beheer.</p>
+      <p className="groep-uitleg">De pagina die klanten zien via onze link, zonder login: eerst wie we zijn, wat we aanbieden en onze komende beurzen (Profiel › Beurzen), dan de kaarten, binders, 3D-prints en sealed van de aangevinkte omgevingen. Kaarten waarvan het hartje eerst moet wisselen, blijven verborgen tot het nieuwe hartje bewaard is. Welke artikels klanten zien, kies je per artikel. Rechtsboven staat de knop Beheer.</p>
       {omgevingen.length > 0 && omgevingen.map((o) => (
         <label key={o.id} className="schakel rij">
           <input type="checkbox" checked={o.zichtbaar_voor_klanten} onChange={(e) => zetZichtbaarVoorKlanten(o.id, e.target.checked)} />
@@ -182,9 +182,10 @@ function Klantencatalogus() {
       {qr && (
         <Sheet titel="Catalogus voor klanten" onSluit={() => setQr(false)}>
           <div className="stand-qr">
-            <QrBeeld tekst={url} />
-            <p><strong>Scan en bekijk onze catalogus</strong></p>
-            <p className="zacht klein">{url}</p>
+            <QrBeeld tekst={`${url}#kaarten`} />
+            <p><strong>Scan en bekijk onze kaarten</strong></p>
+            <p className="zacht klein">{url}#kaarten</p>
+            <p className="zacht klein">De QR opent meteen de kaarten. Wie de gewone link opent, ziet eerst wie we zijn en onze komende beurzen.</p>
           </div>
         </Sheet>
       )}

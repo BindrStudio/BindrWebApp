@@ -197,9 +197,19 @@ function fouten(page) {
   await wacht(400);
   assert.match(await page.locator(".kop-sub").first().innerText(), /^0 exemplaren|Nog niets|leeg/i);
   await foto("04b-omgeving-brent");
+  stap("Brent werkt als particulier: boekhouding uit, enkel voor Brent");
+  await page.getByRole("button", { name: "Instellingen" }).click();
+  await sheet().getByLabel(/Boekhouding voor Brent/).uncheck();
+  await page.getByText("Brent werkt nu als particulier").waitFor();
+  await page.keyboard.press("Escape"); await wacht(200);
+  await tab("Profiel"); await wacht(300);
+  assert.equal(await page.locator(".profiel-tegel.boekhouding, .profiel-tegel.prive").count(), 0, "geen boekhouding of privé als particulier");
+  assert.equal(await page.getByText("Waar werk je?").count(), 0, "de omgeving kies je bovenaan, niet in Profiel");
   await page.locator(".omgeving-pil").click();
   await sheet().getByRole("button", { name: /Bind'r/ }).click();
   await wacht(400);
+  assert.equal(await page.locator(".profiel-tegel.boekhouding").count(), 1, "Bind'r werkt met boekhouding");
+  await tab("Catalogus"); await wacht(300);
   assert.match(await page.locator(".kop-sub").first().innerText(), /85 exemplaren/);
 
   // ── B. Beurs starten ───────────────────────────────────────────────────────
@@ -211,6 +221,19 @@ function fouten(page) {
   await sheet().getByLabel("Plaats").fill("Antwerp Expo");
   await sheet().getByRole("button", { name: "Beurs plannen" }).click();
   await page.locator(".beurs-volgende", { hasText: "Beurs Antwerpen" }).waitFor();
+  // Later aanvullen in Profiel › Beurzen: de uren en de website.
+  await tab("Profiel");
+  await page.locator(".profiel-tegel.beurzen").click();
+  await sheet().locator(".komend-rij", { hasText: "Beurs Antwerpen" }).click();
+  await sheet().getByLabel("Uren (optioneel)").fill("10:00–17:00");
+  await sheet().getByLabel(/Website/).fill("javascript:alert(1)");
+  assert.ok(await sheet().getByRole("button", { name: "Bewaren" }).isDisabled(), "enkel een gewoon webadres");
+  await sheet().getByLabel(/Website/).fill("www.antwerpexpo.be");
+  await sheet().getByRole("button", { name: "Bewaren" }).click();
+  await page.locator(".sheet").last().locator(".komend-rij", { hasText: "10:00–17:00" }).waitFor();
+  await foto("05a-beurzen");
+  await page.keyboard.press("Escape"); await wacht(200);
+  await tab("Kassa");
 
   stap("B1/B4: beurs starten met startkas 150");
   await page.getByRole("button", { name: "Beurs starten" }).click();
@@ -310,7 +333,12 @@ function fouten(page) {
   assert.match(f1, /markt €\s?6/); // per kaart: de marktwaarde en wat we echt betalen
   await afrekenen(); await volgende();
   stap("F2 LP, F4 Chinees (bulk bestaat niet meer)");
-  await klantKaart([{ naam: "Inkoop LP", conditie: "LP", waarde: 30 }]); await bied(30); await afrekenen(); await volgende();
+  await klantKaart([{ naam: "Inkoop LP", conditie: "LP", waarde: 30 }]); await bied(30);
+  // Gekocht van een andere stand (enkel ter info, komt mee in de transactie).
+  await page.getByRole("button", { name: "Afrekenen" }).click();
+  await sheet().getByLabel(/Van een andere vendor/).check();
+  await sheet().getByRole("button", { name: "Uitbetaald" }).click();
+  await page.locator(".gelukt").waitFor(); await volgende();
   await klantKaart([{ naam: "Pikachu", taal: "CN-T", waarde: 8 }]); await bied(8); await afrekenen(); await volgende();
 
   stap("inkoop zoals aan de stand: kaart zoeken, marktwaarde, slider en afronden");
@@ -518,13 +546,33 @@ function fouten(page) {
   assert.match(await page.locator(".gelukt .borderel-knop").innerText(), /AB-\d{4}-[0-9A-F]{6}[\s\S]*in orde/);
   await volgende();
 
-  stap("kas: een andere stand betaalt 50 met SumUp en krijgt cash");
+  stap("kas: enkel tijdens een beurs; een andere stand betaalt 50 met SumUp en krijgt cash");
+  assert.equal(await page.getByRole("button", { name: "Kas", exact: true }).count(), 0, "zonder beurs geen kas");
+  await page.getByRole("button", { name: "Beurs starten" }).click();
+  await sheet().getByLabel("Naam").fill("Avondmarkt");
+  await sheet().getByLabel(/Startbedrag in de cashkoffer/).fill("100");
+  await sheet().getByRole("button", { name: "Beurs starten" }).click();
+  await wacht(200);
   await page.getByRole("button", { name: "Kas", exact: true }).click();
   await sheet().getByRole("button", { name: "Wissel via SumUp" }).click();
   await sheet().getByLabel("Bedrag").fill("50");
   await sheet().getByLabel("Welke stand (optioneel)").fill("Kaartenkelder");
   await sheet().getByRole("button", { name: /SumUp €\s?50(,00)? in/ }).click();
   await page.getByText(/SumUp €\s?50(,00)? ontvangen/).waitFor();
+  // Tijdens een beurs kan je niet "buiten een beurs" inkopen (dat zou de kas verstoren).
+  await tab("Profiel");
+  const thuis = page.locator(".profiel-tegel", { hasText: "Ingekocht buiten een beurs" });
+  assert.match(await thuis.innerText(), /Kan niet zolang Avondmarkt loopt/);
+  await thuis.dispatchEvent("click");
+  await page.getByText(/Avondmarkt loopt nog/).waitFor();
+  await tab("Kassa");
+  await page.getByRole("button", { name: "Afsluiten" }).click();
+  await sheet().getByLabel("Geteld in de cashkoffer (€)").fill("50");
+  await sheet().getByText("De kas klopt.").waitFor();
+  await sheet().getByLabel("Klopt met het totaal in de SumUp-app").check();
+  await sheet().getByRole("button", { name: "Beurs stoppen" }).click();
+  await wacht(200);
+  await page.keyboard.press("Escape"); await wacht(200);
 
   stap("boekhouding: dagontvangsten, borderel, voorraad op een datum");
   await tab("Profiel");
@@ -587,6 +635,9 @@ function fouten(page) {
   stap("deal terugdraaien: de verkoper wil zijn kaarten terug en betaalt ons terug");
   await page.locator(".profiel-tegel", { hasText: "Historiek" }).click();
   await sheet().getByRole("button", { name: "Alle transacties" }).click();
+  assert.ok(await sheet().locator(".tr-waar.beurs", { hasText: "Testbeurs Gent" }).count() > 5, "bij elke transactie staat waar ze gebeurde");
+  assert.equal(await sheet().locator(".tr-waar.vendor").count(), 1, "de aankoop bij een andere vendor");
+  await foto("31b-historiek-waar");
   await sheet().locator(".transactie-rij", { hasText: "Vintage Base" }).first().click();
   await sheet().getByRole("button", { name: "Retour of terugdraaien" }).click();
   for (const n of ["Vintage Base", "Modern A", "Modern B"]) await sheet().locator(".regel", { hasText: n }).locator("input[type=checkbox]").check();
@@ -657,6 +708,14 @@ function fouten(page) {
   await sheet().getByRole("heading", { name: "Ingebracht uit privé" }).waitFor();
   assert.match(await sheet().locator(".gelukt .borderel-knop").innerText(), /PB-\d{4}-/);
   await sheet().getByRole("button", { name: "Nog iets" }).click();
+  // Wat met een factuur gekocht werd, gaat uit de lijst (die kost staat al in Dexxter).
+  const voorFactuur = Number((await sheet().getByRole("button", { name: /^Al in de app/ }).innerText()).match(/\d+/)[0]);
+  await sheet().getByRole("button", { name: "Niets kiezen" }).click();
+  await sheet().locator(".inbreng-lijst li > button").nth(0).click();
+  await sheet().getByRole("button", { name: "Gekocht met factuur" }).click();
+  await sheet().getByRole("button", { name: "Ja, deze kaart" }).click();
+  await page.getByText(/aangeduid als gekocht met factuur/).waitFor();
+  assert.match(await sheet().getByRole("button", { name: /^Al in de app/ }).innerText(), new RegExp(`\\(${voorFactuur - 1}\\)`));
   await sheet().getByRole("button", { name: "Nieuwe kaart" }).click();
   await sheet().getByRole("button", { name: "Kaart toevoegen" }).click();
   await sheet().getByRole("button", { name: "Handmatig", exact: true }).click();
@@ -666,10 +725,11 @@ function fouten(page) {
   await sheet().getByRole("button", { name: /^Toevoegen/ }).click();
   await wacht(150);
   await sheet().getByRole("button", { name: /^Klaar/ }).last().click();
-  await sheet().locator(".afreken-netto", { hasText: /€\s?70/ }).waitFor();
-  await sheet().locator(".prive-pct .chip", { hasText: "100%" }).click();
-  assert.match(await sheet().locator(".prive-pct").innerText(), /boekhouder/);
-  await sheet().locator(".prive-pct .chip", { hasText: "aangeraden" }).click();
+  // Inbreng aan 100% van de marktwaarde, per kaart zelf aan te passen.
+  await sheet().locator(".afreken-netto", { hasText: /€\s?100/ }).waitFor();
+  await sheet().getByLabel("Waarde van Eigen Mew").fill("90");
+  await sheet().locator(".afreken-netto", { hasText: /€\s?90/ }).waitFor();
+  assert.match(await sheet().locator(".inbreng-waarde").innerText(), /eigen schatting/);
   await foto("35-prive");
   await geenHorizontaleScroll("privé");
   await sheet().getByRole("button", { name: "Inbrengen in Bind'r" }).click();
@@ -697,21 +757,31 @@ function fouten(page) {
   const fk = fouten(klant);
   await klant.goto(BASIS + "catalogus/?demo=1");
   await klant.waitForURL((u) => !u.pathname.includes("/catalogus/"));
+  // De start: wie we zijn, wat we aanbieden (een binderpagina met vier vakken), onze komende beurzen.
+  await klant.getByRole("heading", { name: "Binders die even uniek zijn als je collectie" }).waitFor();
+  assert.ok(await klant.locator(".klant-merk img").isVisible(), "logo linksboven");
+  assert.match(await klant.locator(".klant-ig-knop").getAttribute("href"), /instagram\.com\/bindr\.test\//);
+  assert.equal(await klant.locator(".pocketpagina .pocket").count(), 4, "kaarten, binders, 3D-prints en sealed");
+  assert.match(await klant.locator(".beurzen").innerText(), /Beurs Antwerpen[\s\S]*Antwerp Expo[\s\S]*10:00–17:00/, "geplande beurs op de klantenpagina, met de uren");
+  assert.equal(await klant.locator(".ticket a", { hasText: "Website van de beurs" }).getAttribute("href"), "https://www.antwerpexpo.be/");
+  assert.match(await klant.locator(".ticket .ticket-nog").innerText(), /Over \d+ (dagen|weken)/);
+  await klant.waitForTimeout(2400); // de titel wordt gegraveerd
+  await klant.screenshot({ path: path.join(SHOTS, "14a-klant-start.png") });
+  await geenHorizontaleScroll("klantenpagina start", klant);
+  assert.equal(await klant.locator(".tabbalk, .kop-knoppen, .beurs-balk").count(), 0, "geen beheer op de klantenpagina");
+  // Naar de kaarten via het vak op de binderpagina; de rest via de balk onderaan.
+  await klant.locator(".pocket.kaarten").click();
+  await klant.waitForURL(/#kaarten$/);
   await klant.locator(".tegel").first().waitFor();
   const verwacht = await klant.evaluate(() => {
     const d = JSON.parse(localStorage.getItem("bindr-demo-v1"));
-    return d.exemplaren.filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null && e.nieuw_hartje == null && e.label_status === "gestickerd").length
-      + d.artikelen.filter((a) => a.opslag === "vitrine" && a.aantal > 0 && a.prijs != null).reduce((s, a) => s + a.aantal, 0);
+    return d.exemplaren.filter((e) => e.soort !== "eigen product" && e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null && e.nieuw_hartje == null && e.label_status === "gestickerd").length;
   });
   const getoond = await klant.locator(".klant .tegel").evaluateAll((ts) => ts.reduce((s, t) => {
     const m = t.querySelector(".aantal-merk");
     return s + (m ? Number(m.textContent.replace("×", "")) : 1);
   }, 0));
-  assert.equal(getoond, verwacht, "klant ziet precies de catalogus (dubbels als één tegel met een aantal)");
-  assert.ok(await klant.locator(".klant-merk img").isVisible(), "logo linksboven");
-  assert.match(await klant.locator(".binders").innerText(), /Gengar[\s\S]*vraag ernaar/i, "binders, ook die in de vault liggen");
-  await klant.getByRole("heading", { name: "Hier vind je onze volledige catalogus" }).waitFor();
-  assert.match(await klant.locator(".klant-ig-knop").getAttribute("href"), /instagram\.com\/bindr\.test\//);
+  assert.equal(getoond, verwacht, "klant ziet precies de kaarten in de catalogus (dubbels als één tegel met een aantal)");
   const alle = await klant.locator(".klant .tegel").count();
   await klant.locator(".schakelchip", { hasText: "Andere talen" }).click();
   await klant.waitForTimeout(300);
@@ -729,17 +799,38 @@ function fouten(page) {
   await klant.locator(".sorteer select").selectOption("set");
   await klant.locator(".set-kop").first().waitFor();
   await klant.locator(".sorteer select").selectOption("nieuw");
-  assert.equal(await klant.locator(".tabbalk, .kop-knoppen, .beurs-balk").count(), 0, "geen beheer op de klantenpagina");
   await klant.screenshot({ path: path.join(SHOTS, "14-klant.png") });
-  await geenHorizontaleScroll("klantenpagina", klant);
-  assert.match(await klant.locator(".komende-beurzen").innerText(), /Beurs Antwerpen[\s\S]*Antwerp Expo/, "geplande beurs op de klantenpagina");
+  await geenHorizontaleScroll("klantenpagina kaarten", klant);
   await klant.locator(".tegel").first().click();
   await klant.locator(".detail-stand").waitFor();
   assert.match(await klant.locator(".detail-stand").innerText(), /stand/i);
-  assert.equal(await klant.getByRole("link", { name: /Bericht op Instagram/ }).count(), 0, "geen Instagram-bericht meer in het detail");
   await klant.waitForTimeout(500);
   await geenHorizontaleScroll("klantendetail", klant);
   await klant.screenshot({ path: path.join(SHOTS, "15-klant-detail.png") });
+  // Tik op de foto: de kaart in het groot; Escape sluit eerst dat, daarna het detail.
+  await klant.locator(".klant-detail-foto").click({ force: true });
+  await klant.locator(".foto-groot").waitFor();
+  await klant.waitForTimeout(400);
+  await klant.screenshot({ path: path.join(SHOTS, "15b-klant-groot.png") });
+  await klant.keyboard.press("Escape");
+  await klant.locator(".foto-groot").waitFor({ state: "detached" });
+  assert.equal(await klant.locator(".klant-sheet").count(), 1, "het detail blijft open");
+  await klant.keyboard.press("Escape");
+  // Binders: ook die in de vault liggen ("vraag ernaar"); filters van de kaarten blijven staan.
+  await klant.locator(".klant-nav.onder a", { hasText: "Binders" }).click();
+  await klant.waitForURL(/#binders$/);
+  await klant.locator(".binder-kaart").first().waitFor();
+  assert.match(await klant.locator(".binders-rij").innerText(), /Gengar[\s\S]*vraag ernaar/i, "binders, ook die in de vault liggen");
+  await klant.screenshot({ path: path.join(SHOTS, "14c-klant-binders.png") });
+  await geenHorizontaleScroll("klantenpagina binders", klant);
+  for (const [naam, hash] of [["3D-prints", "3d"], ["Sealed", "sealed"]]) {
+    await klant.locator(".klant-nav.onder a", { hasText: naam }).click();
+    await klant.waitForURL(new RegExp(`#${hash}$`));
+    await klant.locator(".sectie-kop h1", { hasText: naam }).waitFor();
+    assert.ok(await klant.locator(".klant .tegel").count() > 0, `${naam} op de klantenpagina`);
+  }
+  await klant.locator(".klant-nav.onder a", { hasText: "Start" }).click();
+  await klant.locator(".pocketpagina").waitFor();
   assert.deepEqual(fk, [], "geen fouten op de klantenpagina");
   await klant.close();
 

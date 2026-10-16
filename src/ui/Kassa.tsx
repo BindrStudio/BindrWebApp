@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  actieveBeurs, afrekenen, alleCodes, huidig, inMandje, mandjeLegen, meld, ongedaanMaken, openTransactie, print, totaalAanpassen,
+  actieveBeurs, afrekenen, alleCodes, boekhoudingAan, huidig, inMandje, mandjeLegen, meld, ongedaanMaken, openTransactie, print, totaalAanpassen,
   bodPct, kanNieuweBoekhouding, kasbeweging, OUD_SCHEMA, sluit as sluitOpen, useApp, verwijderRegel, wijzigRegel, zetArtikelAantal, zetBod, zetInstellingen, zetPerKaart, zetRegelPct,
 } from "../state";
 import type { Artikel, CatalogusKaart, Exemplaar, Regel, Tegenpartij, Transactie } from "../types";
@@ -18,10 +18,10 @@ import { Badges, Hartje, Icoon, KaartFoto, Kiezer, Leeg, Segment, Sheet, Veld } 
 import { MandjeActie } from "./MandjeActie";
 import { Scanner, type FotoResultaat } from "./Scan";
 import { KiesKaart } from "./Toevoegen";
-import { BeursAfsluiten, BeursStart, geplandeBeurzen } from "./Beurs";
+import { BeursAfsluiten, BeursFormulier, BeursStart, geplandeBeurzen } from "./Beurs";
 import { BeursDashboard, BeurzenEnTransacties } from "./Historiek";
 import { GradedVelden, SoldLinks } from "./Graded";
-import { BewijsKnop, BewijsSheet, TegenpartijVelden } from "./Boekhouding";
+import { BewijsKnop, BewijsSheet, KanaalVeld, TegenpartijVelden, VendorSchakel } from "./Boekhouding";
 import { BEWIJS_GROOT, heeftBewijs } from "../lib/boekhouding";
 import { FotoKnop, FotoRij } from "./Fotos";
 import { HandtekeningBeeld, HandtekeningPad } from "./Handtekening";
@@ -61,7 +61,7 @@ export function Kassa() {
             : <p className="kop-sub">Geen beurs bezig</p>}
         </div>
         <div className="kop-knoppen">
-          <button className="pil-knop" onClick={() => setPaneel("kas")} title="Geld in of uit de koffer, wisselgeld"><Icoon naam="geld" maat={18} /> Kas</button>
+          {beurs && <button className="pil-knop" onClick={() => setPaneel("kas")} title="Geld in of uit de koffer, wisselgeld"><Icoon naam="geld" maat={18} /> Kas</button>}
           <button className="pil-knop" onClick={() => setPaneel("transacties")}><Icoon naam="historiek" maat={18} /> Historiek</button>
         </div>
       </header>
@@ -131,10 +131,10 @@ export function Kassa() {
       {paneel === "klantkaart" && <KlantKaart onSluit={naKlantKaarten} />}
       {paneel === "afrekenen" && <Afrekenen onSluit={sluit} onKlaar={(t, w) => { sluit(); setKlaar({ t, wisselgeld: w }); }} />}
       {paneel === "start" && <BeursStart onSluit={sluit} />}
-      {paneel === "plan" && <BeursStart plannen onSluit={sluit} />}
+      {paneel === "plan" && <BeursFormulier onSluit={sluit} />}
       {paneel === "afsluiten" && beurs && <BeursAfsluiten beurs={beurs} onSluit={sluit} />}
       {paneel === "transacties" && <BeurzenEnTransacties onSluit={sluit} />}
-      {paneel === "kas" && <KasSheet onSluit={sluit} />}
+      {paneel === "kas" && beurs && <KasSheet onSluit={sluit} />}
     </div>
   );
 }
@@ -795,7 +795,9 @@ function KlantKaartDetails({ kaart, onTerug, onKlaar, onRegel, bezet = [] }: {
 // ── Afrekenen ────────────────────────────────────────────────────────────────
 
 function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Transactie, wisselgeld: number | null) => void }) {
-  const { mandje, instellingen, transacties } = useApp();
+  const app = useApp();
+  const { mandje, instellingen, transacties } = app;
+  const metBoekhouding = boekhoudingAan(app); // als particulier: geen aankoopbewijs, enkel waar en wanneer
   const regels = mandje.regels;
   const n = netto(regels);
   const teVeelCash = Math.abs(n) > CASH_GRENS;
@@ -844,7 +846,7 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
     return [...new Set(opties)].filter((x) => x >= cashTeOntvangen).slice(0, 5);
   }, [cashTeOntvangen]);
 
-  const ingevuld = !!(tp.naam?.trim() || tp.handtekening || tp.adres?.trim() || tp.kanaal || tp.factuur?.trim());
+  const ingevuld = !!(tp.naam?.trim() || tp.handtekening || tp.adres?.trim() || tp.kanaal || tp.factuur?.trim() || tp.vendor || tp.met_factuur);
   const bevestig = () => {
     if (!betaling) return meld("Vul het cash-deel in", "fout");
     try {
@@ -909,8 +911,21 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
       {cashTeHoog && <p className="nakijken">Cash kan hoogstens {euro(CASH_GRENS, true)} zijn (wettelijke grens). {n > 0 ? "Laat de rest met SumUp of een overschrijving betalen." : "Betaal met een overschrijving."}</p>}
 
       {koopt && !nieuw && <p className="zacht klein">Foto's en het aankoopbewijs kunnen pas na de update van de database. Neem tot dan een foto met je gsm.</p>}
-      {koopt && nieuw && (
+      {koopt && nieuw && !metBoekhouding && (
         <section className="blok afreken-borderel">
+          {opBeurs ? <VendorSchakel waarde={tp} onChange={setTp} /> : (
+            <>
+              <KanaalVeld waarde={tp} onChange={setTp} />
+              <Veld label="Wanneer gekocht?">
+                <input type="date" value={datum} max={vandaag()} onChange={(e) => setDatum(e.target.value || vandaag())} />
+              </Veld>
+            </>
+          )}
+        </section>
+      )}
+      {koopt && nieuw && metBoekhouding && (
+        <section className="blok afreken-borderel">
+          {opBeurs && <VendorSchakel waarde={tp} onChange={setTp} />}
           <div className="afreken-borderel-kop">
             <span><strong>Aankoopbewijs</strong> <span className="zacht klein">een foto van de kaarten en een naam volstaan; mag ook later</span></span>
           </div>
@@ -970,7 +985,7 @@ function Gelukt({ t, wisselgeld, onVolgende }: { t: Transactie; wisselgeld: numb
       </p>
       {wisselgeld != null && wisselgeld > 0 && <p className="wisselgeld-bedrag">Wisselgeld <strong>{euro(wisselgeld)}</strong></p>}
       {huidigT.status === "conflict" && <button className="knop zacht rood" onClick={() => openTransactie(t.id)}>Conflict nakijken</button>}
-      {heeftBewijs(huidigT) && kanNieuweBoekhouding() && <BewijsKnop t={huidigT} onOpen={() => setBorderel(true)} />}
+      {heeftBewijs(huidigT) && kanNieuweBoekhouding() && boekhoudingAan() && <BewijsKnop t={huidigT} onOpen={() => setBorderel(true)} />}
       {borderel && <BewijsSheet id={t.id} onSluit={() => setBorderel(false)} />}
       <div className="knoppenrij">
         {tePrinten.length > 0 && huidigT.status !== "ongedaan" && (

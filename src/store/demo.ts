@@ -168,6 +168,11 @@ export class DemoBackend implements Backend {
     this.bewaar();
   }
 
+  async wijzigGeplandeBeurs(id: string, w: Pick<Beurs, "naam" | "datum" | "locatie" | "uren" | "link">) {
+    this.data.beurzen = this.data.beurzen.map((x) => (x.id === id && x.status === "gepland" ? { ...x, ...w } : x));
+    this.bewaar();
+  }
+
   private zetTransactie(t: Transactie) {
     const i = this.data.transacties.findIndex((x) => x.id === t.id);
     if (i < 0) this.data.transacties.push(t); else this.data.transacties[i] = t;

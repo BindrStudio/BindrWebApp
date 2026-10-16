@@ -1,7 +1,7 @@
 // Catalogusweergave: dubbels samen, filters, sorteren, bod en Cardmarket-info.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { groepeer, groepSleutel, pastFilters, perSet, setIdVan, sorteer, type Toonbaar, type Snelfilter } from "../src/lib/weergave";
+import { artikelZichtbaar, groepeer, groepSleutel, pastFilters, perSet, setIdVan, sorteer, type Toonbaar, type Snelfilter } from "../src/lib/weergave";
 import { bodVoorstellen, marktwaarde, pasBodToe, procentVan } from "../src/lib/bod";
 import { cardmarketLink, grapje, marktinfo, richtingVan, setTrend } from "../src/lib/markt";
 import type { Prijsgids } from "../src/lib/prices";
@@ -98,4 +98,21 @@ test("Cardmarket: richting, grapje, set-trend en link met filters", () => {
   assert.equal(Math.round(st.verandering * 1000), Math.round(((12.5 + 5.2 + 0.2 + 8.5 + 19 + 3) / (10 + 5 + 0.3 + 10 + 20 + 3) - 1) * 1000));
   assert.equal(cardmarketLink(512600, "EN"), "https://www.cardmarket.com/en/Pokemon/Products?idProduct=512600&language=1&minCondition=2&sellerCountry=2,23");
   assert.match(cardmarketLink(1, "JP", ["NL"]), /language=7&minCondition=2&sellerCountry=23$/);
+});
+
+test("artikels op de klantenpagina: per stuk aan of uit, anders catalogus en binders", () => {
+  const a = (x: Partial<Parameters<typeof artikelZichtbaar>[0]>) => artikelZichtbaar({ opslag: "stockdoos", aantal: 2, prijs: 10, details: { type: "3d-print" }, zichtbaar: null, ...x });
+  assert.equal(a({}), false, "3D-print in de vault: standaard niet");
+  assert.equal(a({ opslag: "vitrine" }), true, "in de catalogus: standaard wel");
+  assert.equal(a({ details: { type: "binder" } }), true, "binders altijd, ook in de vault");
+  assert.equal(a({ zichtbaar: true }), true, "zelf aangezet");
+  assert.equal(a({ opslag: "vitrine", zichtbaar: false }), false, "zelf uitgezet");
+  assert.equal(a({ zichtbaar: true, prijs: null }), false, "zonder prijs nooit");
+  assert.equal(a({ zichtbaar: true, aantal: 0 }), false, "uitverkocht nooit");
+});
+
+test("set van een kaart: ook de 30th Celebration Classic Collection (gedrukt nummer ≠ eigen nummer)", () => {
+  assert.equal(setIdVan({ kaart_id: "30th-c-001", nummer: "4", set_code: "30C", set_naam: "30th Classic Collection" }), "30th-c");
+  assert.equal(setIdVan({ kaart_id: "30th-023", nummer: "023", set_code: "30C", set_naam: "30th Celebration" }), "30th");
+  assert.equal(setIdVan({ kaart_id: null, nummer: "12", set_code: "PFL", set_naam: null }), "PFL");
 });

@@ -7,6 +7,7 @@ import type { Artikel, Beurs, Exemplaar, Regel, Transactie, TransactieSoort } fr
 import { beursCijfers, beursOverzicht, marge, PRODUCTSOORTEN, type Productsoort } from "../lib/kassa";
 import { artikelType } from "../lib/categorie";
 import { datumKort, euro } from "../lib/format";
+import { waarGekocht } from "../lib/boekhouding";
 import { geplandeBeurzen } from "./Beurs";
 import { Icoon, Segment, Sheet } from "./common";
 
@@ -55,7 +56,10 @@ export function kasOmschrijving(t: Pick<Transactie, "cash" | "sumup">): string {
 }
 
 export function TransactieRij({ t, beheerder, compact = false }: { t: Transactie; beheerder?: string; compact?: boolean }) {
+  const { beurzen } = useApp();
   const s = SOORT[t.soort];
+  // Waar het gebeurde: de beurs, online, een rommelmarkt … (in de lijst van één beurs is dat al duidelijk).
+  const waar = compact ? null : waarGekocht(t, beurzen);
   const uit = t.regels.filter((r) => r.richting === "uit");
   const binnen = t.regels.filter((r) => r.richting === "in");
   const stuks = (rs: Regel[]) => rs.reduce((n, r) => n + (r.aantal ?? 1), 0);
@@ -81,7 +85,11 @@ export function TransactieRij({ t, beheerder, compact = false }: { t: Transactie
             {t.status === "conflict" && <em className="tr-merk rood">conflict</em>}
           </strong>
           {t.soort === "ruil" && !compact && <span className="zacht klein">{namen(uit)} ⇄ {namen(binnen)}</span>}
-          <span className="zacht klein">{tijdKort(t.tijd)} · {s.naam.toLowerCase()}{geld ? ` · ${geld}` : ""}{beheerder ? ` · ${beheerder}` : ""}</span>
+          <span className="zacht klein">
+            {waar && <em className={`tr-waar${t.beurs_id ? " beurs" : ""}`}>{waar}</em>}
+            {t.tegenpartij?.vendor && <em className="tr-waar vendor">vendor</em>}
+            {tijdKort(t.tijd)} · {s.naam.toLowerCase()}{geld ? ` · ${geld}` : ""}{beheerder ? ` · ${beheerder}` : ""}
+          </span>
         </span>
         <span className={`transactie-bedrag ${bedrag > 0 ? "plus" : bedrag < 0 ? "min" : ""}`}>
           <strong>{bedrag > 0 ? `+${euro(bedrag)}` : bedrag < 0 ? `−${euro(-bedrag)}` : "±0"}</strong>

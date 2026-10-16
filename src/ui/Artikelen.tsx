@@ -1,7 +1,7 @@
 // Artikels: alles wat per aantal gaat en geen eigen label krijgt. Onze binders (hoofdproduct),
 // sealed (met de prijs van Cardmarket), 3D-prints en andere. Te vinden in Meer › Artikels.
 import { useEffect, useMemo, useState } from "react";
-import { inMandje, meld, naarTab, openArtikel, openArtikelen, sluit, useApp, voegArtikelToe, wijzigArtikel } from "../state";
+import { inMandje, meld, naarTab, openArtikel, openArtikelen, schemaOud, SCHEMA_09, sluit, useApp, voegArtikelToe, wijzigArtikel } from "../state";
 import type { Artikel, ArtikelDetails, ArtikelType, Techniek } from "../types";
 export { artikelOmschrijving };
 import { euro, getal, zonderAccenten } from "../lib/format";
@@ -10,6 +10,7 @@ import { ARTIKEL_TYPES, artikelOmschrijving, artikelType, PLAATS, soortVoorType,
 import { cardmarketSealedLink } from "../lib/markt";
 import { laadSealed, zoekSealed, type SealedProduct } from "../lib/sealed";
 import { veiligeFoto } from "../lib/eigenfoto";
+import { artikelZichtbaar } from "../lib/weergave";
 import { Icoon, Kiezer, Sheet, Veld } from "./common";
 import { FotoKiezer } from "./FotoKiezer";
 
@@ -73,7 +74,7 @@ export function Artikelen({ type: start }: { type?: ArtikelType }) {
                   <span className="artikel-rij-tekst">
                     <strong>{a.naam}</strong>
                     {artikelOmschrijving(a) && <span className="zacht klein">{artikelOmschrijving(a)}</span>}
-                    <span className="zacht klein">{PLAATS[a.opslag].naam}{a.prijs != null ? ` · ${euro(a.prijs)}` : " · prijs op vraag"}</span>
+                    <span className="zacht klein">{PLAATS[a.opslag].naam}{a.prijs != null ? ` · ${euro(a.prijs)}` : " · prijs op vraag"}{artikelZichtbaar(a) ? <span className="op-klant"> · <Icoon naam="oog" maat={12} /> klanten</span> : null}</span>
                   </span>
                   <span className="artikel-rij-aantal">{a.aantal ? <><strong>{a.aantal}</strong><em>{a.aantal === 1 ? "stuk" : "stuks"}</em></> : <em>op</em>}</span>
                 </button>
@@ -147,12 +148,14 @@ interface Formulier {
   foto: string | null;
   details: ArtikelDetails;
   cardmarket_id: number | null;
+  zichtbaar: boolean | null;   // op de klantenpagina (leeg: zoals standaard)
 }
 
 const vorigeBinder: ArtikelDetails = { merk: "Vault X", grootte: "9-pocket", toploader: false, techniek: "laser" };
 
 export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | null; type?: ArtikelType; vanLijst?: boolean }) {
-  const { artikelen, instellingen } = useApp();
+  const app = useApp();
+  const { artikelen, instellingen } = app;
   const a = id ? artikelen.find((x) => x.id === id) : null;
   const type: ArtikelType = a ? artikelType(a) : nieuwType ?? "sealed";
   const begin = (): Formulier => ({
@@ -165,6 +168,7 @@ export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | n
     foto: a?.foto ?? null,
     details: { ...(a ? {} : type === "binder" ? vorigeBinder : {}), ...(a?.details ?? {}), type },
     cardmarket_id: a?.cardmarket_id ?? null,
+    zichtbaar: a?.zichtbaar ?? null,
   });
   const [v, setV] = useState<Formulier>(begin);
   const [zoekSealed, setZoekSealed] = useState(!a && type === "sealed");
@@ -179,6 +183,7 @@ export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | n
     const w: Partial<Artikel> = {
       naam, soort: soortVoorType(type), prijs: getal(v.prijs), aankoopprijs: getal(v.aankoopprijs),
       opslag: v.opslag, opmerking: v.opmerking.trim() || null, foto: v.foto, details: { ...d, type }, cardmarket_id: v.cardmarket_id,
+      zichtbaar: v.zichtbaar,
     };
     if (type === "binder") Object.assign(vorigeBinder, { merk: d.merk, grootte: d.grootte, toploader: d.toploader, techniek: d.techniek });
     if (a) {
@@ -273,11 +278,27 @@ export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | n
             </div>
           </Veld>
         )}
-        <Veld label="Waar ligt het?" hint={type === "binder" ? "Klanten zien al jullie binders, ook die in de vault (\"vraag ernaar\")." : undefined}>
+        <Veld label="Waar ligt het?">
           <Kiezer waarde={v.opslag} opties={[{ waarde: "vitrine", label: "Catalogus (uitgestald)" }, { waarde: "stockdoos", label: "Vault" }]} onKies={(o) => setV({ ...v, opslag: o })} />
         </Veld>
+        {(() => {
+          // Op de klantenpagina: standaard wat in de catalogus ligt en al onze binders; per stuk aan of uit te zetten.
+          const standaard = v.opslag === "vitrine" || type === "binder";
+          const aan = v.zichtbaar ?? standaard;
+          const zonderPrijs = getal(v.prijs) == null;
+          return (
+            <div className="klant-schakel">
+              <label className="schakel rij">
+                <input type="checkbox" checked={aan} onChange={(e) => setV({ ...v, zichtbaar: e.target.checked === standaard ? null : e.target.checked })} />
+                <span>Op de klantenpagina <span className="zacht klein">{aan
+                  ? zonderPrijs ? "(eerst een verkoopprijs invullen)" : v.opslag === "stockdoos" ? "(klanten zien \"vraag ernaar\")" : "(klanten zien het met de prijs)"
+                  : "(verborgen voor klanten)"}</span></span>
+              </label>
+              {schemaOud(app) && v.zichtbaar !== null && <p className="nakijken klein">{SCHEMA_09}</p>}
+            </div>
+          );
+        })()}
         <Veld label="Opmerking"><input value={v.opmerking} onChange={(e) => setV({ ...v, opmerking: e.target.value })} /></Veld>
-        {!a && getal(v.prijs) == null && <p className="zacht klein">Zonder verkoopprijs staat het artikel als "prijs op vraag" en zien klanten het niet.</p>}
         <div className="sheet-actie">
           <button className="knop groot" disabled={type === "binder" && !a && !d.artwork?.trim() && !v.naam.trim()} onClick={bewaar}>{a ? "Bewaar" : "Toevoegen"}</button>
         </div>

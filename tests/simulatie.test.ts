@@ -12,7 +12,7 @@ import {
 } from "../src/lib/kassa";
 import { bodVanExact, exactBod, pasBodToe, samenPct } from "../src/lib/bod";
 import {
-  bewijsAdvies, bewijsNummer, boeking, borderelLijnen, dagontvangsten, dexxterLijnen, jaaromzet, maakPad, MAX_PAD, veiligPad, voorraadOp,
+  bewijsAdvies, bewijsNummer, boeking, borderelLijnen, dagontvangsten, dexxterLijnen, jaaromzet, kostenLijnen, maakPad, MAX_PAD, veiligPad, voorraadOp,
   vrijstellingsGrens,
 } from "../src/lib/boekhouding";
 import { uuid } from "../src/lib/uuid";
@@ -323,4 +323,23 @@ test("privé ⇄ Bind'r: inbreng is een kost, naar privé aan aankoopwaarde, gee
   assert.equal(t3.transactie.status, "conflict");
   assert.equal(boeking(t3.transactie).onttrekking, 0, "wat niet kon, telt niet");
   assert.equal(bewijsNummer(t1.transactie).slice(0, 3), "PB-");
+});
+
+test("met factuur: niet in de dagstaat, ook niet als je het terugdraait; een vendor is enkel info", () => {
+  const nieuw = (naam: string) => ({ ...standaardExemplaar({ code: "FACT01", naam, opslag: "stockdoos" }, "2026-11-08T10:00:00Z"), id: uuid() });
+  const kaart = nieuw("Factuurkaart");
+  const tp: Tegenpartij = { type: "handelaar", naam: "Kaartenkelder", factuur: "F-123", met_factuur: true, vendor: true };
+  const koop = nieuweTransactie([regelIn(kaart, 80, 100)], { cash: -80, sumup: 0 }, "b1", null, "2026-11-08T10:00:00Z", tp);
+  const gewoon = nieuweTransactie([regelIn({ ...nieuw("Gewoon"), code: "FACT02" }, 20, 25)], { cash: -20, sumup: 0 }, "b1", null, "2026-11-08T11:00:00Z", { type: "particulier", vendor: true });
+  const [dag] = dagontvangsten([koop, gewoon]);
+  assert.equal(dag.aankopen, 100);
+  assert.deepEqual([dag.aankopenGeld, dag.aankopenFactuur], [20, 80], "de vendor zonder factuur gaat gewoon via de dagstaat");
+  assert.equal(kostenLijnen(dag).reduce((x, l) => x + l.bedrag, 0), 20);
+  assert.deepEqual(bewijsAdvies(koop, 1), [], "de factuur is het bewijs");
+  // De handelaar neemt de kaart terug: ook dat staat niet in de dagstaat (creditnota apart in Dexxter).
+  const terug = nieuweRetour([], -80, "b1", "2026-11-08T12:00:00Z", [{ ...koop.regels[0], van: koop.id }]);
+  const [d2] = dagontvangsten([koop, gewoon, terug]);
+  assert.deepEqual([d2.aankopenGeld, d2.aankopenFactuur], [20, 0]);
+  assert.equal(kostenLijnen(d2).reduce((x, l) => x + l.bedrag, 0), 20);
+  assert.equal(boeking(terug).ontvangst - boeking(terug).aankoop, terug.cash, "het geld klopt");
 });

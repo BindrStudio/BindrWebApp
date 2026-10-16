@@ -56,6 +56,8 @@ const PADEN: Record<string, ReactNode> = {
   tandwiel: <><circle cx="12" cy="12" r="3" /><path d="M12 2.8v2.4M12 18.8v2.4M21.2 12h-2.4M5.2 12H2.8M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7M18.5 18.5l-1.7-1.7M7.2 7.2 5.5 5.5" /><circle cx="12" cy="12" r="6.6" /></>,
   inzicht: <><path d="M4 20V10M9.5 20V5M15 20v-7M20.5 20V8" /><path d="m3.5 7.5 5.5-4 5.5 5 6-4" /></>,
   boek: <><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15Z" /><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3M9 7.5h6M9 11h4" /></>,
+  kalender: <><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" /><path d="M3.5 10h17M8 3v4M16 3v4" /></>,
+  pin: <><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11Z" /><circle cx="12" cy="10" r="2.4" /></>,
 };
 
 export function Icoon({ naam, maat = 22, className }: { naam: keyof typeof PADEN | string; maat?: number; className?: string }) {
@@ -110,6 +112,35 @@ export function Sheet({ titel, onSluit, children, vol = false, actie }: { titel?
         </div>
         <div className="sheet-inhoud">{children}</div>
       </div>
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * De kaart in het groot, over het hele scherm (tik op de foto in een detail). Tik ergens, op ✕ of druk
+ * Escape om te sluiten. Ligt boven de sheet: Escape sluit eerst dit.
+ */
+export function FotoGroot({ src, kaart, alt, onderschrift, onSluit }: { src: string | null; kaart?: FotoKaart; alt: string; onderschrift?: ReactNode; onSluit: () => void }) {
+  const id = useRef(`foto-groot-${++sheetNr}`);
+  const knop = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const mijn = id.current;
+    stapel.push(mijn);
+    const vorige = document.activeElement as HTMLElement | null;
+    knop.current?.focus({ preventScroll: true });
+    return () => { const i = stapel.lastIndexOf(mijn); if (i >= 0) stapel.splice(i, 1); vorige?.focus?.({ preventScroll: true }); };
+  }, []);
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && stapel[stapel.length - 1] === id.current) onSluit(); };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [onSluit]);
+  return createPortal(
+    <div className="foto-groot" role="dialog" aria-modal="true" aria-label={alt} onClick={onSluit}>
+      <button ref={knop} className="rond-knop foto-groot-sluit" onClick={onSluit} aria-label="Sluiten"><Icoon naam="kruis" maat={20} /></button>
+      <div className="foto-groot-kaart"><KaartFoto src={src} kaart={kaart} groot alt={alt} /></div>
+      {onderschrift && <div className="foto-groot-tekst">{onderschrift}</div>}
     </div>,
     document.body,
   );

@@ -224,8 +224,12 @@ function beursdag(dag: string, groei: number, nr: number) {
     for (const r of t.regels.filter((x) => x.richting === "in")) prijs(r.nieuw!.id, r.referentie!);
   }
 
-  // Van een andere stand: twee ETB's met factuur.
-  if (nr % 4 === 0) boek(nieuweTransactie([regelArtikelIn(art("ETB"), 2, 90)], { cash: -90, sumup: 0 }, beursId, null, bxl(dag, uur()), { type: "handelaar", naam: "Kaartenkelder", factuur: `F-${dag}` }));
+  // Van een andere stand (vendor): twee ETB's met factuur. Die factuur gaat apart in Dexxter, niet via de dagstaat.
+  if (nr % 4 === 0) {
+    const tijd = bxl(dag, uur());
+    boek(nieuweTransactie([regelArtikelIn(art("ETB"), 2, 90)], { cash: -90, sumup: 0 }, beursId, null, tijd, { type: "handelaar", naam: "Kaartenkelder", factuur: `F-${dag}`, met_factuur: true, vendor: true }));
+    plus(buiten, jaarVan(tijd), 90);
+  }
 
   // Geld wisselen met een andere stand via SumUp, en wat cash naar huis.
   if (nr % 3 === 0) boek(nieuweKasbeweging({ cash: -100, sumup: 100 }, beursId, null, { naam: "Buurstand", type: "handelaar" }, bxl(dag, uur())));
@@ -428,7 +432,9 @@ test("simulatie van twee jaar: de boekhouding sluit, ook achteraf bekeken", asyn
   const dagen = dagontvangsten(lijst);
   for (const d of dagen) {
     assert.equal(rond2(dexxterLijnen(d).reduce((s, l) => s + l.bedrag, 0)), d.ontvangsten, `dagontvangsten ${d.datum}`);
-    assert.equal(rond2(kostenLijnen(d).reduce((s, l) => s + l.bedrag, 0)), rond2(d.aankopen + d.inbreng), `kosten ${d.datum}`);
+    // De kosten via de dagstaat: alle aankopen behalve die met een factuur (die gaan apart in Dexxter), plus de inbreng.
+    assert.equal(rond2(kostenLijnen(d).reduce((s, l) => s + l.bedrag, 0)), rond2(d.aankopen - d.aankopenFactuur + d.inbreng), `kosten ${d.datum}`);
+    assert.equal(rond2(d.aankopenGeld + d.aankopenRuil + d.aankopenFactuur), d.aankopen, `aankopen gesplitst ${d.datum}`);
     for (const t of d.transacties) {
       if ((t.soort !== "verkoop" && t.soort !== "ruil") || t.status === "ongedaan") continue;
       for (const r of t.regels) if (r.richting === "uit" && r.prijs / (r.aantal ?? 1) > EIGEN_LIJN) assert.ok(d.eigenLijnen.some((l) => l.transactie_id === t.id && l.bedrag === rond2(r.prijs)), `eigen lijn ${r.naam} ${d.datum}`);
@@ -446,7 +452,7 @@ test("simulatie van twee jaar: de boekhouding sluit, ook achteraf bekeken", asyn
     assert.equal(inv.totaal, snapshots.get(jaar), `voorraad op 31/12/${jaar}: achteraf ${inv.totaal}, die avond ${snapshots.get(jaar)}`);
     const jd = dagen.filter((d) => d.datum.startsWith(`${jaar}-`));
     const omzet = jaaromzet(dagen, jaar, START);
-    const kostenApp = rond2(jd.reduce((s, d) => s + d.aankopen + d.inbreng, 0));
+    const kostenApp = rond2(jd.reduce((s, d) => s + kostenLijnen(d).reduce((x, l) => x + l.bedrag, 0), 0));
     const ontt = rond2(jd.reduce((s, d) => s + d.onttrekking, 0));
     const winstBoeken = rond2(omzet.omzet - kostenApp - (buiten.get(jaar) ?? 0) + ontt + inv.totaal - vorige);
     assert.equal(winstBoeken, winst.get(jaar) ?? 0, `winst ${jaar}: boeken ${winstBoeken}, echt ${winst.get(jaar)}`);

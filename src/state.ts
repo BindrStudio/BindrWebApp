@@ -6,7 +6,7 @@
 import { useSyncExternalStore } from "react";
 import { isNetwerkFout, type Alles, type Backend, type PrijsMarkering } from "./store/backend";
 import { DemoBackend } from "./store/demo";
-import { NIEUWSTE, SupabaseBackend } from "./store/supabase";
+import { BOEKHOUDING_VANAF, NIEUWSTE, SupabaseBackend } from "./store/supabase";
 import type { Aankoopfoto, Aanwezig, Artikel, ArtikelType, Bedrijf, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Tegenpartij, Transactie } from "./types";
 import { bewaarPin, controleerPin, isVergrendeld, leesPin, markeerActief, wisPin, VERGRENDEL_NA_MS } from "./lib/pin";
 import { laadPrijsgids, type Prijsgids } from "./lib/prices";
@@ -87,6 +87,7 @@ export interface State {
   aanwezig: Aanwezig[];     // wie er de laatste minuten bezig was
   fotoVersie: number;       // telt op als er aankoopfoto's geladen of toegevoegd werden
   gedeeltelijk: boolean;    // offline gestart met de kopie: enkel de voorraad en de laatste maanden historiek
+  bijgewerktOp: string | null; // laatste keer dat de app iets van de server haalde
 }
 
 const MODUS = "bindr-modus";
@@ -141,6 +142,7 @@ let state: State = {
   aanwezig: [],
   fotoVersie: 0,
   gedeeltelijk: false,
+  bijgewerktOp: null,
 };
 
 /** Welke hartjes moeten wisselen: wat de laatste prijscheck markeerde (gedeeld via de database). */
@@ -276,7 +278,12 @@ export function openInzichten() { zet({ open: { soort: "inzichten" } }); }
 export function openHistoriek() { zet({ open: { soort: "historiek" } }); }
 export function openPrive() { zet({ open: { soort: "prive" } }); }
 /** Kaarten gekocht buiten een beurs (Facebook, rommelmarkt): via de kassa, Van de klant. */
-export function inkoopThuis() { zet({ tab: "kassa", open: { soort: "inkoopThuis" } }); }
+/** Kopen buiten een beurs (Facebook, rommelmarkt): enkel als er geen beurs loopt, anders klopt de kas niet. */
+export function inkoopThuis() {
+  const b = actieveBeurs();
+  if (b) return meld(`${b.naam} loopt nog: koop in via de kassa, of sluit eerst de beurs af.`, "fout");
+  zet({ tab: "kassa", open: { soort: "inkoopThuis" } });
+}
 export function sluit() { zet({ open: null }); }
 
 // ── Kopie op het toestel (Supabase): om offline te kunnen starten ────────────
@@ -345,6 +352,7 @@ type Op =
   | { soort: "artikelWijzig"; id: string; wijziging: Partial<Artikel> }
   | { soort: "beurs"; beurs: Beurs }
   | { soort: "beursWeg"; id: string }
+  | { soort: "beursGepland"; id: string; w: Pick<Beurs, "naam" | "datum" | "locatie" | "uren" | "link"> }
   | { soort: "transactie"; t: Transactie }
   | { soort: "ongedaan"; id: string }
   | { soort: "conflictOplossen"; id: string; oud: string; nieuw: string }
@@ -396,6 +404,7 @@ async function voerUit(op: Op) {
     case "artikelWijzig": await b.wijzigArtikel(op.id, op.wijziging); break;
     case "beurs": await b.bewaarBeurs(op.beurs); break;
     case "beursWeg": await b.verwijderBeurs(op.id); break;
+    case "beursGepland": await b.wijzigGeplandeBeurs(op.id, op.w); break;
     case "instelling": await b.bewaarInstelling(op.sleutel, op.waarde); break;
     case "prijzen": await b.markeerPrijzen(op.omgeving, op.lijst); break;
     case "omgeving": await b.bewaarOmgeving(op.omgeving); break;
@@ -652,7 +661,7 @@ async function gebruik(backend: Backend) {
     ]);
     serverTijd = laatsteTijd(alles);
     laatsteVolledig = Date.now();
-    zet({ ...splits(alles), gids, beheerders: Object.fromEntries(beheerders.map((b) => [b.user_id, b.naam])), fase: "klaar", gedeeltelijk: false });
+    zet({ ...splits(alles), gids, beheerders: Object.fromEntries(beheerders.map((b) => [b.user_id, b.naam])), fase: "klaar", gedeeltelijk: false, bijgewerktOp: new Date().toISOString() });
     // Loopt er een beurs? Dan opent de app op de kassa (tenzij een ander tabblad gevraagd werd).
     if (typeof location !== "undefined" && !location.hash && state.beurzen.some((b) => b.status === "actief")) zet({ tab: "kassa" });
     // Mislukt het laden van de gedeelde instellingen, dan niets overschrijven (anders wist de volgende wijziging alles).
@@ -795,6 +804,7 @@ async function haalWijzigingen() {
     if (!w) return; // oude database: enkel de volledige herlaad om de 5 minuten
     if (rij.length) return;
     const n = w.exemplaren.length + w.artikelen.length + w.beurzen.length + w.transacties.length;
+    zet({ bijgewerktOp: new Date().toISOString() });
     if (!n) return;
     const samen = <T extends { id: string }>(oud: T[], nieuw: T[]) => {
       const per = new Map(nieuw.map((x) => [x.id, x]));
@@ -843,7 +853,7 @@ export async function herlaad() {
       const omgeving = omgevingen.some((o) => o.id === state.omgeving) ? state.omgeving : omgevingen[0].id;
       zet({ omgevingen, omgeving });
     }
-    zet({ ...splits(behoudMarkering(alles)), online: true, gedeeltelijk: false });
+    zet({ ...splits(behoudMarkering(alles)), online: true, gedeeltelijk: false, bijgewerktOp: new Date().toISOString() });
   } catch (e) {
     if (sessieVerlopen()) naarLoginNaVerlopen();
     else if (isNetwerkFout(e)) zet({ online: false }); else fout(e);
@@ -1088,6 +1098,9 @@ export function bedrijfVan(s: State = state): Bedrijf {
   return s.boekhouding.bedrijven[s.omgeving ?? "standaard"] ?? {};
 }
 
+/** Werkt deze omgeving met boekhouding (als zaak), of als particulier? Standaard: met boekhouding. */
+export const boekhoudingAan = (s: State = state) => bedrijfVan(s).boekhouding !== false;
+
 export function zetBedrijf(b: Bedrijf) {
   const id = gedeeldeSleutel();
   zet({ boekhouding: { ...state.boekhouding, bedrijven: { ...state.boekhouding.bedrijven, [id]: b } } });
@@ -1158,7 +1171,7 @@ export function startBeurs(gegevens: { naam: string; datum: string; startkas: nu
     id: gepland?.id ?? uuid(), naam: gegevens.naam.trim() || `Beurs ${gegevens.datum}`, datum: gegevens.datum, standgeld: null,
     startkas: gegevens.startkas, status: "actief", gestart_op: new Date().toISOString(), afgesloten_op: null,
     getelde_kas: null, sumup_bevestigd: false, stand_start: stand(state), stand_einde: null, opmerking: gepland?.opmerking ?? null,
-    locatie: gegevens.locatie ?? gepland?.locatie ?? null, omgeving_id: state.omgeving,
+    locatie: gegevens.locatie ?? gepland?.locatie ?? null, uren: gepland?.uren ?? null, link: gepland?.link ?? null, omgeving_id: state.omgeving,
   };
   zet({ beurzen: gepland ? state.beurzen.map((x) => (x.id === b.id ? b : x)) : [b, ...state.beurzen] });
   inRij({ soort: "beurs", beurs: b });
@@ -1167,16 +1180,37 @@ export function startBeurs(gegevens: { naam: string; datum: string; startkas: nu
 }
 
 /** Een beurs alvast plannen: klanten zien ze bij "komende beurzen". */
-export function planBeurs(gegevens: { naam: string; datum: string; locatie: string | null }): Beurs {
+export function planBeurs(gegevens: { naam: string; datum: string; locatie: string | null; uren?: string | null; link?: string | null }): Beurs {
   const b: Beurs = {
     id: uuid(), naam: gegevens.naam.trim() || `Beurs ${gegevens.datum}`, datum: gegevens.datum, standgeld: null, startkas: null,
     status: "gepland", gestart_op: null, afgesloten_op: null, getelde_kas: null, sumup_bevestigd: false, stand_start: null,
-    stand_einde: null, opmerking: null, locatie: gegevens.locatie?.trim() || null, omgeving_id: state.omgeving,
+    stand_einde: null, opmerking: null, locatie: gegevens.locatie?.trim() || null, uren: gegevens.uren?.trim() || null,
+    link: veiligeLink(gegevens.link), omgeving_id: state.omgeving,
   };
   zet({ beurzen: [b, ...state.beurzen] });
   inRij({ soort: "beurs", beurs: b });
   meld(`${b.naam} gepland`);
   return b;
+}
+
+/** Een link naar een beurs: enkel http(s), anders niets (komt op de klantenpagina). */
+export function veiligeLink(l: string | null | undefined): string | null {
+  const t = (l ?? "").trim();
+  if (!t || t.length > 480) return null; // de database neemt hoogstens 500 tekens
+  const metSchema = /^https?:\/\//i.test(t) ? t : `https://${t}`;
+  try { const u = new URL(metSchema); return (u.protocol === "https:" || u.protocol === "http:") && u.href.length <= 500 ? u.href : null; } catch { return null; }
+}
+
+/** Een geplande beurs aanpassen (naam, datum, plaats, uren, link). */
+export function wijzigBeurs(id: string, w: { naam: string; datum: string; locatie: string | null; uren?: string | null; link?: string | null }) {
+  const b = state.beurzen.find((x) => x.id === id);
+  if (!b || b.status !== "gepland") return;
+  // Enkel deze velden, en op de server enkel zolang de beurs gepland is: startte een andere gsm ze intussen,
+  // dan blijven de startkas en de stand van die beurs staan.
+  const nieuw = { naam: w.naam.trim() || b.naam, datum: w.datum, locatie: w.locatie?.trim() || null, uren: w.uren?.trim() || null, link: veiligeLink(w.link) };
+  zet({ beurzen: state.beurzen.map((x) => (x.id === id ? { ...x, ...nieuw } : x)) });
+  inRij({ soort: "beursGepland", id, w: nieuw });
+  meld(`${nieuw.naam} bewaard`);
 }
 
 /** Een geplande beurs schrappen (gaat ze toch niet door). */
@@ -1367,14 +1401,24 @@ export function kanNieuweBoekhouding(s: State = state): boolean {
   const b = s.backend;
   if (!b || b.soort !== "supabase") return true;
   const v = (b as SupabaseBackend).versie;
-  return v == null || v >= NIEUWSTE;
+  return v == null || v >= BOEKHOUDING_VANAF;
 }
+/** Draait de database een ouder schema dan de app kent? (Uren en link van beurzen en artikels per stuk op de klantenpagina komen met 0.9.) */
+export function schemaOud(s: State = state): boolean {
+  const b = s.backend;
+  if (!b || b.soort !== "supabase") return false;
+  const v = (b as SupabaseBackend).versie;
+  return v != null && v < NIEUWSTE;
+}
+export const SCHEMA_09 = "Wordt pas bewaard na de update van de database: voer supabase/schema.sql opnieuw uit in Supabase (zie de README).";
 export const OUD_SCHEMA = "Dit kan pas na de update van de database: voer supabase/schema.sql opnieuw uit in Supabase (zie de README).";
 
 /** Geld in of uit de cashkoffer zonder verkoop (wisselgeld, bijleggen, afhalen). */
 export function kasbeweging(b: { cash: number; sumup?: number }, omschrijving: string | null, tegenpartij: Tegenpartij | null = null) {
+  // De kas is de cashkoffer van een beurs: zonder beurs is er geen koffer om te tellen.
   const beurs = actieveBeurs();
-  const t = boek(nieuweKasbeweging(b, beurs?.id ?? null, omschrijving, tegenpartij));
+  if (!beurs) throw new Error("De kas kan enkel tijdens een beurs.");
+  const t = boek(nieuweKasbeweging(b, beurs.id, omschrijving, tegenpartij));
   meld(t.sumup > 0 ? `SumUp ${euro(t.sumup)} ontvangen, ${euro(-t.cash)} cash gegeven` : t.cash > 0 ? `${euro(t.cash)} in de kas` : `${euro(-t.cash)} uit de kas`);
   return t;
 }

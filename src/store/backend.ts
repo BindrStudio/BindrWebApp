@@ -40,6 +40,8 @@ export interface Backend {
   bewaarBeurs(b: Beurs): Promise<Beurs>;
   /** Een geplande beurs schrappen (enkel zolang ze niet gestart is). */
   verwijderBeurs(id: string): Promise<void>;
+  /** Naam, datum, plaats, uren of link van een geplande beurs aanpassen (enkel zolang ze niet gestart is). */
+  wijzigGeplandeBeurs(id: string, w: Pick<Beurs, "naam" | "datum" | "locatie" | "uren" | "link">): Promise<void>;
   boekTransactie(t: Transactie): Promise<Transactie>;
   maakOngedaan(id: string): Promise<Transactie>;
   losConflictOp(id: string, oud: string, nieuw: string): Promise<Transactie>;

@@ -1,4 +1,4 @@
--- Bind'r Stock & Beurs App — databaseschema (versie 0.8: kaarten die al in de app staan uit privé inbrengen)
+-- Bind'r Stock & Beurs App — databaseschema (versie 0.9: beurzen met uren en link, artikels per stuk op de klantenpagina)
 --
 -- Uitvoeren: Supabase-dashboard › SQL Editor › New query › dit hele bestand plakken › Run.
 -- Het script mag gerust een tweede keer lopen; het overschrijft geen gegevens.
@@ -268,6 +268,17 @@ create table if not exists public.aanwezig (
   scherm      text,
   laatst      timestamptz not null default now()
 );
+
+-- ── Versie 0.9: beurzen op de klantenpagina, artikels per stuk zichtbaar ──────
+alter table public.beurzen add column if not exists uren text;  -- bv. "10:00–17:00", komt op de klantenpagina
+alter table public.beurzen add column if not exists link text;  -- website van de beurs (enkel http/https)
+alter table public.beurzen drop constraint if exists beurzen_link_check;
+alter table public.beurzen add constraint beurzen_link_check
+  check (link is null or (link ~* '^https?://[^[:space:]<>"]+$' and length(link) <= 500));
+alter table public.beurzen drop constraint if exists beurzen_uren_check;
+alter table public.beurzen add constraint beurzen_uren_check check (uren is null or length(uren) <= 80);
+-- Op de klantenpagina: true = altijd, false = nooit, leeg = zoals vroeger (in de catalogus, of een binder).
+alter table public.artikelen add column if not exists zichtbaar boolean;
 
 -- ── Triggers: gewijzigd_op bijhouden en elke wijziging loggen ────────────────
 -- Ook bij een nieuwe rij zet de server zelf gewijzigd_op: zo ziet de 30-secondensynchronisatie van de
@@ -820,12 +831,12 @@ revoke all on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid)
 grant execute on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid),
   public.los_conflict_op(uuid, uuid, uuid), public.aanvaard_conflict(uuid, text), public.markeer_prijzen(uuid, jsonb) to authenticated;
 
--- Welke versie van dit schema draait er? De app vraagt het na het inloggen (0.8 = 8).
+-- Welke versie van dit schema draait er? De app vraagt het na het inloggen (0.8 = 8, 0.9 = 9).
 create or replace function public.schema_versie()
 returns integer
 language sql
 stable
-as $$ select 8 $$;
+as $$ select 9 $$;
 revoke all on function public.schema_versie() from public, anon;
 grant execute on function public.schema_versie() to authenticated;
 
@@ -846,7 +857,8 @@ create view public.publieke_vitrine as
      and label_status = 'gestickerd'
      and omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten);
 
--- Artikels in de catalogus, en al onze binders (ook die in de vault liggen: "vraag ernaar").
+-- Artikels op de klantenpagina: wat je per stuk aanzet (zichtbaar), en anders zoals vroeger: wat in de
+-- catalogus ligt en al onze binders (ook die in de vault liggen: "vraag ernaar").
 -- Enkel wat de klant mag zien: nooit de aankoopprijs of opmerkingen.
 drop view if exists public.publieke_artikelen;
 create view public.publieke_artikelen as
@@ -856,7 +868,7 @@ create view public.publieke_artikelen as
          opslag = 'vitrine' as uitgestald
     from public.artikelen
    where aantal > 0 and prijs is not null
-     and (opslag = 'vitrine' or details->>'type' = 'binder')
+     and coalesce(zichtbaar, opslag = 'vitrine' or details->>'type' = 'binder')
      and omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten);
 
 -- Instellingen die de klantenpagina nodig heeft (bv. de Instagram-naam).
@@ -865,9 +877,10 @@ create or replace view public.publieke_instellingen as
     from public.instellingen
    where sleutel in ('instagram', 'catalogus_tekst');
 
--- Komende beurzen ("bezoek onze stand").
-create or replace view public.publieke_beurzen as
-  select distinct on (datum, lower(naam)) naam, datum, locatie
+-- Komende beurzen ("kom langs op onze stand"), met uren en de website van de beurs.
+drop view if exists public.publieke_beurzen;
+create view public.publieke_beurzen as
+  select distinct on (datum, lower(naam)) naam, datum, locatie, uren, link
     from public.beurzen
    where status in ('gepland', 'actief') and datum >= current_date
      and omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten)
@@ -878,6 +891,44 @@ create or replace view public.publieke_beurzen as
 -- dus zonder deze revoke kon elke ingelogde gebruiker via de weergave de voorraad wijzigen.
 revoke all on public.publieke_vitrine, public.publieke_artikelen, public.publieke_instellingen, public.publieke_beurzen from public, anon, authenticated;
 grant select on public.publieke_vitrine, public.publieke_artikelen, public.publieke_instellingen, public.publieke_beurzen to anon, authenticated;
+
+-- ── Eenmalig (0.9): de 30th Celebration Classic Collection op het gedrukte nummer ──
+-- TCGdex nummert die 30 kaarten 001–030; gedrukt staat het nummer van de oude set (Charizard 4/102).
+update public.exemplaren e
+   set nummer = m.nr
+  from (values ('001', '4'), ('002', '5'), ('003', '11'), ('004', '11'), ('005', '18'), ('006', '19'), ('007', '25'),
+               ('008', '33'), ('009', '41'), ('010', '43'), ('011', '47'), ('012', '50'), ('013', '57'), ('014', '58'),
+               ('015', '69'), ('016', '85'), ('017', '89'), ('018', '94'), ('019', '99'), ('020', '100'), ('021', '101'),
+               ('022', '106'), ('023', '106'), ('024', '106'), ('025', '108'), ('026', '114'), ('027', '123'), ('028', '138'),
+               ('029', '149'), ('030', '203')) as m (lokaal, nr)
+ where e.kaart_id = '30th-c-' || m.lokaal and e.nummer = m.lokaal;
+
+-- ── Eenmalig (0.9): onze komende beurzen in de omgeving Bind'r ────────────────
+-- Loopt één keer (de sleutel seed:beurzen-2026-10 onthoudt het); daarna beheer je ze in de app
+-- (Profiel › Beurzen). Een beurs die je schrapt, komt dus niet terug als je dit opnieuw uitvoert.
+do $$
+begin
+  if not exists (select 1 from public.instellingen where sleutel = 'seed:beurzen-2026-10') then
+    insert into public.beurzen (naam, datum, locatie, uren, link, status, omgeving_id)
+    select v.naam, v.datum::date, v.locatie, v.uren, v.link, 'gepland', public.standaard_omgeving()
+      from (values
+        ('Toeroets Card Carnival', '2026-10-24', 'De Mast, Industrielaan 2, 8820 Torhout', '9:00–17:00', 'https://toeroetscardcarnival.be/'),
+        ('Fairy Tradingcards Ruilbeurs', '2026-11-08', 'Festivalhal Donkmeer, Berlare (Overmere)', 'vanaf 10:00', 'https://www.fairytradingcards.be/beurzen'),
+        ('CardKingdom – Fall Edition', '2026-11-15', 'Evenementenhal De Ark, Melkerijstraat 2, 8850 Ardooie', 'vanaf 10:00', null),
+        ('Pokémon & attributenbeurs Sint-Niklaas', '2026-11-29', '''t Bauhuis, Slachthuisstraat 60, 9100 Sint-Niklaas', 'vanaf 9:30', 'https://www.ontdeksintniklaas.be/nl/agenda/alle-resultaten/pokemon-kaarten-beurs-te-sint-niklaas'),
+        ('Pokémonbeurs Oudenaarde', '2026-12-05', 'De Qubus, Lindestraat 47, 9700 Oudenaarde', '9:30–17:00', 'https://www.oudenaarde.be/nl/evenementen/pokemon-kaarten-beurs-te-oudenaarde'),
+        ('Geekfest Maldegem', '2026-12-19', 'Eventhall-ME, Industrielaan 6/3, 9990 Maldegem', '10:00–19:00', 'https://tickets.eventhall-me.be/event/geekfest-maldegem/'),
+        ('TCG Madness Ranst', '2027-01-16', 'GC Den Boomgaard, Antwerpsesteenweg 43, 2520 Ranst', '11:00–17:00', 'https://tcgmadness.be/ranst'),
+        ('Bruges TCG Premiere', '2027-01-31', 'Kinepolis Brugge, Koning Albert I-laan 200, 8200 Brugge', '10:00–16:00', 'https://chudartz-collectibles.com/nl/evenement/Bruges-TCG-Premiere/'),
+        ('Brick & Toy', '2027-02-06', null, null, null)
+      ) as v (naam, datum, locatie, uren, link)
+     where v.datum::date >= current_date
+       and not exists (select 1 from public.beurzen b where b.datum = v.datum::date and lower(b.naam) = lower(v.naam));
+    insert into public.instellingen (sleutel, waarde) values ('seed:beurzen-2026-10', to_jsonb(now()::text))
+      on conflict (sleutel) do nothing;
+  end if;
+end;
+$$;
 
 -- ── Inloggen met een pincode ─────────────────────────────────────────────────
 -- In de app log je in met een pincode van 6 cijfers: dat is het wachtwoord van je account.

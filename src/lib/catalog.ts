@@ -1,6 +1,7 @@
 import { DATA, TCGDEX_ASSETS } from "../config";
 import type { Catalogus, CatalogusKaart } from "../types";
 import { zonderAccenten } from "./format";
+import { gedrukt } from "./nummers";
 
 interface Bestand {
   version: string;
@@ -29,9 +30,11 @@ function bouwIndex(cat: Catalogus, b: Bestand): Index {
     if (cat === "en") {
       const [si, nummer, naam, zeldzaamheid, cm] = c as [number, string, string, string, number];
       const s = b.sets[si] as [string, string, string, string, string, number];
+      const g = gedrukt(s[0], nummer); // bijzondere nummering (30th Celebration)
       kaarten.push({
         id: `${s[0]}-${nummer}`, catalogus: "en", setId: s[0], setNaam: s[1], setCode: s[2], serie: s[3],
-        release: s[4], setTotaal: s[5], nummer, naam, zeldzaamheid, cardmarket: cm || null,
+        release: s[4], setTotaal: g?.totaal ?? s[5], nummer: g?.nummer ?? nummer, naam, zeldzaamheid, cardmarket: cm || null,
+        ...(g ? { lokaal: nummer, alias: g.alias } : {}),
       });
     } else {
       const [si, nummer, ja, zhTw, zhCn, en, zeldzaamheid, cm] = c as [number, string, string, string, string, string, string, number];
@@ -50,9 +53,11 @@ function bouwIndex(cat: Catalogus, b: Bestand): Index {
   for (const k of kaarten) {
     perId.set(k.id, k);
     if (k.cardmarket && !perCardmarket.has(k.cardmarket)) perCardmarket.set(k.cardmarket, k);
-    const nn = normNummer(k.nummer);
-    const lijst = perNummer.get(nn);
-    if (lijst) lijst.push(k); else perNummer.set(nn, [k]);
+    for (const nr of k.alias ? [k.nummer, k.alias.nr] : [k.nummer]) {
+      const nn = normNummer(nr);
+      const lijst = perNummer.get(nn);
+      if (lijst) lijst.push(k); else perNummer.set(nn, [k]);
+    }
     zoektekst.push(zonderAccenten([k.naam, k.naamJa, k.naamZhTw, k.naamZhCn, k.setNaam, k.setCode, k.setId].filter(Boolean).join(" ")));
   }
   return { kaarten, perId, perCardmarket, perNummer, zoektekst };
@@ -71,10 +76,11 @@ export function laadCatalogus(cat: Catalogus): Promise<Index> {
   return cache[cat]!;
 }
 
-export function afbeelding(k: { catalogus: Catalogus | null; serie?: string; setId?: string; nummer?: string | null; kaart_id?: string | null }, kwaliteit: "low" | "high" = "low"): string | null {
-  if (!k.serie || !k.setId || !k.nummer) return null;
+export function afbeelding(k: { catalogus: Catalogus | null; serie?: string; setId?: string; nummer?: string | null; lokaal?: string; kaart_id?: string | null }, kwaliteit: "low" | "high" = "low"): string | null {
+  const nr = k.lokaal ?? k.nummer;
+  if (!k.serie || !k.setId || !nr) return null;
   const taal = k.catalogus === "asia" ? "ja" : "en";
-  return `${TCGDEX_ASSETS}/${taal}/${k.serie}/${k.setId}/${k.nummer}/${kwaliteit}.webp`;
+  return `${TCGDEX_ASSETS}/${taal}/${k.serie}/${k.setId}/${nr}/${kwaliteit}.webp`;
 }
 
 /**
@@ -98,7 +104,8 @@ export function zoek(idx: Index, vraag: string, limiet = 40): CatalogusKaart[] {
   const nrTot = /^#?([a-z]*\d+[a-z]?)\s*\/\s*([a-z]*\d+)$/i.exec(ruw);
   if (nrTot) {
     const tot = Number(nrTot[2].replace(/\D/g, ""));
-    const hits = (idx.perNummer.get(normNummer(nrTot[1])) || []).filter((k) => k.setTotaal === tot);
+    const nr = normNummer(nrTot[1]);
+    const hits = (idx.perNummer.get(nr) || []).filter((k) => (k.setTotaal === tot && normNummer(k.nummer) === nr) || (k.alias?.totaal === tot && normNummer(k.alias.nr) === nr));
     if (hits.length) return sorteerNieuw(hits).slice(0, limiet);
   }
 
@@ -121,8 +128,9 @@ export function zoek(idx: Index, vraag: string, limiet = 40): CatalogusKaart[] {
     for (const n of nummers) {
       const kn = normNummer(k.nummer);
       const kCijfers = String(Number(k.nummer.replace(/\D/g, "") || "0"));
-      if (n.totaal != null && k.setTotaal !== n.totaal) { ok = false; break; }
-      if (kn === n.nr.toUpperCase() || kn === n.nr) s += 100;
+      const viaAlias = !!k.alias && normNummer(k.alias.nr) === normNummer(n.nr) && (n.totaal == null || k.alias.totaal === n.totaal);
+      if (n.totaal != null && k.setTotaal !== n.totaal && !viaAlias) { ok = false; break; }
+      if (kn === n.nr.toUpperCase() || kn === n.nr || viaAlias) s += 100;
       else if (kCijfers === n.cijfers) s += 80;          // "tg5" of "05" tegen TG05
       else if (kCijfers.startsWith(n.cijfers)) s += 40;  // deel van het nummer: 15 → 153
       else if (t.includes(n.ruw)) s += 20;               // set zoals "151" of "sv2a"

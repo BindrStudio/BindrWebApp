@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
-  actieveBeurs, bewaarBeurs, conflictAanvaarden, conflictOplossen, huidig, kanNieuweBoekhouding, magOngedaan, meld, ongedaanMaken, openBeurs, openExemplaar,
-  openTransactie, planBeurs, retour, schrapBeurs, sluit, sluitBeurs, startBeurs, useApp,
+  actieveBeurs, bewaarBeurs, boekhoudingAan, conflictAanvaarden, conflictOplossen, huidig, kanNieuweBoekhouding, magOngedaan, meld, ongedaanMaken, openBeurs, openExemplaar,
+  openTransactie, planBeurs, retour, schemaOud, SCHEMA_09, schrapBeurs, sluit, sluitBeurs, startBeurs, useApp, veiligeLink, wijzigBeurs,
 } from "../state";
 import type { Beurs, Regel, Stand, Transactie } from "../types";
 import { beursCijfers, beursOverzicht, CASH_GRENS, PRODUCTSOORTEN, retourBedrag, stand } from "../lib/kassa";
@@ -26,15 +26,64 @@ export function geplandeBeurzen(beurzen: Beurs[]): Beurs[] {
 }
 
 /**
- * Een beurs starten (met de cashkoffer) of enkel plannen: geplande beurzen verschijnen
- * op de klantenpagina bij "Bezoek onze stand". Starten kan vanuit een geplande beurs.
+ * Een beurs plannen of een geplande aanpassen: naam, datum, plaats, uren en de website van de beurs.
+ * Klanten zien geplande beurzen op de klantenpagina (als de omgeving zichtbaar is voor klanten).
  */
-export function BeursStart({ onSluit, plannen = false }: { onSluit: () => void; plannen?: boolean }) {
+export function BeursFormulier({ beurs, onSluit }: { beurs?: Beurs | null; onSluit: () => void }) {
+  const s = useApp();
+  const [v, setV] = useState({ naam: beurs?.naam ?? "", datum: beurs?.datum ?? vandaag(), locatie: beurs?.locatie ?? "", uren: beurs?.uren ?? "", link: beurs?.link ?? "" });
+  const [weg, setWeg] = useState(false);
+  const linkOk = !v.link.trim() || veiligeLink(v.link) != null;
+  const ok = !!v.naam.trim() && !!v.datum && v.datum >= vandaag() && linkOk;
+  const omg = s.omgevingen.find((o) => o.id === s.omgeving);
+  const bewaar = () => {
+    const w = { naam: v.naam, datum: v.datum, locatie: v.locatie, uren: v.uren, link: v.link };
+    if (beurs) wijzigBeurs(beurs.id, w); else planBeurs(w);
+    onSluit();
+  };
+  return (
+    <Sheet titel={beurs ? "Beurs aanpassen" : "Beurs plannen"} onSluit={onSluit}>
+      <div className="formulier">
+        <Veld label="Naam"><input value={v.naam} onChange={(e) => setV({ ...v, naam: e.target.value })} placeholder="bv. Geekfest Maldegem" autoFocus={!beurs} /></Veld>
+        <div className="twee">
+          <Veld label="Datum"><input type="date" value={v.datum} min={vandaag()} onChange={(e) => setV({ ...v, datum: e.target.value })} /></Veld>
+          <Veld label="Uren (optioneel)"><input value={v.uren} onChange={(e) => setV({ ...v, uren: e.target.value })} placeholder="10:00–17:00" maxLength={80} /></Veld>
+        </div>
+        <Veld label="Plaats"><input value={v.locatie} onChange={(e) => setV({ ...v, locatie: e.target.value })} placeholder="zaal, straat en gemeente" /></Veld>
+        <Veld label="Website van de beurs (optioneel)" hint={linkOk ? undefined : v.link.trim().length > 480 ? "Die link is te lang: kopieer het adres zonder alles na het vraagteken." : "Dat lijkt geen webadres."}>
+          <input value={v.link} onChange={(e) => setV({ ...v, link: e.target.value })} placeholder="https://…" inputMode="url" autoCapitalize="off" autoCorrect="off" />
+        </Veld>
+        {schemaOud(s) && (v.uren || v.link) && <p className="nakijken klein">Uren en website: {SCHEMA_09}</p>}
+        <p className="zacht klein">{omg && !omg.zichtbaar_voor_klanten ? `${omg.naam} staat niet op de klantenpagina: klanten zien deze beurs niet.` : "Klanten zien deze beurs op de klantenpagina, bij Komende beurzen. Op de dag zelf start je hem in de kassa met één tik."}</p>
+        <button className="knop groot" disabled={!ok} onClick={bewaar}>{beurs ? "Bewaren" : "Beurs plannen"}</button>
+        {beurs && (weg ? (
+          <div className="knoppenrij">
+            <button className="knop zacht rood" onClick={() => { schrapBeurs(beurs.id); onSluit(); }}>Ja, schrappen</button>
+            <button className="knop zacht" onClick={() => setWeg(false)}>Toch niet</button>
+          </div>
+        ) : <button className="tekstknop rood" onClick={() => setWeg(true)}>Gaat niet door? Schrappen</button>)}
+      </div>
+    </Sheet>
+  );
+}
+
+/** Alle komende beurzen (Profiel › Beurzen): plannen, aanpassen en schrappen. */
+export function BeurzenSheet({ onSluit }: { onSluit: () => void }) {
+  return (
+    <Sheet titel="Beurzen" onSluit={onSluit} vol>
+      <KomendeBeurzen />
+      <p className="zacht klein">Voorbije beurzen met hun cijfers staan in Historiek.</p>
+    </Sheet>
+  );
+}
+
+/** Een beurs starten met de cashkoffer, eventueel vanuit een geplande beurs. */
+export function BeursStart({ onSluit }: { onSluit: () => void }) {
   const s = useApp();
   const st = stand(s);
   const gepland = geplandeBeurzen(s.beurzen);
   const vandaagGepland = gepland.find((b) => b.datum === vandaag());
-  const [gekozen, setGekozen] = useState<string | null>(plannen ? null : vandaagGepland?.id ?? null);
+  const [gekozen, setGekozen] = useState<string | null>(vandaagGepland?.id ?? null);
   const basis = gepland.find((b) => b.id === gekozen);
   const [v, setV] = useState({
     naam: basis?.naam ?? "", datum: basis?.datum ?? vandaag(), locatie: basis?.locatie ?? "", startkas: "",
@@ -45,9 +94,9 @@ export function BeursStart({ onSluit, plannen = false }: { onSluit: () => void; 
   };
   const kas = getal(v.startkas);
   return (
-    <Sheet titel={plannen ? "Beurs plannen" : "Beurs starten"} onSluit={onSluit}>
+    <Sheet titel="Beurs starten" onSluit={onSluit}>
       <div className="formulier">
-        {!plannen && gepland.length > 0 && (
+        {gepland.length > 0 && (
           <Veld label="Gepland">
             <div className="kiezer">
               {gepland.slice(0, 4).map((b) => (
@@ -63,59 +112,52 @@ export function BeursStart({ onSluit, plannen = false }: { onSluit: () => void; 
           <Veld label="Datum"><input type="date" value={v.datum} onChange={(e) => setV({ ...v, datum: e.target.value })} /></Veld>
           <Veld label="Plaats"><input value={v.locatie} onChange={(e) => setV({ ...v, locatie: e.target.value })} placeholder="bv. ICC Gent" /></Veld>
         </div>
-        {plannen ? (
-          <>
-            <p className="zacht klein">Klanten zien geplande beurzen op de klantenpagina, bij "Bezoek onze stand". Op de dag zelf start je hem met één tik.</p>
-            <button className="knop groot" disabled={!v.naam.trim() || v.datum < vandaag()} onClick={() => {
-              planBeurs({ naam: v.naam, datum: v.datum, locatie: v.locatie });
-              onSluit();
-            }}>Beurs plannen</button>
-          </>
-        ) : (
-          <>
-            <Veld label="Startbedrag in de cashkoffer (€)" hint="Tel het geld in de koffer en vul het exacte bedrag in.">
-              <input inputMode="decimal" value={v.startkas} onChange={(e) => setV({ ...v, startkas: e.target.value })} placeholder="150" autoFocus={!!basis} />
-            </Veld>
-            <div className="stand-blok">
-              <span className="zacht klein">De app noteert nu de stand bij de start</span>
-              <StandRij st={st} />
-            </div>
-            <button className="knop groot" disabled={kas == null || kas < 0} onClick={() => {
-              try {
-                startBeurs({ naam: v.naam || `Beurs ${datumKort(v.datum)}`, datum: v.datum, startkas: kas!, locatie: v.locatie.trim() || null, geplandId: gekozen });
-                onSluit();
-              } catch (e) { meld((e as Error).message, "fout"); }
-            }}>Beurs starten</button>
-          </>
-        )}
+        <Veld label="Startbedrag in de cashkoffer (€)" hint="Tel het geld in de koffer en vul het exacte bedrag in.">
+          <input inputMode="decimal" value={v.startkas} onChange={(e) => setV({ ...v, startkas: e.target.value })} placeholder="150" autoFocus={!!basis} />
+        </Veld>
+        <div className="stand-blok">
+          <span className="zacht klein">De app noteert nu de stand bij de start</span>
+          <StandRij st={st} />
+        </div>
+        <button className="knop groot" disabled={kas == null || kas < 0} onClick={() => {
+          try {
+            startBeurs({ naam: v.naam || `Beurs ${datumKort(v.datum)}`, datum: v.datum, startkas: kas!, locatie: v.locatie.trim() || null, geplandId: gekozen });
+            onSluit();
+          } catch (e) { meld((e as Error).message, "fout"); }
+        }}>Beurs starten</button>
       </div>
     </Sheet>
   );
 }
 
-/** De komende beurzen, met schrappen (in het overzicht en bij de kassa). */
-export function KomendeBeurzen({ onPlan }: { onPlan: () => void }) {
+/** "toeroetscardcarnival.be" uit een link (of de link zelf als die niet te lezen is). */
+const hostVan = (l: string) => { try { return new URL(l).hostname.replace(/^www\./, ""); } catch { return l; } };
+
+/** De komende beurzen: tik om aan te passen of te schrappen (Profiel › Beurzen en het overzicht). */
+export function KomendeBeurzen() {
   const { beurzen } = useApp();
   const lijst = geplandeBeurzen(beurzen);
-  const [weg, setWeg] = useState<string | null>(null);
+  const [open, setOpen] = useState<Beurs | "nieuw" | null>(null);
   return (
     <section className="blok">
-      <div className="blok-kop"><h3>Komende beurzen</h3><button className="tekstknop klein" onClick={onPlan}><Icoon naam="plus" maat={16} /> Plannen</button></div>
+      <div className="blok-kop"><h3>Komende beurzen</h3><button className="tekstknop klein" onClick={() => setOpen("nieuw")}><Icoon naam="plus" maat={16} /> Plannen</button></div>
       {!lijst.length && <p className="zacht klein">Niets gepland. Geplande beurzen staan ook op de klantenpagina.</p>}
       <ul className="lijst">
         {lijst.map((b) => (
-          <li key={b.id} className="komend-rij">
-            <span className="komend-datum"><strong>{new Date(b.datum + "T12:00:00").getDate()}</strong>{new Date(b.datum + "T12:00:00").toLocaleDateString("nl-BE", { month: "short" })}</span>
-            <span className="lijst-naam"><strong>{b.naam}</strong>{b.locatie && <span className="zacht klein"> · {b.locatie}</span>}</span>
-            {weg === b.id ? (
-              <span className="rechts knoppenrij klein">
-                <button className="tekstknop klein rood" onClick={() => { schrapBeurs(b.id); setWeg(null); }}>Schrappen</button>
-                <button className="tekstknop klein" onClick={() => setWeg(null)}>Toch niet</button>
+          <li key={b.id}>
+            <button className="lijst-knop komend-rij" onClick={() => setOpen(b)}>
+              <span className="komend-datum"><strong>{new Date(b.datum + "T12:00:00").getDate()}</strong>{new Date(b.datum + "T12:00:00").toLocaleDateString("nl-BE", { month: "short" })}</span>
+              <span className="lijst-naam">
+                <strong>{b.naam}</strong>
+                <span className="zacht klein">{[b.locatie, b.uren].filter(Boolean).join(" · ") || "plaats en uren nog niet ingevuld"}</span>
+                {b.link && <span className="zacht klein komend-link"><Icoon naam="link" maat={12} /> {hostVan(b.link)}</span>}
               </span>
-            ) : <button className="rond-knop rechts" onClick={() => setWeg(b.id)} aria-label={`${b.naam} schrappen`}><Icoon naam="kruis" maat={14} /></button>}
+              <Icoon naam="pijlRechts" maat={16} className="rechts" />
+            </button>
           </li>
         ))}
       </ul>
+      {open && <BeursFormulier beurs={open === "nieuw" ? null : open} onSluit={() => setOpen(null)} />}
     </section>
   );
 }
@@ -257,7 +299,7 @@ export function TransactieSheet({ id }: { id: string }) {
       )}
       {t.soort === "kas" && t.beheerder && <div className="afsluit-rij"><span>Door</span><strong>{beheerders[t.beheerder] ?? "beheerder"}</strong></div>}
 
-      {(heeftBewijs(t) || t.soort === "prive") && nieuw && <BewijsKnop t={t} onOpen={() => setBorderel(true)} />}
+      {(heeftBewijs(t) || t.soort === "prive") && nieuw && boekhoudingAan() && <BewijsKnop t={t} onOpen={() => setBorderel(true)} />}
       {borderel && <BewijsSheet id={t.id} onSluit={() => setBorderel(false)} />}
 
       {retourKeuze && (
@@ -423,7 +465,6 @@ export function Overzicht() {
     return Math.round(actief.reduce((x, e) => x + (nu - Date.parse(e.aangemaakt_op)) / 86400000, 0) / actief.length);
   })();
   const actief = actieveBeurs(s);
-  const [plan, setPlan] = useState(false);
   const [historiek, setHistoriek] = useState(false);
   return (
     <Sheet titel="Overzicht" onSluit={sluit} vol>
@@ -434,8 +475,7 @@ export function Overzicht() {
         <Cijfer label="Aankoopwaarde" waarde={euro(aankoop, true)} sub="van alles in voorraad" />
         <Cijfer label="Gemiddelde ouderdom" waarde={leeftijd == null ? "–" : `${leeftijd} dagen`} sub="sinds invoer" />
       </div>
-      <KomendeBeurzen onPlan={() => setPlan(true)} />
-      {plan && <BeursStart plannen onSluit={() => setPlan(false)} />}
+      <KomendeBeurzen />
       <section className="blok">
         <h3>Beurzen</h3>
         {!s.beurzen.some((b) => b.status !== "gepland") && <p className="zacht">Nog geen beurzen.</p>}

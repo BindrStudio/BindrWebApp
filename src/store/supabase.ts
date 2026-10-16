@@ -6,8 +6,10 @@ import { schoonArtikel, schoonExemplaar } from "../lib/exemplaar";
 
 const SESSIE_SLEUTEL = "bindr-sessie-v1";
 const VERSIE_SLEUTEL = "bindr-schema-v1";
-/** De versie van het schema die alles van de app kan (supabase/schema.sql van 0.8). */
-export const NIEUWSTE = 7;
+/** De versie van het schema die alles van de app kan (supabase/schema.sql van 0.9). */
+export const NIEUWSTE = 8;
+/** Vanaf deze versie kan de boekhouding van 0.8 (kas, overschrijving, privé, aankoopfoto's …) naar de server. */
+export const BOEKHOUDING_VANAF = 7;
 const PAGINA = 1000;
 // Kolommen die pas bestaan na de update van het schema (omgevingen, prijscheck, beurslocatie).
 // Zolang de database ouder is, sturen we ze niet mee: anders weigert de server de hele wijziging.
@@ -24,6 +26,11 @@ const KOLOMMEN_V5: Record<Tabel, string[]> = {
   exemplaren: ["foto"],
   artikelen: [],
   beurzen: [],
+};
+const KOLOMMEN_V8: Record<Tabel, string[]> = {
+  exemplaren: [],
+  artikelen: ["zichtbaar"],
+  beurzen: ["uren", "link"],
 };
 // Exemplaren zonder de eigen foto (die komt apart, zie vulFotos).
 const EXEMPLAAR_KOLOMMEN = [
@@ -180,8 +187,8 @@ export class SupabaseBackend implements Backend {
   /** True als de database nog het schema van fase 1 heeft (geen beurzen en transacties). */
   schemaOud = false;
 
-  /** 7 = inbreng van kaarten die al in de app staan (0.8), 6 = aankoopfoto's en privé (0.7), 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
-  versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v >= 2 && v <= 7 ? v : null; })();
+  /** 8 = beurzen met uren en link, artikels zichtbaar per stuk (0.9), 7 = inbreng van kaarten die al in de app staan (0.8), 6 = aankoopfoto's en privé (0.7), 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
+  versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v >= 2 && v <= 8 ? v : null; })();
 
   private async zekerVersie() {
     if (this.versie == null) await this.laadOmgevingen().catch(() => undefined);
@@ -189,8 +196,10 @@ export class SupabaseBackend implements Backend {
 
   private schoon<T extends object>(r: T, tabel: Tabel): T {
     const v = this.versie ?? 5;
-    if (v >= 5) return r;
+    if (v >= 8) return r;
     const k = { ...r } as Record<string, unknown>;
+    for (const x of KOLOMMEN_V8[tabel]) delete k[x];
+    if (v >= 5) return k as T;
     for (const x of KOLOMMEN_V5[tabel]) delete k[x];
     if (v >= 4) return k as T;
     for (const x of KOLOMMEN_V4[tabel]) delete k[x];
@@ -212,13 +221,21 @@ export class SupabaseBackend implements Backend {
         if (e instanceof Fout && (e.status === 400 || e.status === 404)) return false; // onbekende kolom of tabel
         throw e;
       });
-      const [v4, v5, v6, v7] = await Promise.all([
+      // Vanaf 0.8 zegt de database zelf welke versie ze heeft (schema_versie: 8 = 0.8, 9 = 0.9).
+      const schema = await this.vraag<number>("GET", "rpc/schema_versie").then((n) => Number(n) || 0, (e) => {
+        if (e instanceof Fout && (e.status === 400 || e.status === 404)) return 0;
+        throw e;
+      });
+      if (schema >= 8) {
+        this.zetVersie(Math.min(8, schema - 1));
+        return o;
+      }
+      const [v4, v5, v6] = await Promise.all([
         bestaat("artikelen?select=id&limit=1&details=not.is.null&foto=is.null"),
         bestaat("transacties?select=id&limit=1&tegenpartij=is.null").then((ok) => ok && bestaat("exemplaren?select=id&limit=1&foto=is.null")),
         bestaat("aankoopfotos?select=id&limit=1"),
-        bestaat("rpc/schema_versie"),
       ]);
-      this.zetVersie(v4 && v5 && v6 ? (v7 ? 7 : 6) : v4 && v5 ? 5 : v4 ? 4 : 3);
+      this.zetVersie(v4 && v5 && v6 ? 6 : v4 && v5 ? 5 : v4 ? 4 : 3);
       return o;
     } catch (e) {
       if (e instanceof Fout && e.status === 404) {
@@ -254,7 +271,7 @@ export class SupabaseBackend implements Backend {
 
   private artikelKolommen() {
     return (this.versie ?? 0) >= 4
-      ? "id,naam,soort,aantal,prijs,opslag,opmerking,omgeving_id,aankoopprijs,details,cardmarket_id,aangemaakt_op,gewijzigd_op"
+      ? `id,naam,soort,aantal,prijs,opslag,opmerking,omgeving_id,aankoopprijs,details,cardmarket_id,aangemaakt_op,gewijzigd_op${(this.versie ?? 0) >= 8 ? ",zichtbaar" : ""}`
       : "*";
   }
 
@@ -411,15 +428,22 @@ export class SupabaseBackend implements Backend {
 
   async bewaarBeurs(b: Beurs) {
     await this.zekerVersie();
-    const { id, naam, datum, standgeld, startkas, status, gestart_op, afgesloten_op, getelde_kas, sumup_bevestigd, stand_start, stand_einde, opmerking, locatie, omgeving_id } = b;
+    const { id, naam, datum, standgeld, startkas, status, gestart_op, afgesloten_op, getelde_kas, sumup_bevestigd, stand_start, stand_einde, opmerking, locatie, uren, link, omgeving_id } = b;
     const r = await this.vraag<Beurs[]>("POST", "beurzen?on_conflict=id", [
-      this.schoon({ id, naam, datum, standgeld, startkas, status, gestart_op, afgesloten_op, getelde_kas, sumup_bevestigd, stand_start, stand_einde, opmerking, locatie: locatie ?? null, omgeving_id }, "beurzen"),
+      this.schoon({ id, naam, datum, standgeld, startkas, status, gestart_op, afgesloten_op, getelde_kas, sumup_bevestigd, stand_start, stand_einde, opmerking, locatie: locatie ?? null, uren: uren ?? null, link: link ?? null, omgeving_id }, "beurzen"),
     ], { Prefer: "return=representation,resolution=merge-duplicates" });
     return r[0] ?? b;
   }
 
   async verwijderBeurs(id: string) {
     await this.vraag("DELETE", `beurzen?id=eq.${encodeURIComponent(id)}&status=eq.gepland`);
+  }
+
+  /** Enkel de gegevens van een beurs die nog gepland is: een beurs die intussen op een andere gsm startte, blijft zoals ze is. */
+  async wijzigGeplandeBeurs(id: string, w: Pick<Beurs, "naam" | "datum" | "locatie" | "uren" | "link">) {
+    await this.zekerVersie();
+    const { naam, datum, locatie, uren, link } = w;
+    await this.vraag("PATCH", `beurzen?id=eq.${encodeURIComponent(id)}&status=eq.gepland`, this.schoon({ naam, datum, locatie: locatie ?? null, uren: uren ?? null, link: link ?? null }, "beurzen"), { Prefer: "return=minimal" });
   }
 
   private rpc(naam: string, args: Record<string, unknown>) {
@@ -429,12 +453,12 @@ export class SupabaseBackend implements Backend {
   /** Wat pas kan na de update van het schema (0.6): wachten in plaats van weigeren (en kwijtraken). */
   private async vraagNieuw(wat: string) {
     await this.zekerVersie();
-    if ((this.versie ?? 0) < NIEUWSTE) {
+    if ((this.versie ?? 0) < BOEKHOUDING_VANAF) {
       // Opnieuw nakijken (misschien werd het schema net uitgevoerd); anders blijft het in de wachtrij.
       localStorage.removeItem(VERSIE_SLEUTEL);
       this.versie = null;
       await this.zekerVersie();
-      if ((this.versie ?? 0) < NIEUWSTE) throw new Fout(`${wat} kan pas na de update van de database. Voer supabase/schema.sql opnieuw uit.`, 404);
+      if ((this.versie ?? 0) < BOEKHOUDING_VANAF) throw new Fout(`${wat} kan pas na de update van de database. Voer supabase/schema.sql opnieuw uit.`, 404);
     }
   }
 

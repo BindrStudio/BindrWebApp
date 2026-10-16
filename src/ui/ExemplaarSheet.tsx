@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { bevestigLabel, kanNieuweBoekhouding, meld, OUD_SCHEMA, openExemplaar, openToevoegen, print, prive, sluit, useApp, wijzig, zetHartje } from "../state";
 import type { Exemplaar } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
@@ -7,7 +7,7 @@ import { toonCode } from "../lib/code";
 import { voorstelVoor } from "../lib/pricing";
 import { labelDataUrl } from "../lib/label";
 import { huidigeMaat } from "../lib/printer";
-import { Badges, Hartje, Icoon, KaartFoto, Kiezer, OnderAankoop, onderAankoop, Sheet, Veld } from "./common";
+import { Badges, FotoGroot, Hartje, Icoon, KaartFoto, Kiezer, OnderAankoop, onderAankoop, Sheet, Veld } from "./common";
 import { MandjeActie } from "./MandjeActie";
 import { PLAATS } from "../lib/categorie";
 import { setIdVan, setNaam } from "../lib/weergave";
@@ -28,6 +28,9 @@ export function ExemplaarSheet({ id }: { id: string }) {
   const ex = exemplaren.find((e) => e.id === id);
   const [bewerk, setBewerk] = useState(false);
   const [geenFoto, setGeenFoto] = useState(false);
+  const [groot, setGroot] = useState(false);
+  // Tikken (niet draaien) op de foto toont hem in het groot.
+  const tik = useRef<{ x: number; y: number; t: number } | null>(null);
   if (!ex) return null;
   const voorstel = voorstelVoor(ex, gids, instellingen);
   const wijzigNodig = teWijzigen.get(ex.id);
@@ -37,7 +40,11 @@ export function ExemplaarSheet({ id }: { id: string }) {
     <Sheet titel={<><span className="code">{toonCode(ex.code)}</span></>} onSluit={sluit}
       actie={<button className="tekstknop" onClick={() => setBewerk(!bewerk)}>{bewerk ? "Klaar" : "Bewerk"}</button>}>
       <div className="detail-kop">
-        <div className={`detail-foto zweeft${((ex.opslag === "vitrine" ? ex.hartjesprijs : ex.verkoopprijs) ?? 0) >= 50 ? " holo" : ""}`}>
+        <div className={`detail-foto zweeft${((ex.opslag === "vitrine" ? ex.hartjesprijs : ex.verkoopprijs) ?? 0) >= 50 ? " holo" : ""}`}
+          role="button" tabIndex={0} aria-label={`${ex.naam} in het groot`}
+          onPointerDown={(e) => { tik.current = { x: e.clientX, y: e.clientY, t: Date.now() }; }}
+          onPointerUp={(e) => { const s0 = tik.current; tik.current = null; if (s0 && Math.hypot(e.clientX - s0.x, e.clientY - s0.y) < 10 && Date.now() - s0.t < 500 && !geenFoto) setGroot(true); }}
+          onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && !geenFoto) { e.preventDefault(); setGroot(true); } }}>
           <div className="kantel-vlak" {...kantelVrij}>
             {ex.soort === "slab" ? (
               <div className="slab-hoes groot">
@@ -59,6 +66,8 @@ export function ExemplaarSheet({ id }: { id: string }) {
         </div>
       </div>
 
+      {groot && <FotoGroot src={ex.afbeelding} kaart={ex} alt={ex.naam} onSluit={() => setGroot(false)}
+        onderschrift={<><strong>{ex.naam}</strong><span>{[ex.set_code, ex.nummer].filter(Boolean).join(" ")}{ex.taal ? ` · ${ex.taal}` : ""}</span></>} />}
       {(geenFoto || ex.foto || bewerk) && <EigenFoto ex={ex} geen={geenFoto} />}
 
       <MandjeActie ex={ex} />

@@ -4,6 +4,7 @@
 // Limitless TCG (heeft nieuwe sets snel, op de officiële setcode) en daarna
 // pokemontcg.io. Lukt geen enkele, dan toont de app de eerste letter van de naam.
 import { veiligeFoto } from "./eigenfoto";
+import { klassiek30 } from "./nummers";
 
 const TCGDEX = "https://assets.tcgdex.net";
 const LIMITLESS = "https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com";
@@ -44,12 +45,21 @@ export function fotoBronnen(k: FotoKaart, kwaliteit: "klein" | "groot" = "klein"
   const uit: string[] = [];
   const eigen = veiligeFoto(k.foto);
   if (eigen) uit.push(eigen);
-  if (k.afbeelding) uit.push(kwaliteit === "groot" ? groot(k.afbeelding) : k.afbeelding);
+  const maat = kwaliteit === "groot" ? "LG" : "SM";
+  // 30th Celebration: de officiële scans van Limitless eerst (TCGdex had die set nog niet volledig), en de
+  // Classic Collection op haar eigen nummer (CC1–CC30), nooit op het oude nummer (dat is een andere kaart).
+  const cc = klassiek30(k.kaart_id);
+  if (cc) uit.push(`${LIMITLESS}/tpci/30C/30C_CC${cc.cc}_R_EN_${maat}.png`);
   const nr = (k.nummer ?? "").trim();
   const code = (k.set_code ?? "").trim();
+  if (!cc && /^30th-\d{3}$/.test(k.kaart_id ?? "") && /^\d+$/.test(nr)) uit.push(`${LIMITLESS}/tpci/30C/30C_${nr.padStart(3, "0")}_R_EN_${maat}.png`);
+  if (k.afbeelding) uit.push(kwaliteit === "groot" ? groot(k.afbeelding) : k.afbeelding);
+  if (cc) return [...new Set(uit)];
+  // Celebrations (2021): Classic Collection CC001 → Limitless CEL_CC1.
+  const cel = /^CC0*(\d+)$/.exec(nr);
+  if (cel && /^CEL/i.test(code)) uit.push(`${LIMITLESS}/tpci/CEL/CEL_CC${cel[1]}_R_EN_${maat}.png`);
   const asia = k.catalogus === "asia" || ["JP", "CN-T", "CN-S", "KR"].includes(k.taal ?? "");
   if (code && /^\d+$/.test(nr)) {
-    const maat = kwaliteit === "groot" ? "LG" : "SM";
     if (asia) {
       // Japans: nummer zonder voorloopnullen, setcode zoals ze is (SV2a), promo's zonder streepje (M-P → MP).
       const set = limitlessJpSet(code);

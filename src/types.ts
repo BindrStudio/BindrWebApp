@@ -86,6 +86,7 @@ export interface Artikel {
   foto?: string | null;          // eigen foto (verkleind, als data-URL)
   details?: ArtikelDetails | null;
   cardmarket_id?: number | null; // voor sealed: het product op Cardmarket
+  zichtbaar?: boolean | null;    // op de klantenpagina (null: binders altijd, de rest als het in de catalogus ligt)
   aangemaakt_op?: string | null;
   gewijzigd_op?: string | null;
 }
@@ -124,6 +125,8 @@ export interface Beurs {
   stand_einde: Stand | null;
   opmerking: string | null;
   locatie?: string | null;
+  uren?: string | null;   // openingsuren, voor de klantenpagina (bv. 10:00–17:00)
+  link?: string | null;   // website of Facebook van de beurs
   omgeving_id?: string | null;
 }
 
@@ -147,6 +150,8 @@ export interface Tegenpartij {
   kanaal?: "beurs" | "online" | "rommelmarkt" | "andere" | null; // waar we kochten (buiten een beurs)
   btw?: string | null;              // ondernemingsnummer van een handelaar
   factuur?: string | null;          // factuurnummer van de handelaar (dan is hun factuur het bewijs)
+  met_factuur?: boolean;            // met factuur: die geef je zelf in Dexxter in (niet in de dagstaat-kost)
+  vendor?: boolean;                 // op een beurs gekocht van een andere stand (enkel ter info)
   id_gecontroleerd?: boolean;       // niet meer gebruikt (0.6)
   handtekening?: string | null;     // de verkoper, als SVG-pad (getekend op de gsm)
   handtekening_ons?: string | null; // de beheerder
@@ -222,6 +227,7 @@ export interface Bedrijf {
   adres?: string | null;
   kbo?: string | null;       // ondernemingsnummer
   start?: string | null;     // JJJJ-MM-DD: begin van de activiteit (voor de grens van de btw-vrijstelling in het startjaar)
+  boekhouding?: boolean;     // false: deze omgeving werkt als particulier (geen boekhouding, aankoopbewijzen of privé)
 }
 
 /** Een omgeving: Bind'r en Brent houden elk hun eigen stock, kassa en beurzen bij. */
@@ -254,8 +260,10 @@ export interface CatalogusKaart {
   setNaam: string;
   setCode: string;       // officiële afkorting, bv. PFL (leeg bij oudere sets)
   serie: string;
-  nummer: string;
-  setTotaal: number;
+  nummer: string;        // zoals gedrukt (Classic Collection van 30th: het oude nummer, bv. 4)
+  setTotaal: number;     // zoals gedrukt (Classic Collection: het totaal van de oude set, bv. 102)
+  lokaal?: string;       // het nummer bij TCGdex (voor de foto), als het anders is dan het gedrukte
+  alias?: { nr: string; totaal: number } | null; // een tweede gedrukt nummer om op te zoeken (Pikachu 01/30)
   naam: string;          // Engelse naam (of beste benadering)
   naamJa?: string;
   naamZhTw?: string;

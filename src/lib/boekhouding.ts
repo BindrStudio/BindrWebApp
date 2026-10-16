@@ -2,7 +2,7 @@
 // Enkel rekenwerk: wat elke transactie betekent voor de dagontvangsten en de kosten, de
 // dagrapporten, het borderel, de jaaromzet tegenover de vrijstellingsgrens en de voorraad
 // op een datum. Bronnen en de punten om met een boekhouder na te kijken: zie de README.
-import type { Artikel, Exemplaar, Regel, Tegenpartij, Transactie } from "../types";
+import type { Artikel, Beurs, Exemplaar, Regel, Tegenpartij, Transactie } from "../types";
 import { rond2, verwervingen } from "./kassa";
 
 export { verwervingen };
@@ -70,6 +70,7 @@ export interface Dag {
   aankopen: number;      // inkoop en ruil (hun kant), min wat we teruggaven
   aankopenGeld: number;  // waarvan inkoop voor geld (inkoop, en teruggedraaide inkopen)
   aankopenRuil: number;  // waarvan via ruil (de waarde van hun kaarten)
+  aankopenFactuur: number; // waarvan met factuur (een vendor of webshop): die factuur geef je zelf in Dexxter in
   inbreng: number;       // uit privé ingebracht (kost, betaald met privémiddelen)
   onttrekking: number;   // naar privé, aan aankoopwaarde
   kaarten: number;       // ontvangsten uit kaarten en slabs
@@ -84,13 +85,16 @@ export interface Dag {
 }
 
 const legeDag = (datum: string): Dag => ({
-  datum, verkopen: 0, ruil: 0, retour: 0, ontvangsten: 0, eigenLijnen: [], rest: 0, aankopen: 0, aankopenGeld: 0, aankopenRuil: 0,
+  datum, verkopen: 0, ruil: 0, retour: 0, ontvangsten: 0, eigenLijnen: [], rest: 0, aankopen: 0, aankopenGeld: 0, aankopenRuil: 0, aankopenFactuur: 0,
   inbreng: 0, onttrekking: 0, kaarten: 0, artikels: 0, cash: 0, sumup: 0, bank: 0, kas: 0, kasSumup: 0, transacties: [], beurzen: [],
 });
 
 /** Alle dagen met transacties, de nieuwste eerst. */
 export function dagontvangsten(transacties: Transactie[]): Dag[] {
   const dagen = new Map<string, Dag>();
+  const perId = new Map(transacties.map((t) => [t.id, t]));
+  // Een retour van een aankoop met factuur: die factuur (en een creditnota) ging apart in Dexxter, dus ook niet via de dagstaat.
+  const viaFactuur = (t: Transactie) => metFactuur(t) || (t.soort === "retour" && t.regels.some((r) => r.richting === "uit" && !!r.van && !!perId.get(r.van) && metFactuur(perId.get(r.van)!)));
   for (const t of transacties) {
     if (t.status === "ongedaan") continue;
     const datum = dagVan(t.tijd);
@@ -105,7 +109,8 @@ export function dagontvangsten(transacties: Transactie[]): Dag[] {
     else if (t.soort === "ruil") d.ruil += b.ontvangst;
     else d.verkopen += b.ontvangst;
     d.aankopen += b.aankoop;
-    if (t.soort === "ruil") d.aankopenRuil += b.aankoop; else d.aankopenGeld += b.aankoop;
+    if (viaFactuur(t)) d.aankopenFactuur += b.aankoop;
+    else if (t.soort === "ruil") d.aankopenRuil += b.aankoop; else d.aankopenGeld += b.aankoop;
     // Kaarten of artikels? (Een retour: wat terugkwam, telt negatief bij zijn soort.)
     const teken = t.soort === "retour" ? -1 : 1;
     const kant = t.soort === "retour" ? "in" : "uit";
@@ -127,7 +132,7 @@ export function dagontvangsten(transacties: Transactie[]): Dag[] {
       ...d,
       verkopen: rond2(d.verkopen), ruil: rond2(d.ruil), retour: rond2(d.retour), ontvangsten,
       rest: rond2(ontvangsten - som(d.eigenLijnen.map((l) => l.bedrag))),
-      aankopen: rond2(d.aankopen), aankopenGeld: rond2(d.aankopenGeld), aankopenRuil: rond2(d.aankopenRuil),
+      aankopen: rond2(d.aankopen), aankopenGeld: rond2(d.aankopenGeld), aankopenRuil: rond2(d.aankopenRuil), aankopenFactuur: rond2(d.aankopenFactuur),
       inbreng: rond2(d.inbreng), onttrekking: rond2(d.onttrekking), kaarten: rond2(d.kaarten), artikels: rond2(d.artikels),
       cash: rond2(d.cash), sumup: rond2(d.sumup), bank: rond2(d.bank),
       kas: rond2(d.kas), kasSumup: rond2(d.kasSumup),
@@ -136,7 +141,10 @@ export function dagontvangsten(transacties: Transactie[]): Dag[] {
   }).sort((a, b) => b.datum.localeCompare(a.datum));
 }
 
-/** De kosten van één dag voor Dexxter (uitgaven › aankoop van handelsgoederen): per soort één lijn. */
+/** Gekocht met een factuur (een vendor of webshop): die factuur geef je zelf in Dexxter in, niet via de dagstaat. */
+export const metFactuur = (t: Transactie) => !!t.tegenpartij?.met_factuur && t.soort !== "retour";
+
+/** De kosten van één dag voor Dexxter (uitgaven › aankoop van handelsgoederen): per soort één lijn. Zonder wat met factuur kwam. */
 export function kostenLijnen(d: Dag, waar?: string): DexxterLijn[] {
   const w = waar ? ` (${waar})` : "";
   return [
@@ -206,6 +214,8 @@ export function bewijsAdvies(t: Transactie, fotos: number): string[] {
   if (t.soort === "prive") return fotos || !t.regels.some((r) => r.richting === "in") ? [] : ["screenshot van de marktwaarde"];
   const p: Tegenpartij = t.tegenpartij ?? {};
   const advies: string[] = [];
+  // Met factuur: die factuur is het bewijs.
+  if (p.met_factuur) return p.factuur?.trim() ? [] : ["factuurnummer"];
   if (!fotos) advies.push("foto van de kaarten");
   if (!p.naam?.trim()) advies.push("naam van de verkoper");
   if (p.type === "handelaar") {
@@ -283,6 +293,9 @@ export interface Inventaris {
   zonderAankoop: { aantal: number; waarde: number };
 }
 
+/** Een zelf toegevoegde kaart die met een factuur gekocht werd (de kost staat al in Dexxter). */
+export const metFactuurBron = (bron: string | null | undefined) => /^factuur/i.test((bron ?? "").trim());
+
 /** Het aantal van een artikel op het einde van `datum`, zonder de kassa: wat er met de hand bij of af ging na die dag, teruggedraaid. */
 function tellingenNa(a: Artikel, datum: string): number {
   return (a.details?.tellingen ?? []).filter((x) => dagVan(x.op) > datum).reduce((s, x) => s + x.delta, 0);
@@ -324,7 +337,7 @@ export function voorraadOp(datum: string, exemplaren: Exemplaar[], artikelen: Ar
       id: e.id, code: e.code, soort: e.soort,
       omschrijving: [e.naam, [e.set_code, e.nummer].filter(Boolean).join(" "), e.taal, e.soort === "slab" ? [e.grader, e.grade].filter(Boolean).join(" ") : e.conditie].filter(Boolean).join(" · "),
       aantal: 1, aankoopdatum: t ? dagVan(t.tijd) : e.aankoopdatum, herkomst: t ? (t.soort === "ruil" ? "ruil" : t.soort === "prive" ? "uit privé" : "aankoop") : e.aankoopbron || "zelf toegevoegd",
-      borderel: t ? bewijsNummer(t) : null, waarde: rond2(e.aankoopprijs ?? 0), zonderWaarde: e.aankoopprijs == null, zonderAankoop: !t && e.soort !== "eigen product",
+      borderel: t ? bewijsNummer(t) : null, waarde: rond2(e.aankoopprijs ?? 0), zonderWaarde: e.aankoopprijs == null, zonderAankoop: !t && e.soort !== "eigen product" && !metFactuurBron(e.aankoopbron),
     });
   }
   // Artikels: het aantal van nu, min wat er na de datum binnenkwam, plus wat er na de datum uitging.
@@ -367,3 +380,18 @@ export function cel(v: string | number | null | undefined): string {
   return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 export const csv = (rijen: (string | number | null | undefined)[][]) => rijen.map((r) => r.map(cel).join(";")).join("\n");
+
+// ── Waar het gebeurde ────────────────────────────────────────────────────────
+
+export const KANAAL: Record<NonNullable<Tegenpartij["kanaal"]>, string> = {
+  beurs: "Beurs", online: "Online (Facebook, Vinted …)", rommelmarkt: "Rommelmarkt", andere: "Andere",
+};
+
+/** Waar een transactie gebeurde: de beurs, of het kanaal dat bij het afrekenen gekozen werd (buiten een beurs). */
+export function waarGekocht(t: Transactie, beurzen: Beurs[]): string {
+  const b = beurzen.find((x) => x.id === t.beurs_id);
+  if (b) return b.naam;
+  if (t.soort === "prive") return t.regels.some((r) => r.richting === "in") ? "uit privé" : "naar privé";
+  const k = t.tegenpartij?.kanaal;
+  return k ? KANAAL[k].replace(/ \(.*\)/, "") : "buiten een beurs";
+}
