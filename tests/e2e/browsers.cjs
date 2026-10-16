@@ -157,11 +157,17 @@ async function doorloop(ctx, page, motor, naam, opties) {
     await page.waitForTimeout(650);
     await nooitTeBreed(`beheer ${tab}`);
     // Het lichtblauwe ovaaltje staat onder de actieve tab (op een Mac schoot het er ooit voorbij).
-    const naast = await page.evaluate(() => {
-      const d = document.querySelector(".tabbalk .tab-duim").getBoundingClientRect();
-      const k = document.querySelector(".tabbalk button.aan").getBoundingClientRect();
-      return Math.abs((d.left + d.width / 2) - (k.left + k.width / 2));
-    });
+    // Wachten tot het stilstaat: in GitHub Actions kan het openen van de Kassa in WebKit lang duren, en dan
+    // is het ovaaltje na een vaste wachttijd nog onderweg.
+    let naast = Infinity;
+    for (let i = 0; i < 40 && naast >= 3; i++) {
+      if (i) await page.waitForTimeout(100);
+      naast = await page.evaluate(() => {
+        const d = document.querySelector(".tabbalk .tab-duim").getBoundingClientRect();
+        const k = document.querySelector(".tabbalk button.aan").getBoundingClientRect();
+        return Math.abs((d.left + d.width / 2) - (k.left + k.width / 2));
+      });
+    }
     assert.ok(naast < 3, `beheer ${tab}: het ovaaltje staat ${Math.round(naast)} px naast de tab`);
   }
   await foto("beheer-profiel");
