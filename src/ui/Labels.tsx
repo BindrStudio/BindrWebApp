@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
-import { afstelling, kiesPrinter, koppelPrinter, loskoppelen, openExemplaar, print, printRandtestNu, printTestlabel, useApp, wijzigVeel, zetAfstelling, zetInstellingen } from "../state";
+import { afstelling, kiesPrinter, koppelPrinter, loskoppelen, openExemplaar, perStrook, print, printRandtestNu, printTestlabel, useApp, wijzigVeel, zetAfstelling, zetInstellingen } from "../state";
 import type { Exemplaar } from "../types";
 import { toonCode } from "../lib/code";
 import { krijgtLabel } from "../lib/exemplaar";
-import { FICHERO_MAAT, LABELMATEN, labelDataUrl, verschuivingTekst } from "../lib/label";
+import { FICHERO_MAAT, LABELMATEN, labelDataUrl, labelRol, verschuivingTekst } from "../lib/label";
 import { bluetoothMogelijk, huidigeMaat, isIphone, PRINTERS, VERSCHUIVING_MAX } from "../lib/printer";
 import { ficheroDonkerte } from "../lib/fichero";
 import { Icoon, Leeg, Segment } from "./common";
@@ -13,13 +13,18 @@ type Lijst = "te printen" | "geprint";
 const ACTIEF = (e: Exemplaar) => e.status === "in voorraad" && krijgtLabel(e);
 const BLUEFY = "https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055";
 
+/** De kaarten die nog een label moeten krijgen, de oudste eerst (zoals in Labels › Te printen). */
+export function wachtOpLabel(exemplaren: Exemplaar[]): Exemplaar[] {
+  return exemplaren.filter((e) => ACTIEF(e) && e.label_status === "te printen").sort((a, b) => a.aangemaakt_op.localeCompare(b.aangemaakt_op));
+}
+
 export function Labels({ inSheet = false }: { inSheet?: boolean }) {
-  const { exemplaren } = useApp();
+  const { exemplaren, instellingen } = useApp();
   const [lijst, setLijst] = useState<Lijst>("te printen");
   const [gekozen, setGekozen] = useState<Set<string> | null>(null); // null = alles
 
-  const tePrinten = useMemo(() => exemplaren.filter((e) => ACTIEF(e) && e.label_status === "te printen")
-    .sort((a, b) => a.aangemaakt_op.localeCompare(b.aangemaakt_op)), [exemplaren]);
+  const tePrinten = useMemo(() => wachtOpLabel(exemplaren), [exemplaren]);
+  const per = perStrook(instellingen);
   const geprint = useMemo(() => exemplaren.filter((e) => ACTIEF(e) && e.label_status === "geprint"), [exemplaren]);
   const toon = lijst === "te printen" ? tePrinten : geprint;
   const selectie = gekozen ? toon.filter((e) => gekozen.has(e.id)) : toon;
@@ -65,6 +70,11 @@ export function Labels({ inSheet = false }: { inSheet?: boolean }) {
             ))}
           </ul>
           <div className={`onderbalk${inSheet ? " in-sheet" : ""}`}>
+            {per === 2 && selectie.length % 2 === 1 && (
+              <p className="zacht klein center strook-tip">
+                {selectie.length} {selectie.length === 1 ? "label" : "labels"} = {Math.ceil(selectie.length / 2)} {selectie.length === 1 ? "strook" : "strookjes"}: één helft blijft leeg.{toon.length > selectie.length ? " Kies er nog één bij om niets te verspillen." : ""}
+              </p>
+            )}
             {lijst === "te printen" ? (
               <button className="knop groot" disabled={!selectie.length} onClick={() => { void print(selectie.map((e) => e.id)); setGekozen(null); }}>
                 <Icoon naam="printer" maat={20} /> {selectie.length === 1 ? "Print 1 label" : `Print ${selectie.length} labels`}
@@ -97,9 +107,11 @@ export function printerDelen(printer: string | null, i: ReturnType<typeof useApp
   const soort = i.labelPrinter ?? "niimbot";
   const a = afstelling(i);
   const wie = printer ?? (soort === "fichero" ? "Fichero" : "Niimbot");
-  const rol = soort === "fichero" ? `${FICHERO_MAAT.mmBreed} × ${FICHERO_MAAT.mmHoog} mm` : LABELMATEN.find((l) => l.id === i.labelMaat)?.label ?? "";
+  const r = labelRol(i.labelMaat);
+  const rol = soort === "fichero" ? `${FICHERO_MAAT.mmBreed} × ${FICHERO_MAAT.mmHoog} mm` : r.kort ?? r.label;
   const donker = soort === "fichero" ? ["licht", "normaal", "donker"][ficheroDonkerte(a.donkerte)] : `donkerte ${a.donkerte}`;
-  return [wie, printer ? "verbonden" : null, rol, donker, a.verschuiving ? verschuivingTekst(a.verschuiving, soort === "fichero") : null, a.trager ? "trager" : null].filter((x): x is string => !!x);
+  const opzij = soort === "niimbot" && r.per === 2 && a.zijwaarts ? verschuivingTekst(a.zijwaarts, true) : null;
+  return [wie, printer ? "verbonden" : null, rol, donker, a.verschuiving ? verschuivingTekst(a.verschuiving, soort === "fichero") : null, opzij, a.trager ? "trager" : null].filter((x): x is string => !!x);
 }
 
 /**
@@ -111,7 +123,8 @@ export function PrinterBlok() {
   const soort = instellingen.labelPrinter ?? "niimbot";
   const fichero = soort === "fichero";
   const kan = bluetoothMogelijk(soort);
-  const rol = fichero ? `${FICHERO_MAAT.mmBreed} × ${FICHERO_MAAT.mmHoog} mm` : LABELMATEN.find((l) => l.id === instellingen.labelMaat)?.label ?? "";
+  const r = labelRol(instellingen.labelMaat);
+  const rol = fichero ? `${FICHERO_MAAT.mmBreed} × ${FICHERO_MAAT.mmHoog} mm` : r.label;
   return (
     <div className="printer-blok">
       <div className="maatkeuze printerkeuze">
@@ -149,9 +162,15 @@ export function PrinterBlok() {
           <span className="zacht klein">Labelrol</span>
           <div className="chips">
             {LABELMATEN.map((m) => (
-              <button key={m.id} className={`chip${instellingen.labelMaat === m.id ? " aan" : ""}`} onClick={() => zetInstellingen({ labelMaat: m.id })}>{m.label}</button>
+              <button key={m.id} className={`chip${r.id === m.id ? " aan" : ""}`} aria-pressed={r.id === m.id} onClick={() => zetInstellingen({ labelMaat: m.id })}>{m.label}</button>
             ))}
           </div>
+          {r.per === 2 && (
+            <p className="zacht klein">
+              Twee labels naast elkaar op één strook. De printer schuift altijd een hele strook door: print je één label,
+              dan komt het links en blijft de rechterhelft leeg. Bij <em>Te printen</em> komen ze per twee op een strook.
+            </p>
+          )}
         </div>
       )}
 
@@ -185,10 +204,10 @@ export function Afstellen() {
   const { instellingen, bezig } = useApp();
   const a = afstelling(instellingen);
   const fichero = a.printer === "fichero";
-  const schuif = (d: number) => {
-    const n = Math.min(VERSCHUIVING_MAX, Math.max(-VERSCHUIVING_MAX, Math.round(((a.verschuiving ?? 0) + d) * 2) / 2));
-    zetAfstelling({ verschuiving: n });
-  };
+  const duo = perStrook(instellingen) === 2;
+  const stap = (nu: number | undefined, d: number) => Math.min(VERSCHUIVING_MAX, Math.max(-VERSCHUIVING_MAX, Math.round(((nu ?? 0) + d) * 2) / 2));
+  const schuif = (d: number) => zetAfstelling({ verschuiving: stap(a.verschuiving, d) });
+  const opzij = (d: number) => zetAfstelling({ zijwaarts: stap(a.zijwaarts, d) });
   return (
     <details className="afstellen">
       <summary>Proeflabel en afstellen ({fichero ? "Fichero" : "Niimbot"})</summary>
@@ -197,8 +216,10 @@ export function Afstellen() {
         <button className="knop zacht klein" disabled={!!bezig} onClick={() => void printRandtestNu()}><Icoon naam="printer" maat={16} /> Randtest</button>
       </div>
       <p className="zacht klein">
-        Randtest: zie je de vier randen met streepjes (1 streepje = 1 mm)? Dan valt er niets weg.
-        {fichero ? " Boven en onder een smal wit randje is normaal: de printkop is 12 mm breed." : " Links en rechts een smal wit randje is normaal."}
+        {duo
+          ? "Randtest: een kader op elk label (1 streepje = 1 mm). Zie je op allebei de vier randen? Dan valt er niets weg. Valt links of rechts een rand weg of loopt een kader over de ruimte tussen de labels: schuif naar links of rechts."
+          : "Randtest: zie je de vier randen met streepjes (1 streepje = 1 mm)? Dan valt er niets weg."}
+        {fichero ? " Boven en onder een smal wit randje is normaal: de printkop is 12 mm breed." : duo ? "" : " Links en rechts een smal wit randje is normaal."}
       </p>
       <div className="afstel-rij">
         <span>Donkerte</span>
@@ -221,6 +242,16 @@ export function Afstellen() {
           <button className="knop zacht klein" onClick={() => schuif(0.5)} disabled={(a.verschuiving ?? 0) >= VERSCHUIVING_MAX}>{fichero ? "Naar rechts" : "Lager"}</button>
         </div>
       </div>
+      {duo && (
+        <div className="afstel-rij">
+          <span>Staat de print te ver naar links of rechts?</span>
+          <div className="afstel-schuif zijwaarts">
+            <button className="knop zacht klein" onClick={() => opzij(-0.5)} disabled={(a.zijwaarts ?? 0) <= -VERSCHUIVING_MAX}>Naar links</button>
+            <strong aria-live="polite">{verschuivingTekst(a.zijwaarts ?? 0, true)}</strong>
+            <button className="knop zacht klein" onClick={() => opzij(0.5)} disabled={(a.zijwaarts ?? 0) >= VERSCHUIVING_MAX}>Naar rechts</button>
+          </div>
+        </div>
+      )}
       <label className="schakel rij">
         <input type="checkbox" checked={!!a.trager} onChange={(e) => zetAfstelling({ trager: e.target.checked })} />
         <span>Trager printen <span className="zacht klein">(als een label leeg of half uit de printer komt)</span></span>

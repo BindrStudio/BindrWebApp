@@ -1671,3 +1671,7 @@ body { transition: background-color .4s ease; }
 .printer-details .printer-icoon { width: 40px; height: 40px; border-radius: 12px; }
 .printer-blok .afstellen:not([open]) { padding: 10px 14px; }
 .geen-breuk { white-space: nowrap; }
+/* Twee labels per strook: de uitleg bij een oneven aantal en in een kaart. */
+.strook-tip { margin: 6px 0 0; }
+.onderbalk .strook-tip { margin: 0; padding: 8px 12px; border-radius: var(--rond-klein); background: var(--boter-licht); color: var(--inkt); box-shadow: var(--schaduw); }
+.strook-tip .tekstknop { display: inline; padding: 0; text-align: left; }

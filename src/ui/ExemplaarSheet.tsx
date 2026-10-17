@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { annuleerReservering, bevestigLabel, kanNieuweBoekhouding, kanReserveren, meld, OUD_SCHEMA, openExemplaar, openToevoegen, print, prive, reserveer, SCHEMA_016, sluit, useApp, wijzig, zetHartje } from "../state";
+import { annuleerReservering, bevestigLabel, kanNieuweBoekhouding, kanReserveren, meld, OUD_SCHEMA, openExemplaar, openToevoegen, perStrook, print, prive, reserveer, SCHEMA_016, sluit, useApp, wijzig, zetHartje } from "../state";
 import type { Exemplaar } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
 import { dagenGeleden, datumKort, euro, getal, vandaag } from "../lib/format";
@@ -10,7 +10,7 @@ import { labelDataUrl } from "../lib/label";
 import { huidigeMaat } from "../lib/printer";
 import { Badges, FotoGroot, Hartje, Icoon, KaartFoto, Kiezer, OnderAankoop, onderAankoop, Sheet, Veld } from "./common";
 import { MandjeActie } from "./MandjeActie";
-import { PrinterBlok, printerDelen } from "./Labels";
+import { PrinterBlok, printerDelen, wachtOpLabel } from "./Labels";
 import { PLAATS } from "../lib/categorie";
 import { setIdVan, setNaam } from "../lib/weergave";
 import { useSets } from "./Voorraad";
@@ -390,7 +390,10 @@ function HartjeBlok({ ex, voorstelPrijs }: { ex: Exemplaar; voorstelPrijs: numbe
 }
 
 function LabelBlok({ ex, printer }: { ex: Exemplaar; printer: string | null }) {
-  const { instellingen } = useApp();
+  const { instellingen, exemplaren } = useApp();
+  // Twee labels per strook: een kaart die ook op een label wacht, kan mee op de rechterhelft.
+  const duo = perStrook(instellingen) === 2;
+  const ander = useMemo(() => (duo ? wachtOpLabel(exemplaren).find((e) => e.id !== ex.id) : undefined), [duo, exemplaren, ex.id]);
   const voorbeeld = useMemo(() => {
     try { return labelDataUrl(ex, huidigeMaat(instellingen.labelMaat, instellingen.labelPrinter)); } catch { return null; }
   }, [ex.code, ex.naam, ex.set_code, ex.nummer, ex.conditie, ex.taal, ex.variant, ex.grader, ex.grade, ex.soort, instellingen.labelMaat, instellingen.labelPrinter, printer]);
@@ -406,6 +409,12 @@ function LabelBlok({ ex, printer }: { ex: Exemplaar; printer: string | null }) {
           <button className="knop zacht" onClick={() => void wijzig(ex.id, { label_status: "gestickerd" }, "Label staat op geplakt")}>Label hangt erop</button>
         )}
       </div>
+      {duo && (
+        <p className="zacht klein strook-tip">
+          Twee labels per strook: dit label komt links, de rechterhelft blijft leeg.
+          {ander && <> <button className="tekstknop klein" onClick={() => void print([ex.id, ander.id])}>Samen met {ander.naam} ({toonCode(ander.code)}) op één strook</button></>}
+        </p>
+      )}
       {/* Waarmee deze gsm print, en de afstelling: ook hier te kiezen (zelfde blok als in Labels). */}
       <details className="printer-details">
         <summary><Icoon naam="printer" maat={16} /> <span>{printerDelen(printer, instellingen).map((d, i) => <Fragment key={i}>{i > 0 && " · "}<span className="geen-breuk">{d}</span></Fragment>)}</span> <span className="tekstknop klein">Wijzig</span></summary>

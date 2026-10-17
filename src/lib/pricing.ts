@@ -14,6 +14,7 @@ export interface Instellingen {
   labelMaat: string; // id uit LABELMATEN
   labelDonkerte?: number;     // 1–5 zoals in de Niimbot-app (standaard 3), enkel op dit toestel
   labelVerschuiving?: number; // mm langs de doorvoer: + = lager op het label, − = hoger (stappen van 0,5)
+  labelZijwaarts?: number;    // mm opzij: + = naar rechts (enkel bij twee labels per strook)
   labelTrager?: boolean;      // trager versturen als labels leeg of half uit de printer komen
   labelPrinter?: "niimbot" | "fichero"; // welke labelprinter dit toestel gebruikt (standaard de Niimbot)
   // De afstelling van de Fichero apart (de label…-velden hierboven zijn die van de Niimbot): wisselen van printer

@@ -305,11 +305,88 @@ function kamer() {
     await kaart("FMX-FSF");
     assert.match(await sheet().locator(".printer-details > summary").innerText(), /^Niimbot · 50 × 15 mm · donkerte 3 · 0,5 mm lager/);
     await sheet().getByRole("button", { name: "Print label" }).click();
+    await wachtPaginas(1);
     await melding(/Label geprint/);
     s = await k();
     // Na herladen is de oude pagina weg (nieuwe kamer): de eerste pagina in deze sessie.
     assert.equal(s.paginas.length, 1);
     assert.deepEqual([s.paginas[0].W, s.paginas[0].H, s.paginas[0].gevuld], [576, 177, 177]);
+
+    // ── Twee labels per strook (Niimbot T50*15/2R-460: 2 × 23 × 15 mm) ──
+    // Zwarte pixels in de linker- en rechterhelft van een strook, en in hoeveel rijen kolom x zwart is.
+    const helften = (i) => page.evaluate((i) => {
+      const p = window.__kamer.niim.paginas[i];
+      const tel = (a, b) => { let n = 0; p.rijen.forEach((r) => { if (r) for (let x = a; x < b; x++) if (r[x >> 3] & (0x80 >> (x & 7))) n++; }); return n; };
+      return [tel(0, 288), tel(288, 576)];
+    }, i);
+    const kolom = (i, x) => page.evaluate(([i, x]) => window.__kamer.niim.paginas[i].rijen.filter((r) => r && r[x >> 3] & (0x80 >> (x & 7))).length, [i, x]);
+
+    stap("twee per strook: de rol kiezen in de kaart; één label komt links, de rechterhelft blijft leeg");
+    await sheet().locator(".printer-details > summary").click();
+    await sheet().locator(".printer-details .maatkeuze:not(.printerkeuze) .chip", { hasText: "2 per strook" }).click();
+    await sheet().locator(".printer-details", { hasText: "Twee labels naast elkaar op één strook" }).waitFor();
+    assert.match(await sheet().locator(".printer-details > summary").innerText(), /^Niimbot B1 Pro · verbonden · 2 per strook · donkerte 3 · 0,5 mm lager/);
+    const voorbeeld = await sheet().locator(".label-voorbeeld").evaluate((img) => [img.naturalWidth, img.naturalHeight]);
+    assert.deepEqual(voorbeeld, [272, 177], "het voorbeeld is één label van 23 × 15 mm");
+    const tip = sheet().locator(".strook-tip");
+    assert.match(await tip.innerText(), /dit label komt links, de rechterhelft blijft leeg/);
+    await sheet().getByRole("button", { name: "Print label" }).click();
+    await wachtPaginas(2);
+    await melding(/op de linkerhelft van de strook/);
+    let h = await helften(1);
+    assert.ok(h[0] > 2000 && h[1] === 0, `links het label, rechts leeg (${h})`);
+    await labelPng(1, "duo-1-links.png");
+
+    stap("twee per strook: in de kaart samen met een kaart die ook op een label wacht");
+    const samenKnop = tip.getByRole("button", { name: /^Samen met .+ op één strook$/ });
+    assert.match(await samenKnop.innerText(), /^Samen met .+ \([0-9A-Z]{3}-[0-9A-Z]{3}\) op één strook$/);
+    await samenKnop.click();
+    await wachtPaginas(3);
+    await melding(/2 labels geprint op één strook/);
+    h = await helften(2);
+    assert.ok(h[0] > 2000 && h[1] > 2000, `twee labels op één strook (${h})`);
+    await labelPng(2, "duo-2-samen.png");
+    await foto("6-duo-kaart");
+
+    stap("twee per strook: proeflabel op allebei de helften, randtest met een kader per label");
+    await sheet().locator(".printer-details .afstellen:not(.fichero-uitleg) > summary").click();
+    await sheet().locator(".printer-details").getByRole("button", { name: "Proeflabel" }).click();
+    await wachtPaginas(4);
+    h = await helften(3);
+    assert.ok(h[0] > 2000 && h[0] === h[1], `het proeflabel twee keer, links en rechts gelijk (${h})`);
+    await sheet().locator(".printer-details").getByRole("button", { name: "Randtest" }).click();
+    await wachtPaginas(5);
+    // De linkerrand van elk kader over de hele hoogte (min 6 rijen: deze gsm staat 0,5 mm lager), niets tussen de labels.
+    assert.deepEqual([await kolom(4, 5), await kolom(4, 300), await kolom(4, 288)], [171, 171, 0]);
+    await labelPng(4, "duo-randtest.png");
+
+    stap("twee per strook: 0,5 mm naar rechts schuift beide labels 6 pixels op");
+    await sheet().locator(".printer-details .afstel-schuif.zijwaarts").getByRole("button", { name: "Naar rechts" }).click();
+    await sheet().locator(".printer-details .afstel-schuif.zijwaarts strong", { hasText: "0,5 mm naar rechts" }).waitFor();
+    assert.match(await sheet().locator(".printer-details > summary").innerText(), /0,5 mm naar rechts/);
+    await sheet().locator(".printer-details").getByRole("button", { name: "Randtest" }).click();
+    await wachtPaginas(6);
+    assert.deepEqual([await kolom(5, 11), await kolom(5, 306), await kolom(5, 5) < 171], [171, 171, true]);
+    await labelPng(5, "duo-randtest-rechts.png");
+    await sheet().locator(".printer-details .afstellen:not(.fichero-uitleg)").scrollIntoViewIfNeeded();
+    await foto("7-duo-afstellen");
+    await sluitAlles();
+
+    stap("twee per strook: in Labels drie labels = twee strookjes, de laatste helft leeg");
+    await page.getByRole("button", { name: "Instellingen" }).click();
+    await sheet().getByRole("button", { name: /Printer verbinden, proeflabel en afstellen/ }).click();
+    await sheet().getByRole("button", { name: "Niets kiezen" }).click();
+    for (let i = 0; i < 3; i++) await sheet().locator(".labelrij .vink").nth(i).click();
+    await sheet().locator(".onderbalk .strook-tip", { hasText: /3 labels = 2 strookjes: één helft blijft leeg\./ }).waitFor();
+    await foto("8-duo-labels");
+    await sheet().getByRole("button", { name: "Print 3 labels" }).click();
+    await wachtPaginas(8);
+    await melding(/3 labels geprint op 2 strookjes/);
+    const [h7, h8] = [await helften(6), await helften(7)];
+    assert.ok(h7[0] > 2000 && h7[1] > 2000 && h8[0] > 2000 && h8[1] === 0, `twee vol, dan één links (${h7} / ${h8})`);
+    await labelPng(6, "duo-3-strook1.png");
+    await labelPng(7, "duo-3-strook2.png");
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 0, "niets steekt uit");
     await ctx.close();
   }
   assert.deepEqual(fouten, [], "geen JavaScript-fouten");

@@ -15,6 +15,7 @@ import { dagVan, euro, vandaag } from "./lib/format";
 import { HARTJES_OK, kies } from "./lib/grapjes";
 import { laadTestset } from "./lib/testset";
 import { printLabels, printRandtest, printerNaam, verbindPrinter, ontkoppelPrinter, type Afstelling } from "./lib/printer";
+import { labelRol } from "./lib/label";
 import { laadCatalogus } from "./lib/catalog";
 import { laadOcr } from "./lib/ocr";
 import { uuid } from "./lib/uuid";
@@ -1314,18 +1315,27 @@ export function afstelling(i = state.instellingen): Afstelling {
     const f = i.labelFichero ?? {};
     return { donkerte: f.donkerte ?? 3, verschuiving: f.verschuiving ?? 0, trager: !!f.trager, printer: "fichero" };
   }
-  return { donkerte: i.labelDonkerte ?? 3, verschuiving: i.labelVerschuiving ?? 0, trager: !!i.labelTrager, printer: "niimbot" };
+  return { donkerte: i.labelDonkerte ?? 3, verschuiving: i.labelVerschuiving ?? 0, zijwaarts: i.labelZijwaarts ?? 0, trager: !!i.labelTrager, printer: "niimbot" };
 }
 
 /** De afstelling van de gekozen printer aanpassen (enkel die printer). */
-export function zetAfstelling(w: { donkerte?: number; verschuiving?: number; trager?: boolean }) {
+export function zetAfstelling(w: { donkerte?: number; verschuiving?: number; zijwaarts?: number; trager?: boolean }) {
   const i = state.instellingen;
-  if (i.labelPrinter === "fichero") return zetInstellingen({ labelFichero: { ...i.labelFichero, ...w } });
+  if (i.labelPrinter === "fichero") {
+    const { zijwaarts: _, ...f } = w; // opzij schuiven is de verschuiving zelf bij de Fichero
+    return zetInstellingen({ labelFichero: { ...i.labelFichero, ...f } });
+  }
   zetInstellingen({
     ...(w.donkerte !== undefined ? { labelDonkerte: w.donkerte } : {}),
     ...(w.verschuiving !== undefined ? { labelVerschuiving: w.verschuiving } : {}),
+    ...(w.zijwaarts !== undefined ? { labelZijwaarts: w.zijwaarts } : {}),
     ...(w.trager !== undefined ? { labelTrager: w.trager } : {}),
   });
+}
+
+/** Twee labels per strook (Niimbot met zo'n rol): print per twee; één label komt op de linkerhelft. */
+export function perStrook(i = state.instellingen): 1 | 2 {
+  return (i.labelPrinter ?? "niimbot") === "niimbot" && labelRol(i.labelMaat).per === 2 ? 2 : 1;
 }
 const voortgang = (s: string) => zet({ bezig: s === "ok" ? "Klaar" : `Printen: ${s}` });
 
@@ -1337,7 +1347,8 @@ export async function print(ids: string[]) {
     await printLabels(ex, state.instellingen.labelMaat, voortgang, afstelling());
     zet({ printer: printerNaam() });
     wijzigVeel(ex.filter((e) => e.label_status === "te printen").map((e) => e.id), { label_status: "geprint" });
-    meld(ex.length === 1 ? "Label geprint. Scan het na het plakken." : `${ex.length} labels geprint. Scan ze na het plakken.`);
+    if (perStrook() === 2) meld(ex.length === 1 ? "Label geprint, op de linkerhelft van de strook. Scan het na het plakken." : `${ex.length} labels geprint op ${ex.length === 2 ? "één strook" : `${Math.ceil(ex.length / 2)} strookjes`}. Scan ze na het plakken.`);
+    else meld(ex.length === 1 ? "Label geprint. Scan het na het plakken." : `${ex.length} labels geprint. Scan ze na het plakken.`);
   } catch (e) {
     printFout(e);
   } finally {
@@ -1353,7 +1364,7 @@ export async function printTestlabel() {
   } as Exemplaar;
   zet({ bezig: "Proeflabel printen…" });
   try {
-    await printLabels([proef], state.instellingen.labelMaat, voortgang, afstelling());
+    await printLabels([proef], state.instellingen.labelMaat, voortgang, afstelling(), true);
     zet({ printer: printerNaam() });
     meld("Proeflabel geprint. Scan het met Scan om de QR-code te testen.");
   } catch (e) {

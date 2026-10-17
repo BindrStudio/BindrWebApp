@@ -2,8 +2,8 @@
 // Fichero (Action): het beeld gedraaid naar 96 px, de bytes per label en de antwoorden van de printer.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { printOpties } from "../src/lib/printer";
-import { maatVoor, verschuivingTekst } from "../src/lib/label";
+import { printOpties, zijwaartsPx } from "../src/lib/printer";
+import { enkelLabel, labelRol, maatVoor, verschuivingTekst } from "../src/lib/label";
 import { CMD, ficheroDonkerte, ficheroSchuif, isKlaar, labelOpdracht, naarRaster, printerFout, rasterKop, stukjes } from "../src/lib/fichero";
 
 test("B1 Pro: 50 × 15 mm = 576 × 177 px, standaard donkerte 3 zonder verschuiving", () => {
@@ -21,6 +21,36 @@ test("verschuiving in mm wordt pixels langs de doorvoer; + = lager, − = hoger"
   // De gewone B1 schuift standaard 4 px op (zoals in de driver); de verschuiving komt erbij.
   const b1 = printOpties("b1", "50x15", { verschuiving: 0.5 });
   assert.deepEqual([b1.size.w_px, b1.size.h_px, b1.offsetY], [384, 120, 8]);
+});
+
+test("twee labels per strook (T50*15/2R): de strook is de hele printkop, elk label 23 mm met 2 mm ertussen", () => {
+  const m = maatVoor(300, "50x15x2");
+  assert.deepEqual([m.breedte, m.hoogte, m.mmLabel], [576, 177, 23]);
+  // De printkop (48,8 mm) staat in het midden van de strook (50 mm): het eerste label begint 0,4 mm
+  // na het begin van de kop, het tweede 25 mm verder.
+  assert.deepEqual(m.vakken, [{ x: 5, breedte: 272 }, { x: 300, breedte: 272 }]);
+  const tussen = m.vakken![1].x - (m.vakken![0].x + m.vakken![0].breedte);
+  assert.ok(tussen >= 22 && tussen <= 25, `± 2 mm tussen de labels (${tussen} px)`);
+  assert.ok(m.vakken![1].x + m.vakken![1].breedte <= 576, "het rechtse label past op de kop");
+  // De gewone B1 (203 dpi): dezelfde maten in millimeter.
+  const b1 = maatVoor(203, "50x15x2");
+  assert.deepEqual([b1.breedte, b1.hoogte, b1.vakken], [384, 120, [{ x: 0, breedte: 184 }, { x: 200, breedte: 184 }]]);
+  // Eén label (om te tekenen en te tonen) is één helft; een gewone rol blijft zichzelf.
+  assert.deepEqual(enkelLabel(m), { breedte: 272, hoogte: 177, dpi: 300, mmBreed: 23, mmHoog: 15 });
+  assert.equal(enkelLabel(maatVoor(300, "50x15")).breedte, 576);
+  assert.equal(maatVoor(300, "50x15").vakken, undefined);
+  // De driver krijgt de hele strook.
+  const o = printOpties("b1pro", "50x15x2");
+  assert.deepEqual([o.size.w_px, o.size.h_px], [576, 177]);
+  assert.equal(labelRol("bestaat-niet").id, "50x15", "een onbekende rol: de standaard");
+});
+
+test("opzij schuiven (twee per strook): + = naar rechts, in pixels, hoogstens 3 mm", () => {
+  assert.equal(zijwaartsPx(300, { zijwaarts: 0.5 }), 6);
+  assert.equal(zijwaartsPx(300, { zijwaarts: -1 }), -12);
+  assert.equal(zijwaartsPx(300, { zijwaarts: 9 }), 35);
+  assert.equal(zijwaartsPx(203, { zijwaarts: 1 }), 8);
+  assert.equal(zijwaartsPx(300), 0);
 });
 
 test("donkerte is een geheel getal van 1 tot 5", () => {

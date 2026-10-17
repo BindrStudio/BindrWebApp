@@ -19,30 +19,65 @@ export interface LabelMaat {
   dpi: number;
   mmBreed: number;
   mmHoog: number;
+  /** Rol met twee labels naast elkaar op één strook: waar elk label op de strook staat (pixels langs de kop). */
+  vakken?: { x: number; breedte: number }[];
+  mmLabel?: number; // breedte van één label op zo'n rol
+}
+
+export interface LabelRol {
+  id: string;
+  label: string;
+  kort?: string;   // in de samenvatting van de printer
+  b: number;       // breedte van de strook (mm)
+  h: number;       // hoogte (mm)
+  per?: 2;         // twee labels naast elkaar op één strook (de printer print altijd de hele strook)
+  labelB?: number; // breedte van één label (mm)
+  tussen?: number; // ruimte tussen de twee labels (mm)
 }
 
 // Labelrollen die passen op de achterkant van een toploader. 50 × 15 mm is de standaard;
-// de andere zijn er voor als de rol die jullie kopen anders blijkt.
-export const LABELMATEN = [
+// de andere zijn er voor als de rol die jullie kopen anders blijkt. "2 per strook" = Niimbot
+// T50*15/2R-460: twee labels van 23 × 15 mm naast elkaar, 2 mm ertussen (de printer kent enkel de
+// strook: hij schuift per strook door, nooit per half).
+export const LABELMATEN: LabelRol[] = [
   { id: "50x15", label: "50 × 15 mm", b: 50, h: 15 },
+  { id: "50x15x2", label: "2 per strook (2 × 23 × 15 mm)", kort: "2 per strook", b: 50, h: 15, per: 2, labelB: 23, tussen: 2 },
   { id: "40x15", label: "40 × 15 mm", b: 40, h: 15 },
   { id: "50x20", label: "50 × 20 mm", b: 50, h: 20 },
   { id: "50x30", label: "50 × 30 mm", b: 50, h: 30 },
-] as const;
+];
+
+/** De rol met dit id (een onbekend id: de standaard 50 × 15). */
+export function labelRol(labelId?: string): LabelRol {
+  return LABELMATEN.find((l) => l.id === labelId) || LABELMATEN[0];
+}
 
 // Breedte van de printkop: B1 Pro 576 px (300 dpi), B1 384 px (203 dpi), zoals de driver ze gebruikt.
 const PRINTKOP: Record<number, number> = { 300: 576, 203: 384 };
 
 export function maatVoor(dpi: number, labelId = "50x15"): LabelMaat {
-  const m = LABELMATEN.find((l) => l.id === labelId) || LABELMATEN[0];
+  const m = labelRol(labelId);
   const pxmm = dpi / 25.4;
-  return {
-    breedte: Math.min(Math.round(m.b * pxmm), PRINTKOP[dpi] ?? Infinity),
-    hoogte: Math.round(m.h * pxmm),
-    dpi,
-    mmBreed: m.b,
-    mmHoog: m.h,
-  };
+  const breedte = Math.min(Math.round(m.b * pxmm), PRINTKOP[dpi] ?? Infinity);
+  const maat: LabelMaat = { breedte, hoogte: Math.round(m.h * pxmm), dpi, mmBreed: m.b, mmHoog: m.h };
+  if (m.per === 2 && m.labelB) {
+    // De printkop staat in het midden van de strook; de twee labels ook (met `tussen` ertussen).
+    const kopRand = (m.b - breedte / pxmm) / 2;           // stuk van de strook links van de printkop
+    const begin = (m.b - 2 * m.labelB - (m.tussen ?? 0)) / 2; // rand van de strook links van het eerste label
+    const lb = Math.round(m.labelB * pxmm);
+    maat.vakken = [0, 1].map((i) => {
+      const x = Math.round((begin + i * (m.labelB! + (m.tussen ?? 0)) - kopRand) * pxmm);
+      return { x: Math.max(0, Math.min(x, breedte - lb)), breedte: lb };
+    });
+    maat.mmLabel = m.labelB;
+  }
+  return maat;
+}
+
+/** De maat van één label: bij twee per strook één helft (om te tekenen en te tonen), anders de strook zelf. */
+export function enkelLabel(maat: LabelMaat): LabelMaat {
+  if (!maat.vakken) return maat;
+  return { breedte: maat.vakken[0].breedte, hoogte: maat.hoogte, dpi: maat.dpi, mmBreed: maat.mmLabel ?? maat.mmBreed / 2, mmHoog: maat.mmHoog };
 }
 
 // 50 × 15 mm op de B1 Pro (300 dpi) en de B1 (203 dpi).
@@ -162,8 +197,9 @@ export function tekenLabel(ex: Exemplaar, maat: LabelMaat = MAAT_300, datum = la
 }
 
 /**
- * Een klein label (30 × 14 mm, Fichero): QR links (± 10,5 mm), rechts de code groot, de naam en
- * set · nummer · conditie, onderaan de datum en het logo. Dikkere letters: 203 dpi is grover.
+ * Een klein label (30 × 14 mm, Fichero; 23 × 15 mm, twee per strook bij de Niimbot): QR links
+ * (± 10,5 mm, op 23 mm ± 9 mm), rechts de code groot, de naam en set · nummer · conditie, onderaan
+ * de datum en het logo (als er plaats is). Dikkere letters: 203 dpi is grover.
  */
 function tekenKlein(ex: Exemplaar, maat: LabelMaat, datum: string): HTMLCanvasElement {
   const pxmm = maat.dpi / 25.4;
@@ -180,15 +216,16 @@ function tekenKlein(ex: Exemplaar, maat: LabelMaat, datum: string): HTMLCanvasEl
   qr.addData(qrInhoud(ex.code));
   qr.make();
   const n = qr.getModuleCount();
-  const mod = Math.max(1, Math.floor(Math.min(mm(10.5), c.height - mm(1)) / n));
+  const smal = maat.mmBreed < 26; // 23 mm: een iets kleinere QR, zodat de code ernaast past
+  const mod = Math.max(1, Math.floor(Math.min(mm(smal ? 9.6 : 10.5), c.height - mm(1)) / n));
   const qrZijde = mod * n;
-  const x0 = mm(1.5);
+  const x0 = mm(smal ? 1.1 : 1.5);
   const y0 = Math.round((c.height - qrZijde) / 2);
   for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (qr.isDark(r, k)) ctx.fillRect(x0 + k * mod, y0 + r * mod, mod, mod);
 
   const { code, naam, detail } = labelRegels(ex);
-  const tx = x0 + qrZijde + mm(1.2);
-  const rechts = c.width - mm(1.2);
+  const tx = x0 + qrZijde + mm(smal ? 1 : 1.2);
+  const rechts = c.width - mm(smal ? 1 : 1.2);
   const max = rechts - tx;
   const boven = Math.round((c.height - mm(11.4)) / 2);
   const y = (v: number) => boven + mm(v);
@@ -197,7 +234,7 @@ function tekenKlein(ex: Exemplaar, maat: LabelMaat, datum: string): HTMLCanvasEl
   // De code zo groot als past (hij moet leesbaar zijn als de QR niet scant).
   let px = mm(3.2);
   ctx.font = font(800, px);
-  while (px > mm(2.2) && ctx.measureText(code).width > max) ctx.font = font(800, --px);
+  while (px > mm(2) && ctx.measureText(code).width > max) ctx.font = font(800, --px);
   ctx.fillText(code, tx, y(2.9));
   ctx.font = font(600, mm(1.9));
   ctx.fillText(past(ctx, naam, max), tx, y(5.6));
@@ -220,7 +257,37 @@ function tekenKlein(ex: Exemplaar, maat: LabelMaat, datum: string): HTMLCanvasEl
 }
 
 export function labelDataUrl(ex: Exemplaar, maat: LabelMaat = MAAT_300): string {
-  return tekenLabel(ex, maat).toDataURL("image/png");
+  return tekenLabel(ex, enkelLabel(maat)).toDataURL("image/png");
+}
+
+/**
+ * Een strook met twee labels naast elkaar: elk label op zijn plaats (`maat.vakken`), een lege plaats
+ * blijft wit. `schuif` (pixels, + = naar rechts) zet alles samen opzij, om de strook af te stellen.
+ */
+export function tekenStrook(labels: (HTMLCanvasElement | null)[], maat: LabelMaat, schuif = 0): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = maat.breedte;
+  c.height = maat.hoogte;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, c.width, c.height);
+  (maat.vakken ?? [{ x: 0, breedte: maat.breedte }]).forEach((v, i) => {
+    const l = labels[i];
+    if (l) ctx.drawImage(l, v.x + schuif, 0, v.breedte, maat.hoogte);
+  });
+  return c;
+}
+
+/** De strooks voor deze exemplaren: per twee naast elkaar (de laatste helft blijft leeg bij een oneven aantal). */
+export function strookUrls(exemplaren: Exemplaar[], maat: LabelMaat, schuif = 0, datum = labelDatum()): string[] {
+  const een = enkelLabel(maat);
+  const per = maat.vakken?.length ?? 1;
+  const urls: string[] = [];
+  for (let i = 0; i < exemplaren.length; i += per) {
+    const labels = exemplaren.slice(i, i + per).map((ex) => tekenLabel(ex, een, datum));
+    urls.push(tekenStrook(labels, maat, schuif).toDataURL("image/png"));
+  }
+  return urls;
 }
 
 /** Hoe de verschuiving op het label heet: "0 mm", "0,5 mm lager", "1 mm hoger" (Fichero: naar rechts/links). */
@@ -230,12 +297,39 @@ export function verschuivingTekst(mm: number, zijwaarts = false): string {
   return `${String(Math.abs(mm)).replace(".", ",")} mm ${kant}`;
 }
 
+type RandtestAfstelling = { donkerte?: number; verschuiving?: number; zijwaarts?: number; trager?: boolean; printer?: string };
+
+/** Een kader met streepjes per millimeter (lang per 5 mm) van x tot x + breedte. */
+function kader(ctx: CanvasRenderingContext2D, x: number, breedte: number, hoogte: number, pxmm: number) {
+  const lijn = Math.max(2, Math.round(0.3 * pxmm));
+  ctx.fillRect(x, 0, breedte, lijn);
+  ctx.fillRect(x, hoogte - lijn, breedte, lijn);
+  ctx.fillRect(x, 0, lijn, hoogte);
+  ctx.fillRect(x + breedte - lijn, 0, lijn, hoogte);
+  const dun = Math.max(1, Math.round(0.15 * pxmm));
+  const kort = Math.round(0.9 * pxmm);
+  const lang = Math.round(1.8 * pxmm);
+  for (let i = 1; i * pxmm < breedte - 1; i++) {
+    const xi = x + Math.round(i * pxmm);
+    const l = i % 5 === 0 ? lang : kort;
+    ctx.fillRect(xi, 0, dun, l);
+    ctx.fillRect(xi, hoogte - l, dun, l);
+  }
+  for (let i = 1; i * pxmm < hoogte - 1; i++) {
+    const y = Math.round(i * pxmm);
+    const l = i % 5 === 0 ? lang : kort;
+    ctx.fillRect(x, y, l, dun);
+    ctx.fillRect(x + breedte - l, y, l, dun);
+  }
+}
+
 /**
  * Randtest: een kader tot op de rand van het beeld met streepjes per millimeter (lang per 5 mm).
  * Zie je alle vier de randen, dan valt er niets weg; mist er boven of onder iets, dan tel je
  * de millimeters en verschuif je zoveel. In het midden: maat, dpi en de afstelling.
+ * Twee labels per strook: een kader per label (links en rechts), mee opzij geschoven met `zijwaarts`.
  */
-export function tekenRandtest(maat: LabelMaat, a: { donkerte?: number; verschuiving?: number; trager?: boolean; printer?: string } = {}): HTMLCanvasElement {
+export function tekenRandtest(maat: LabelMaat, a: RandtestAfstelling = {}): HTMLCanvasElement {
   const pxmm = maat.dpi / 25.4;
   const c = document.createElement("canvas");
   c.width = maat.breedte;
@@ -244,39 +338,41 @@ export function tekenRandtest(maat: LabelMaat, a: { donkerte?: number; verschuiv
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, c.width, c.height);
   ctx.fillStyle = "#000";
-  const lijn = Math.max(2, Math.round(0.3 * pxmm));
-  ctx.fillRect(0, 0, c.width, lijn);
-  ctx.fillRect(0, c.height - lijn, c.width, lijn);
-  ctx.fillRect(0, 0, lijn, c.height);
-  ctx.fillRect(c.width - lijn, 0, lijn, c.height);
-  const dun = Math.max(1, Math.round(0.15 * pxmm));
-  const kort = Math.round(0.9 * pxmm);
-  const lang = Math.round(1.8 * pxmm);
-  for (let i = 1; i * pxmm < c.width - 1; i++) {
-    const x = Math.round(i * pxmm);
-    const l = i % 5 === 0 ? lang : kort;
-    ctx.fillRect(x, 0, dun, l);
-    ctx.fillRect(x, c.height - l, dun, l);
+  const font = (gewicht: number, px: number) => `${gewicht} ${px}px "Helvetica Neue", Arial, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  if (maat.vakken) {
+    const schuif = Math.round((a.zijwaarts ?? 0) * pxmm);
+    const mmL = maat.mmLabel ?? maat.mmBreed / 2;
+    const regels = [
+      ["◀ LINKS", `${mmL} × ${maat.mmHoog} · ${maat.dpi} dpi`, [`donkerte ${a.donkerte ?? 3}`, a.trager ? "trager" : null].filter(Boolean).join(" · ")],
+      ["RECHTS ▶", a.verschuiving ? verschuivingTekst(a.verschuiving) : "niet hoger of lager", a.zijwaarts ? verschuivingTekst(a.zijwaarts, true) : "niet opzij"],
+    ];
+    maat.vakken.forEach((v, i) => {
+      kader(ctx, v.x + schuif, v.breedte, c.height, pxmm);
+      const midden = v.x + schuif + v.breedte / 2;
+      ctx.font = font(800, Math.round(2.4 * pxmm));
+      ctx.fillText(regels[i][0], midden, c.height / 2 - 2.6 * pxmm);
+      ctx.font = font(500, Math.round(1.5 * pxmm));
+      ctx.fillText(regels[i][1], midden, c.height / 2 + 0.6 * pxmm);
+      ctx.fillText(regels[i][2], midden, c.height / 2 + 2.9 * pxmm);
+    });
+    return c;
   }
-  for (let i = 1; i * pxmm < c.height - 1; i++) {
-    const y = Math.round(i * pxmm);
-    const l = i % 5 === 0 ? lang : kort;
-    ctx.fillRect(0, y, l, dun);
-    ctx.fillRect(c.width - l, y, l, dun);
-  }
+
+  kader(ctx, 0, c.width, c.height, pxmm);
   const klein = Math.min(1, maat.mmBreed / 45); // op een label van 30 mm kleinere letters
   const pt = (p: number) => Math.round((p * klein / 72) * maat.dpi);
   const midden = c.width / 2;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = `700 ${pt(9)}px "Helvetica Neue", Arial, sans-serif`;
+  ctx.font = font(700, pt(9));
   ctx.fillText(`▲ RANDTEST ${maat.mmBreed} × ${maat.mmHoog}`, midden, c.height / 2 - pt(4.2));
-  ctx.font = `400 ${pt(5.6)}px "Helvetica Neue", Arial, sans-serif`;
+  ctx.font = font(400, pt(5.6));
   const regel = [`${maat.dpi} dpi`, `donkerte ${a.donkerte ?? 3}`, verschuivingTekst(a.verschuiving ?? 0, a.printer === "fichero"), a.trager ? "trager" : null].filter(Boolean).join(" · ");
   ctx.fillText(regel, midden, c.height / 2 + pt(3.4));
   return c;
 }
 
-export function randtestDataUrl(maat: LabelMaat, a: { donkerte?: number; verschuiving?: number; trager?: boolean; printer?: string } = {}): string {
+export function randtestDataUrl(maat: LabelMaat, a: RandtestAfstelling = {}): string {
   return tekenRandtest(maat, a).toDataURL("image/png");
 }
