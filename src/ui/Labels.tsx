@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { afstelling, kiesPrinter, koppelPrinter, loskoppelen, openExemplaar, print, printRandtestNu, printTestlabel, useApp, wijzigVeel, zetInstellingen } from "../state";
+import { afstelling, kiesPrinter, koppelPrinter, loskoppelen, openExemplaar, print, printRandtestNu, printTestlabel, useApp, wijzigVeel, zetAfstelling, zetInstellingen } from "../state";
 import type { Exemplaar } from "../types";
 import { toonCode } from "../lib/code";
 import { krijgtLabel } from "../lib/exemplaar";
@@ -14,7 +14,7 @@ const ACTIEF = (e: Exemplaar) => e.status === "in voorraad" && krijgtLabel(e);
 const BLUEFY = "https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055";
 
 export function Labels({ inSheet = false }: { inSheet?: boolean }) {
-  const { exemplaren, printer, instellingen } = useApp();
+  const { exemplaren } = useApp();
   const [lijst, setLijst] = useState<Lijst>("te printen");
   const [gekozen, setGekozen] = useState<Set<string> | null>(null); // null = alles
 
@@ -23,11 +23,6 @@ export function Labels({ inSheet = false }: { inSheet?: boolean }) {
   const geprint = useMemo(() => exemplaren.filter((e) => ACTIEF(e) && e.label_status === "geprint"), [exemplaren]);
   const toon = lijst === "te printen" ? tePrinten : geprint;
   const selectie = gekozen ? toon.filter((e) => gekozen.has(e.id)) : toon;
-  const soort = instellingen.labelPrinter ?? "niimbot";
-  const fichero = soort === "fichero";
-  const kan = bluetoothMogelijk(soort);
-  const rol = fichero ? `${FICHERO_MAAT.mmBreed} × ${FICHERO_MAAT.mmHoog} mm` : LABELMATEN.find((l) => l.id === instellingen.labelMaat)?.label ?? "";
-
   const wissel = (id: string) => {
     const s = new Set(gekozen ?? toon.map((e) => e.id));
     if (s.has(id)) s.delete(id); else s.add(id);
@@ -45,51 +40,7 @@ export function Labels({ inSheet = false }: { inSheet?: boolean }) {
         </header>
       )}
 
-      <section className={`printerkaart${printer ? " verbonden" : ""}`}>
-        <div className="printer-icoon"><Icoon naam="printer" maat={26} /></div>
-        <div className="printer-tekst">
-          <strong>{printer || "Geen printer verbonden"}</strong>
-          <span className="zacht klein">
-            {printer ? `Labels ${rol}` : kan ? `Zet de ${fichero ? "Fichero" : "Niimbot"} aan en verbind` : isIphone() ? "Op iPhone print enkel de gratis Bluefy-browser (Safari en Chrome kunnen het niet)" : "Printen werkt in Chrome op Android of een computer"}
-          </span>
-        </div>
-        {kan ? (
-          printer
-            ? <button className="knop zacht klein" onClick={() => void loskoppelen()}>Loskoppelen</button>
-            : <button className="knop klein" onClick={() => void koppelPrinter()}><Icoon naam="bluetooth" maat={16} /> Verbinden</button>
-        ) : isIphone() ? (
-          <a className="knop klein" href={BLUEFY} target="_blank" rel="noreferrer">Bluefy</a>
-        ) : null}
-      </section>
-
-      <div className="maatkeuze printerkeuze">
-        <span className="zacht klein">Printer</span>
-        <div className="chips">
-          {PRINTERS.map((p) => (
-            <button key={p.id} className={`chip${soort === p.id ? " aan" : ""}`} aria-pressed={soort === p.id} onClick={() => void kiesPrinter(p.id)}>
-              {p.label} <span className="zacht klein">{p.rol}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {fichero ? (
-        <>
-          <p className="zacht klein">Labelrol 30 × 14 mm. Het label loopt in de lengte door de printer; de app draait het zelf.</p>
-          <FicheroUitleg />
-        </>
-      ) : (
-        <div className="maatkeuze">
-          <span className="zacht klein">Labelrol</span>
-          <div className="chips">
-            {LABELMATEN.map((m) => (
-              <button key={m.id} className={`chip${instellingen.labelMaat === m.id ? " aan" : ""}`} onClick={() => zetInstellingen({ labelMaat: m.id })}>{m.label}</button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {kan && <Afstellen />}
+      <PrinterBlok />
 
       <Segment<Lijst> waarde={lijst} onKies={(l) => { setLijst(l); setGekozen(null); }} opties={[
         { waarde: "te printen", label: `Te printen ${tePrinten.length}` },
@@ -136,36 +87,111 @@ export function Labels({ inSheet = false }: { inSheet?: boolean }) {
   );
 }
 
+/** Welke printer, verbonden of niet, en de afstelling ervan (voor de samenvatting in een kaart). */
+export function printerSamenvatting(printer: string | null, i: ReturnType<typeof useApp>["instellingen"]): string {
+  return printerDelen(printer, i).join(" · ");
+}
+
+/** Dezelfde samenvatting in stukjes (een kaart zet elk stukje op één regel: "50 × 15 mm" breekt niet). */
+export function printerDelen(printer: string | null, i: ReturnType<typeof useApp>["instellingen"]): string[] {
+  const soort = i.labelPrinter ?? "niimbot";
+  const a = afstelling(i);
+  const wie = printer ?? (soort === "fichero" ? "Fichero" : "Niimbot");
+  const rol = soort === "fichero" ? `${FICHERO_MAAT.mmBreed} × ${FICHERO_MAAT.mmHoog} mm` : LABELMATEN.find((l) => l.id === i.labelMaat)?.label ?? "";
+  const donker = soort === "fichero" ? ["licht", "normaal", "donker"][ficheroDonkerte(a.donkerte)] : `donkerte ${a.donkerte}`;
+  return [wie, printer ? "verbonden" : null, rol, donker, a.verschuiving ? verschuivingTekst(a.verschuiving, soort === "fichero") : null, a.trager ? "trager" : null].filter((x): x is string => !!x);
+}
+
+/**
+ * De printer van dit toestel: welke (Niimbot of Fichero), verbinden, de labelrol en de afstelling.
+ * Dezelfde in Labels en onderaan een kaart, zodat je overal ziet en kiest waarmee je print.
+ */
+export function PrinterBlok() {
+  const { printer, instellingen } = useApp();
+  const soort = instellingen.labelPrinter ?? "niimbot";
+  const fichero = soort === "fichero";
+  const kan = bluetoothMogelijk(soort);
+  const rol = fichero ? `${FICHERO_MAAT.mmBreed} × ${FICHERO_MAAT.mmHoog} mm` : LABELMATEN.find((l) => l.id === instellingen.labelMaat)?.label ?? "";
+  return (
+    <div className="printer-blok">
+      <div className="maatkeuze printerkeuze">
+        <span className="zacht klein">Printer van deze gsm</span>
+        <div className="chips">
+          {PRINTERS.map((p) => (
+            <button key={p.id} className={`chip${soort === p.id ? " aan" : ""}`} aria-pressed={soort === p.id} onClick={() => void kiesPrinter(p.id)}>
+              {p.label} <span className="zacht klein">{p.rol}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <section className={`printerkaart${printer ? " verbonden" : ""}`}>
+        <div className="printer-icoon"><Icoon naam="printer" maat={26} /></div>
+        <div className="printer-tekst">
+          <strong>{printer || `${fichero ? "Fichero" : "Niimbot"} niet verbonden`}</strong>
+          <span className="zacht klein">
+            {printer ? `Labels ${rol}` : kan ? `Zet de ${fichero ? "Fichero" : "Niimbot"} aan en verbind (of tik gewoon op Print)` : isIphone() ? "Op iPhone print enkel de gratis Bluefy-browser (Safari en Chrome kunnen het niet)" : "Printen werkt in Chrome op Android of een computer"}
+          </span>
+        </div>
+        {kan ? (
+          printer
+            ? <button className="knop zacht klein" onClick={() => void loskoppelen()}>Loskoppelen</button>
+            : <button className="knop klein" onClick={() => void koppelPrinter()}><Icoon naam="bluetooth" maat={16} /> Verbinden</button>
+        ) : isIphone() ? (
+          <a className="knop klein" href={BLUEFY} target="_blank" rel="noreferrer">Bluefy</a>
+        ) : null}
+      </section>
+
+      {fichero ? (
+        <p className="zacht klein">Labelrol 30 × 14 mm. Het label loopt in de lengte door de printer; de app draait het zelf.</p>
+      ) : (
+        <div className="maatkeuze">
+          <span className="zacht klein">Labelrol</span>
+          <div className="chips">
+            {LABELMATEN.map((m) => (
+              <button key={m.id} className={`chip${instellingen.labelMaat === m.id ? " aan" : ""}`} onClick={() => zetInstellingen({ labelMaat: m.id })}>{m.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {kan && <Afstellen />}
+      <FicheroUitleg />
+    </div>
+  );
+}
+
 /** Hoe je met de Fichero (Action) print: eenmalig klaarzetten, dan gewoon printen. */
 function FicheroUitleg() {
   return (
     <details className="afstellen fichero-uitleg">
-      <summary>Zo print je met de Fichero</summary>
+      <summary>Zo print je met de Fichero (Action)</summary>
       <ol>
         <li><strong>Rol erin:</strong> labels van 30 × 14 mm (de rol van Action). Klep dicht en de printer aanzetten. Opladen gaat met de USB-C-kabel.</li>
-        <li><strong>Niet koppelen</strong> in de Bluetooth-instellingen van je gsm, en sluit de app van de printer zelf: die houdt de verbinding anders vast.</li>
-        <li><strong>Verbinden:</strong> tik hierboven op <em>Verbinden</em> en kies de printer (heet FICHERO_… of D11s_…). Android: in Chrome, met Bluetooth en locatie aan. iPhone: in de gratis app Bluefy.</li>
+        <li><strong>Niet koppelen</strong> in de Bluetooth-instellingen van je gsm, en sluit de app <em>Fichero Printer</em> (die je normaal bij deze printer gebruikt): die houdt de verbinding anders vast.</li>
+        <li><strong>Fichero kiezen:</strong> tik bij <em>Printer van deze gsm</em> op <em>Fichero</em>. Dat onthoudt deze gsm, tot je terug <em>Niimbot</em> kiest; elke printer houdt zijn eigen afstelling.</li>
+        <li><strong>Verbinden:</strong> tik op <em>Verbinden</em> en kies de printer (heet FICHERO_… of D11s_…). Android: in Chrome, met Bluetooth en locatie aan. iPhone: in de gratis app Bluefy.</li>
         <li><strong>De eerste keer:</strong> print een <em>Proeflabel</em> en scan het met Scan. Print ook een <em>Randtest</em>: staat de print te ver links of rechts, schuif per halve mm; te licht, kies <em>Donker</em>.</li>
         <li><strong>Daarna:</strong> bij <em>Te printen</em> kies je de kaarten en tik je <em>Print</em>. Plak het label achteraan op de toploader en scan het: pas dan staat de kaart op de klantenpagina.</li>
-        <li><strong>Lukt het niet?</strong> Komt een label leeg of half uit de printer: zet <em>Trager printen</em> aan. Vindt de gsm de printer niet: printer aan, dichterbij, de app van de printer dicht. De app zegt het ook als de klep openstaat of de labels op zijn.</li>
+        <li><strong>Lukt het niet?</strong> Komt een label leeg of half uit de printer: zet <em>Trager printen</em> aan. Vindt de gsm de printer niet: printer aan, dichterbij, de app Fichero Printer dicht. De app zegt het ook als de klep openstaat of de labels op zijn.</li>
+        <li><strong>Terug naar de Niimbot:</strong> tik bij <em>Printer van deze gsm</em> op <em>Niimbot</em>. Staat de Fichero nog aan, dan zoekt de app enkel een Fichero en vindt ze de Niimbot niet.</li>
       </ol>
-      <p className="zacht klein">Dit geldt per gsm: kies op elke gsm één keer de Fichero. De Niimbot blijft ook werken (kies hierboven Niimbot).</p>
     </details>
   );
 }
 
 /** Proeflabel, randtest en de afstelling van dit toestel (donkerte, hoger/lager, trager). */
-function Afstellen() {
+export function Afstellen() {
   const { instellingen, bezig } = useApp();
   const a = afstelling(instellingen);
   const fichero = a.printer === "fichero";
   const schuif = (d: number) => {
     const n = Math.min(VERSCHUIVING_MAX, Math.max(-VERSCHUIVING_MAX, Math.round(((a.verschuiving ?? 0) + d) * 2) / 2));
-    zetInstellingen({ labelVerschuiving: n });
+    zetAfstelling({ verschuiving: n });
   };
   return (
     <details className="afstellen">
-      <summary>Proeflabel en afstellen</summary>
+      <summary>Proeflabel en afstellen ({fichero ? "Fichero" : "Niimbot"})</summary>
       <div className="knoppenrij">
         <button className="knop zacht klein" disabled={!!bezig} onClick={() => void printTestlabel()}><Icoon naam="printer" maat={16} /> Proeflabel</button>
         <button className="knop zacht klein" disabled={!!bezig} onClick={() => void printRandtestNu()}><Icoon naam="printer" maat={16} /> Randtest</button>
@@ -180,10 +206,10 @@ function Afstellen() {
           {fichero
             ? ([[1, "Licht"], [3, "Normaal · standaard"], [5, "Donker"]] as const).map(([d, naam]) => {
               const aan = ficheroDonkerte(a.donkerte) === ficheroDonkerte(d);
-              return <button key={d} className={`chip${aan ? " aan" : ""}`} aria-pressed={aan} onClick={() => zetInstellingen({ labelDonkerte: d })}>{naam}</button>;
+              return <button key={d} className={`chip${aan ? " aan" : ""}`} aria-pressed={aan} onClick={() => zetAfstelling({ donkerte: d })}>{naam}</button>;
             })
             : [1, 2, 3, 4, 5].map((d) => (
-              <button key={d} className={`chip${a.donkerte === d ? " aan" : ""}`} aria-pressed={a.donkerte === d} onClick={() => zetInstellingen({ labelDonkerte: d })}>{d}{d === 3 ? " · standaard" : ""}</button>
+              <button key={d} className={`chip${a.donkerte === d ? " aan" : ""}`} aria-pressed={a.donkerte === d} onClick={() => zetAfstelling({ donkerte: d })}>{d}{d === 3 ? " · standaard" : ""}</button>
             ))}
         </div>
       </div>
@@ -196,10 +222,10 @@ function Afstellen() {
         </div>
       </div>
       <label className="schakel rij">
-        <input type="checkbox" checked={!!a.trager} onChange={(e) => zetInstellingen({ labelTrager: e.target.checked })} />
+        <input type="checkbox" checked={!!a.trager} onChange={(e) => zetAfstelling({ trager: e.target.checked })} />
         <span>Trager printen <span className="zacht klein">(als een label leeg of half uit de printer komt)</span></span>
       </label>
-      <p className="zacht klein">Dit geldt enkel voor dit toestel.</p>
+      <p className="zacht klein">Dit geldt enkel voor deze gsm en enkel voor de {fichero ? "Fichero" : "Niimbot"}: elke printer houdt zijn eigen afstelling.</p>
     </details>
   );
 }

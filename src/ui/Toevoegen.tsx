@@ -14,6 +14,7 @@ import { MarktBlok } from "./Markt";
 import { kies, TOEGEVOEGD } from "../lib/grapjes";
 import { GradedVelden, VerkopenBlok } from "./Graded";
 import { gradedZoektekst } from "../lib/markt";
+import { printerSamenvatting } from "./Labels";
 
 type Bron = "zoeken" | "foto" | "handmatig";
 
@@ -171,7 +172,7 @@ function FotoHerkenning({ cat, onKies }: { cat: Catalogus; onKies: (k: Catalogus
 }
 
 function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | null; opslag?: Opslag; onTerug: () => void; onKlaar: (n: Exemplaar[]) => void }) {
-  const { gids, instellingen, exemplaren } = useApp();
+  const { gids, instellingen, exemplaren, printer } = useApp();
   const asia = kaart?.catalogus === "asia";
   const [soort, setSoort] = useState<Soort>("kaart");
   const [v, setV] = useState({
@@ -348,7 +349,7 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
 
       <label className="schakel">
         <input type="checkbox" checked={printen} onChange={(e) => { setPrinten(e.target.checked); zetInstellingen({ automatischPrinten: e.target.checked }); }} />
-        <span>Label meteen printen</span>
+        <span>Label meteen printen {printen && <span className="zacht klein">({printerSamenvatting(printer, instellingen)})</span>}</span>
       </label>
 
       <div className="sheet-actie">

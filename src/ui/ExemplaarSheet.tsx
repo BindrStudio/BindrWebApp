@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { annuleerReservering, bevestigLabel, kanNieuweBoekhouding, kanReserveren, meld, OUD_SCHEMA, openExemplaar, openToevoegen, print, prive, reserveer, SCHEMA_016, sluit, useApp, wijzig, zetHartje } from "../state";
 import type { Exemplaar } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
@@ -10,6 +10,7 @@ import { labelDataUrl } from "../lib/label";
 import { huidigeMaat } from "../lib/printer";
 import { Badges, FotoGroot, Hartje, Icoon, KaartFoto, Kiezer, OnderAankoop, onderAankoop, Sheet, Veld } from "./common";
 import { MandjeActie } from "./MandjeActie";
+import { PrinterBlok, printerDelen } from "./Labels";
 import { PLAATS } from "../lib/categorie";
 import { setIdVan, setNaam } from "../lib/weergave";
 import { useSets } from "./Voorraad";
@@ -405,7 +406,11 @@ function LabelBlok({ ex, printer }: { ex: Exemplaar; printer: string | null }) {
           <button className="knop zacht" onClick={() => void wijzig(ex.id, { label_status: "gestickerd" }, "Label staat op geplakt")}>Label hangt erop</button>
         )}
       </div>
-      {!printer && <p className="zacht klein">De eerste keer kies je de printer in het Bluetooth-venster.</p>}
+      {/* Waarmee deze gsm print, en de afstelling: ook hier te kiezen (zelfde blok als in Labels). */}
+      <details className="printer-details">
+        <summary><Icoon naam="printer" maat={16} /> <span>{printerDelen(printer, instellingen).map((d, i) => <Fragment key={i}>{i > 0 && " · "}<span className="geen-breuk">{d}</span></Fragment>)}</span> <span className="tekstknop klein">Wijzig</span></summary>
+        <PrinterBlok />
+      </details>
       {voorbeeld && <a className="tekstknop klein" href={voorbeeld} download={`label-${ex.code}.png`}>Label als afbeelding bewaren</a>}
     </section>
   );

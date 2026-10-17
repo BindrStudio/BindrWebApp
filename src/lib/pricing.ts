@@ -16,6 +16,9 @@ export interface Instellingen {
   labelVerschuiving?: number; // mm langs de doorvoer: + = lager op het label, − = hoger (stappen van 0,5)
   labelTrager?: boolean;      // trager versturen als labels leeg of half uit de printer komen
   labelPrinter?: "niimbot" | "fichero"; // welke labelprinter dit toestel gebruikt (standaard de Niimbot)
+  // De afstelling van de Fichero apart (de label…-velden hierboven zijn die van de Niimbot): wisselen van printer
+  // laat de afstelling van de andere printer staan.
+  labelFichero?: { donkerte?: number; verschuiving?: number; trager?: boolean };
   inkoopPct: number; // wat we bieden bij inkoop, in % van de marktwaarde
   ruilPct: number;   // wat een kaart van de klant waard is bij ruil, in %
   toonMarge?: boolean; // aankoopprijs en marge zichtbaar in de kassa (enkel op deze gsm)

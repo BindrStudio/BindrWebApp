@@ -9,7 +9,7 @@
     "watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test.mjs",
-    "e2e": "node tests/e2e/walkthrough.cjs && node tests/e2e/pincode.cjs && node tests/e2e/printer.cjs && node tests/e2e/klant.cjs",
+    "e2e": "node tests/e2e/walkthrough.cjs && node tests/e2e/pincode.cjs && node tests/e2e/printer.cjs && node tests/e2e/printen.cjs && node tests/e2e/klant.cjs",
     "serve": "python3 -m http.server 8080 --directory public",
     "prijzen": "node scripts/fetch-prices.mjs"
   },

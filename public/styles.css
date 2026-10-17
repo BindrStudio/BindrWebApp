@@ -1655,3 +1655,19 @@ body { transition: background-color .4s ease; }
 /* Een lange keuze breekt af in plaats van uit het kader te steken (smalle gsm). */
 .kiezer .chip { max-width: 100%; white-space: normal; text-align: left; overflow-wrap: anywhere; }
 .fichero-uitleg ol { margin: 8px 0 6px; padding-left: 20px; display: grid; gap: 8px; font-size: 14px; line-height: 1.45; }
+
+/* De printer van deze gsm: in Labels en onderaan een kaart (PrinterBlok) */
+.printer-blok { display: grid; gap: 12px; }
+.printer-details { margin-top: 10px; border-radius: 14px; background: var(--room); box-shadow: inset 0 0 0 1.5px var(--lijn); }
+.printer-details > summary { display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; list-style: none; font-size: 14px; color: var(--inkt-2); }
+.printer-details > summary::-webkit-details-marker { display: none; }
+.printer-details > summary > span:first-of-type { flex: 1; min-width: 0; }
+.printer-details[open] > summary .tekstknop { visibility: hidden; }
+.printer-details > .printer-blok { padding: 0 12px 12px; }
+.printerkeuze .chips, .printer-blok .maatkeuze .chips { flex-wrap: wrap; overflow: visible; -webkit-mask-image: none; mask-image: none; }
+/* In een kaart: de blokken binnen het printervak wit, anders lijkt het leeg tussen de titels. */
+.printer-details .printerkaart, .printer-details .afstellen { background: var(--wit); box-shadow: inset 0 0 0 1px var(--lijn); }
+.printer-details .printerkaart { padding: 10px 12px; gap: 10px; }
+.printer-details .printer-icoon { width: 40px; height: 40px; border-radius: 12px; }
+.printer-blok .afstellen:not([open]) { padding: 10px 14px; }
+.geen-breuk { white-space: nowrap; }

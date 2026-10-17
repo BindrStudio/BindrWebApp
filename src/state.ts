@@ -1270,9 +1270,26 @@ export async function koppelPrinter() {
     zet({ printer: naam });
     meld(`${naam} verbonden`);
   } catch (e) {
-    if (e instanceof Error && /cancel|chooser/i.test(e.message)) return;
-    fout(e);
+    printFout(e);
   }
+}
+
+/** Geen printer gekozen in het Bluetooth-venster (geannuleerd, of de juiste stond er niet bij)? */
+const geenPrinterGekozen = (e: unknown) =>
+  e instanceof Error && (e.name === "NotFoundError" || /cancel|chooser|no device selected/i.test(e.message));
+
+/** Een fout bij het printen in gewone woorden; zonder gekozen printer: zeg welke printer deze gsm zoekt. */
+function printFout(e: unknown) {
+  zet({ printer: printerNaam() });
+  if (geenPrinterGekozen(e)) {
+    const nu = state.instellingen.labelPrinter ?? "niimbot";
+    const naam = nu === "fichero" ? "Fichero" : "Niimbot";
+    const ander = nu === "fichero" ? "niimbot" : "fichero";
+    meld(`Geen ${naam} gekozen. Deze gsm zoekt een ${naam}: staat hij aan en dichtbij? Print je met de ${ander === "fichero" ? "Fichero" : "Niimbot"}, kies die dan.`, "info",
+      { label: ander === "fichero" ? "Fichero" : "Niimbot", doe: () => void kiesPrinter(ander) }, 9000);
+    return;
+  }
+  fout(e);
 }
 
 export async function loskoppelen() {
@@ -1284,12 +1301,31 @@ export async function loskoppelen() {
 export async function kiesPrinter(soort: "niimbot" | "fichero") {
   if ((state.instellingen.labelPrinter ?? "niimbot") === soort) return;
   if (state.printer) await loskoppelen();
-  zetInstellingen({ labelPrinter: soort, labelVerschuiving: 0 });
+  zetInstellingen({ labelPrinter: soort });
+  meld(soort === "fichero" ? "Deze gsm print nu op de Fichero" : "Deze gsm print nu op de Niimbot", "info");
 }
 
-/** Donkerte, verschuiving en "trager" van dit toestel (Labels › Proeflabel en afstellen). */
+/**
+ * Donkerte, verschuiving en "trager" van dit toestel voor de gekozen printer (Labels › Proeflabel en afstellen).
+ * Elke printer heeft zijn eigen afstelling: de Niimbot in label…, de Fichero in labelFichero.
+ */
 export function afstelling(i = state.instellingen): Afstelling {
-  return { donkerte: i.labelDonkerte ?? 3, verschuiving: i.labelVerschuiving ?? 0, trager: !!i.labelTrager, printer: i.labelPrinter ?? "niimbot" };
+  if (i.labelPrinter === "fichero") {
+    const f = i.labelFichero ?? {};
+    return { donkerte: f.donkerte ?? 3, verschuiving: f.verschuiving ?? 0, trager: !!f.trager, printer: "fichero" };
+  }
+  return { donkerte: i.labelDonkerte ?? 3, verschuiving: i.labelVerschuiving ?? 0, trager: !!i.labelTrager, printer: "niimbot" };
+}
+
+/** De afstelling van de gekozen printer aanpassen (enkel die printer). */
+export function zetAfstelling(w: { donkerte?: number; verschuiving?: number; trager?: boolean }) {
+  const i = state.instellingen;
+  if (i.labelPrinter === "fichero") return zetInstellingen({ labelFichero: { ...i.labelFichero, ...w } });
+  zetInstellingen({
+    ...(w.donkerte !== undefined ? { labelDonkerte: w.donkerte } : {}),
+    ...(w.verschuiving !== undefined ? { labelVerschuiving: w.verschuiving } : {}),
+    ...(w.trager !== undefined ? { labelTrager: w.trager } : {}),
+  });
 }
 const voortgang = (s: string) => zet({ bezig: s === "ok" ? "Klaar" : `Printen: ${s}` });
 
@@ -1303,7 +1339,7 @@ export async function print(ids: string[]) {
     wijzigVeel(ex.filter((e) => e.label_status === "te printen").map((e) => e.id), { label_status: "geprint" });
     meld(ex.length === 1 ? "Label geprint. Scan het na het plakken." : `${ex.length} labels geprint. Scan ze na het plakken.`);
   } catch (e) {
-    fout(e);
+    printFout(e);
   } finally {
     zet({ bezig: null });
   }
@@ -1321,7 +1357,7 @@ export async function printTestlabel() {
     zet({ printer: printerNaam() });
     meld("Proeflabel geprint. Scan het met Scan om de QR-code te testen.");
   } catch (e) {
-    fout(e);
+    printFout(e);
   } finally {
     zet({ bezig: null });
   }
@@ -1335,7 +1371,7 @@ export async function printRandtestNu() {
     zet({ printer: printerNaam() });
     meld("Randtest geprint. Zie je de vier randen met streepjes?");
   } catch (e) {
-    fout(e);
+    printFout(e);
   } finally {
     zet({ bezig: null });
   }
