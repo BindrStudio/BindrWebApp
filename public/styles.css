@@ -1624,8 +1624,6 @@ body { transition: background-color .4s ease; }
 
 /* ── Storecredit (0.16): tegoedbonnen ── */
 .profiel-tegel.tegoeden svg { color: #5b8a3a; }
-.profiel-tegel.verkoop-thuis svg { color: var(--zee-donker); }
-.profiel-tegel.verkoop-thuis.uit { opacity: .6; }
 .tegoed-keuze { display: grid; gap: 8px; }
 .bon-lijst { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .bon-rij { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 14px;
@@ -1651,3 +1649,9 @@ body { transition: background-color .4s ease; }
 
 /* Labels › Printer: Niimbot of Fichero (per toestel) */
 .printerkeuze .chip .zacht { color: inherit; opacity: .75; font-weight: 400; margin-left: 2px; }
+
+/* Afrekenen: per overschrijving is een uitzondering, een klein knopje onder de keuze */
+.overschrijving-knop { display: inline-flex; align-items: center; gap: 6px; margin: 2px 0 4px; align-self: flex-start; }
+/* Een lange keuze breekt af in plaats van uit het kader te steken (smalle gsm). */
+.kiezer .chip { max-width: 100%; white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.fichero-uitleg ol { margin: 8px 0 6px; padding-left: 20px; display: grid; gap: 8px; font-size: 14px; line-height: 1.45; }

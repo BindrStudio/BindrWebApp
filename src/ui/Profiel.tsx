@@ -4,7 +4,6 @@
 import { useMemo, useState } from "react";
 import {
   actieveBeurs, actieveOmgeving, beheerThema, boekhoudingAan, inkoopThuis, logUit, openAanvragen, openArtikelen, openBoekhouding, openEtalage, openHistoriek, openInzichten, openOverzicht, openPrive, openTegoeden, openThema,
-  verkoopThuis,
   synchroniseer, useApp,
 } from "../state";
 import { PinKiezen, WachtwoordWijzigen } from "./Login";
@@ -82,11 +81,6 @@ export function Profiel() {
           <Icoon naam="inkoop" maat={26} />
           <strong>Ingekocht buiten een beurs</strong>
           <span>{beurs ? `Kan niet zolang ${beurs.naam} loopt: koop in via de kassa, of sluit eerst de beurs af` : "Facebook, Vinted, een rommelmarkt: kaarten, prijs, foto of screenshot"}</span>
-        </button>
-        <button className={`profiel-tegel verkoop-thuis${beurs ? " uit" : ""}`} onClick={verkoopThuis} aria-disabled={!!beurs}>
-          <Icoon naam="verzending" maat={26} />
-          <strong>Verkocht buiten een beurs</strong>
-          <span>{beurs ? `Kan niet zolang ${beurs.naam} loopt` : "Via Instagram, opgestuurd of afgehaald: met verzendkosten en de dag van betaling"}</span>
         </button>
         <button className="profiel-tegel tegoeden" onClick={openTegoeden}>
           <Icoon naam="tegoed" maat={26} />

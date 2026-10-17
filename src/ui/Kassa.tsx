@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  actieveBeurs, afrekenen, alleCodes, boekhoudingAan, huidig, inMandje, mandjeLegen, meld, ongedaanMaken, openTransactie, print, totaalAanpassen,
+  actieveBeurs, afrekenen, alleCodes, boekhoudingAan, huidig, inMandje, mandjeLegen, meld, ongedaanMaken, openArtikel, openTransactie, print, totaalAanpassen,
   bodPct, kanNieuweBoekhouding, kanTegoed, kasbeweging, OUD_SCHEMA, sluit as sluitOpen, useApp, verwijderRegel, wijzigRegel, zetArtikelAantal, zetBod, zetInstellingen, zetPerKaart, zetRegelPct,
 } from "../state";
-import type { Artikel, CatalogusKaart, Exemplaar, Regel, Tegenpartij, Transactie } from "../types";
+import type { Artikel, ArtikelType, CatalogusKaart, Exemplaar, Regel, Tegenpartij, Transactie } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
 import { actieveReservering, inVoorraad } from "../lib/exemplaar";
 import { beursCijfers, CASH_GRENS, marge, netto, regelArtikelUit, regelIn, regelUit, regelVerzending, totaalIn, totaalUit, type Betaling } from "../lib/kassa";
@@ -29,6 +29,7 @@ import { cardmarketKentTaal, cardmarketLink, gradedZoektekst, NIET_OP_CARDMARKET
 import { afrondKeuzes, exactBod, marktwaarde, PCT_MAX, PCT_MIN, procentVan, samenPct, type BodInstelling } from "../lib/bod";
 import { GELUKT, kies, MANDJE_LEEG } from "../lib/grapjes";
 import { bonCode, openBonnen, tegoedbonnen, verdeelOverBonnen, zoekBonnen } from "../lib/tegoed";
+import { ARTIKEL_TYPES } from "../lib/categorie";
 
 type Paneel = null | "scan" | "zoek" | "artikel" | "klantkaart" | "afrekenen" | "start" | "afsluiten" | "transacties" | "kas";
 
@@ -59,7 +60,7 @@ export function Kassa() {
           <h1>Kassa</h1>
           {beurs
             ? <p className="beurs-live"><span className="live-stip" /> Beurs bezig · {beurs.naam}{beurs.gestart_op ? ` · sinds ${new Date(beurs.gestart_op).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" })}` : ""}</p>
-            : <p className="kop-sub">Geen beurs bezig</p>}
+            : <p className="kop-sub">Geen beurs bezig: wat je nu boekt, is buiten een beurs (online, opgestuurd, afgehaald)</p>}
         </div>
         <div className="kop-knoppen">
           {beurs && <button className="pil-knop" onClick={() => setPaneel("kas")} title="Geld in of uit de koffer, wisselgeld"><Icoon naam="geld" maat={18} /> Kas</button>}
@@ -625,9 +626,11 @@ function ArtikelKiezer({ onSluit }: { onSluit: () => void }) {
   const { artikelen, mandje } = useApp();
   const lijst = artikelen.filter((a) => a.aantal > 0 && a.prijs != null);
   const inMand = (a: Artikel) => mandje.regels.find((r) => r.artikel_id === a.id && r.richting === "uit")?.aantal ?? 0;
+  // Staat het er nog niet bij (bv. een binder die je net maakte)? Meteen aanmaken; na Toevoegen zit het in het mandje.
+  const nieuw = (type: ArtikelType) => { onSluit(); openArtikel(null, type, true); };
   return (
     <Sheet titel="Artikel verkopen" onSluit={onSluit}>
-      {!lijst.length && <p className="zacht">Geen artikelen met een prijs op voorraad. Voeg ze toe in de catalogus.</p>}
+      {!lijst.length && <p className="zacht">Nog geen artikelen met een prijs op voorraad. Maak er hieronder een aan.</p>}
       <ul className="lijst">
         {lijst.map((a) => (
           <li key={a.id}>
@@ -641,6 +644,15 @@ function ArtikelKiezer({ onSluit }: { onSluit: () => void }) {
           </li>
         ))}
       </ul>
+      <div className="blok nieuw-artikel">
+        <span className="veld-label">Staat het er niet bij? Nieuw artikel</span>
+        <div className="kiezer">
+          {ARTIKEL_TYPES.map((t) => (
+            <button key={t.id} type="button" className="chip" onClick={() => nieuw(t.id)}><Icoon naam="plus" maat={14} /> {t.label}</button>
+          ))}
+        </div>
+        <span className="zacht klein">Na Toevoegen zit het meteen in het mandje (met een prijs). Het staat daarna ook bij Profiel › Artikels.</span>
+      </div>
       <button className="knop groot" onClick={onSluit}>Klaar</button>
     </Sheet>
   );
@@ -829,6 +841,11 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
   const [bonZoek, setBonZoek] = useState("");
   const [bonKeuze, setBonKeuze] = useState<string[]>([]);
   const [restWijze, setRestWijze] = useState<"cash" | "sumup" | "bank">("cash");
+  // Overschrijving is een uitzondering: geen gewone knop, wel een klein knopje onderaan.
+  const OverschrijvingKnop = ({ aan, onAan, onUit, kanUit = true }: { aan: boolean; onAan: () => void; onUit: () => void; kanUit?: boolean }) =>
+    !nieuw ? null : aan
+      ? (kanUit ? <button type="button" className="tekstknop klein overschrijving-knop" onClick={onUit}>Toch niet per overschrijving</button> : null)
+      : <button type="button" className="tekstknop klein overschrijving-knop" onClick={onAan}><Icoon naam="bank" maat={14} /> Per overschrijving</button>;
   const gekozenBonnen = bonnen.filter((b) => bonKeuze.includes(b.id));
   const opBonnen = Math.round(gekozenBonnen.reduce((s, b) => s + b.rest, 0) * 100) / 100;
   const metTegoed = n > 0 && wijze === "tegoed" ? Math.min(n, opBonnen) : 0;
@@ -928,7 +945,6 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
         <>
           <Segment<"cash" | "sumup" | "beide" | "bank" | "tegoed"> waarde={wijze} onKies={setWijze} opties={[
             { waarde: "cash", label: "Cash" }, { waarde: "sumup", label: "SumUp" }, { waarde: "beide", label: "Beide" },
-            ...(nieuw ? [{ waarde: "bank" as const, label: "Bank" }] : []),
             ...(tegoedKan && bonnen.length ? [{ waarde: "tegoed" as const, label: "Tegoed" }] : []),
           ]} />
           {wijze === "tegoed" && (
@@ -956,9 +972,13 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
                 </p>
               )}
               {metTegoed > 0 && restNaTegoed > 0 && (
-                <Segment<"cash" | "sumup" | "bank"> waarde={restWijze} onKies={setRestWijze} opties={[
-                  { waarde: "cash", label: "Cash" }, { waarde: "sumup", label: "SumUp" }, ...(nieuw ? [{ waarde: "bank" as const, label: "Bank" }] : []),
-                ]} />
+                <>
+                  <Segment<"cash" | "sumup" | "bank"> waarde={restWijze} onKies={setRestWijze} opties={[
+                    { waarde: "cash", label: "Cash" }, { waarde: "sumup", label: "SumUp" },
+                  ]} />
+                  {restWijze === "bank" && <p className="zacht klein">De rest ({euro(restNaTegoed)}) per overschrijving.</p>}
+                  <OverschrijvingKnop aan={restWijze === "bank"} onAan={() => setRestWijze("bank")} onUit={() => setRestWijze("cash")} />
+                </>
               )}
             </section>
           )}
@@ -979,12 +999,13 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
               {wisselgeld != null && <div className="wisselgeld-bedrag">Wisselgeld <strong>{euro(wisselgeld)}</strong></div>}
             </div>
           )}
+          {wijze !== "tegoed" && <OverschrijvingKnop aan={wijze === "bank"} onAan={() => setWijze("bank")} onUit={() => setWijze(teVeelCash ? "sumup" : "cash")} />}
         </>
       )}
       {n < 0 && (
         <>
-          {nieuw && <Segment<"cash" | "bank" | "tegoed"> waarde={uitbetalen} onKies={setUitbetalen} opties={[
-            { waarde: "cash", label: "Cash" }, { waarde: "bank", label: "Overschrijving" }, ...(tegoedKan && koopt ? [{ waarde: "tegoed" as const, label: "Tegoed" }] : []),
+          {nieuw && tegoedKan && koopt && <Segment<"cash" | "bank" | "tegoed"> waarde={uitbetalen} onKies={setUitbetalen} opties={[
+            { waarde: "cash", label: "Cash" }, { waarde: "tegoed", label: "Tegoed" },
           ]} />}
           {uitbetalen === "cash" ? <p>Geef de klant <strong>{euro(-n)}</strong> uit de cashkoffer.</p>
             : uitbetalen === "bank" ? <p>Schrijf <strong>{euro(-n)}</strong> over naar de rekening van de klant (noteer het rekeningnummer niet in de app).</p>
@@ -1002,6 +1023,7 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
                 )}
               </section>
             )}
+          {uitbetalen !== "tegoed" && <OverschrijvingKnop aan={uitbetalen === "bank"} onAan={() => setUitbetalen("bank")} onUit={() => setUitbetalen("cash")} kanUit={!teVeelCash} />}
         </>
       )}
       {n === 0 && <p className="zacht">Er gaat geen geld over en weer.</p>}

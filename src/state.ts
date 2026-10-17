@@ -42,7 +42,7 @@ export type Tab = "catalogus" | "vault" | "scan" | "kassa" | "profiel";
 export type Open =
   | { soort: "exemplaar"; id: string }
   | { soort: "toevoegen"; kaartId?: string; catalogus?: "en" | "asia"; opslag?: "vitrine" | "stockdoos" }
-  | { soort: "artikel"; id: string | null; type?: ArtikelType; vanLijst?: boolean }
+  | { soort: "artikel"; id: string | null; type?: ArtikelType; vanLijst?: boolean; naarMandje?: boolean }
   | { soort: "artikelen"; type?: ArtikelType }
   | { soort: "labels" }
   | { soort: "transactie"; id: string }
@@ -278,8 +278,8 @@ function fout(e: unknown) {
 // ── Navigatie binnen de app ──────────────────────────────────────────────────
 export function naarTab(tab: Tab) { zet({ tab, open: null }); }
 export function openExemplaar(id: string) { zet({ open: { soort: "exemplaar", id } }); }
-export function openArtikel(id: string | null, type?: ArtikelType) {
-  zet({ open: { soort: "artikel", id, type, vanLijst: state.open?.soort === "artikelen" } });
+export function openArtikel(id: string | null, type?: ArtikelType, naarMandje = false) {
+  zet({ open: { soort: "artikel", id, type, vanLijst: state.open?.soort === "artikelen", ...(naarMandje ? { naarMandje } : {}) } });
 }
 export function openArtikelen(type?: ArtikelType) { zet({ open: { soort: "artikelen", type } }); }
 export function openToevoegen(kaartId?: string, catalogus?: "en" | "asia", opslag?: "vitrine" | "stockdoos") {
@@ -298,12 +298,6 @@ export function openEtalage(plek: EtalagePlek) { zet({ open: { soort: "etalage",
 export function openThema() { zet({ open: { soort: "thema" } }); }
 export function openTegoeden() { zet({ open: { soort: "tegoeden" } }); }
 /** Verkocht buiten een beurs (Instagram, opgestuurd): via de kassa; bij Afrekenen kies je waar en wanneer, en de verzendkosten. */
-export function verkoopThuis() {
-  const b = actieveBeurs();
-  if (b) return meld(`${b.naam} loopt nog: verkoop via de kassa, of sluit eerst de beurs af.`, "fout");
-  zet({ tab: "kassa", open: null });
-  meld("Zet wat je verkocht in het mandje. Bij Afrekenen kies je waar, de dag van betaling en eventueel verzendkosten.", "info", undefined, 8000);
-}
 export function openAanvragen(id?: string) { zet({ open: { soort: "aanvragen", id } }); }
 /** Kaarten gekocht buiten een beurs (Facebook, rommelmarkt): via de kassa, Van de klant. */
 /** Kopen buiten een beurs (Facebook, rommelmarkt): enkel als er geen beurs loopt, anders klopt de kas niet. */

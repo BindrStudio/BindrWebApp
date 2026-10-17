@@ -337,10 +337,11 @@ function AankoopDagSheet({ dag, onSluit, onBewijs }: { dag: Dag; onSluit: () => 
 /** Waar we buiten een beurs kochten: online, op een rommelmarkt of elders. */
 export function KanaalVeld({ waarde, onChange, label = "Waar gekocht?" }: { waarde: Tegenpartij; onChange: (t: Tegenpartij) => void; label?: string }) {
   return (
-    <Veld label={label}>
+    <Veld label={label} hint={waarde.kanaal === "online" ? "Online: Instagram, Facebook, Vinted …" : undefined}>
       <div className="kiezer">
         {(["online", "rommelmarkt", "andere"] as const).map((k) => (
-          <button key={k} type="button" className={`chip${waarde.kanaal === k ? " aan" : ""}`} onClick={() => onChange({ ...waarde, kanaal: k })}>{KANAAL[k]}</button>
+          // Kort op de knop (anders steekt hij op een smalle gsm uit het kader); de voorbeelden staan eronder.
+          <button key={k} type="button" className={`chip${waarde.kanaal === k ? " aan" : ""}`} onClick={() => onChange({ ...waarde, kanaal: k })}>{KANAAL[k].replace(/ \(.*\)/, "")}</button>
         ))}
       </div>
     </Veld>

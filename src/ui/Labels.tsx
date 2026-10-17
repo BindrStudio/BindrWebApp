@@ -74,7 +74,10 @@ export function Labels({ inSheet = false }: { inSheet?: boolean }) {
       </div>
 
       {fichero ? (
-        <p className="zacht klein">Labelrol 30 × 14 mm. Het label loopt in de lengte door de printer; de app draait het zelf.</p>
+        <>
+          <p className="zacht klein">Labelrol 30 × 14 mm. Het label loopt in de lengte door de printer; de app draait het zelf.</p>
+          <FicheroUitleg />
+        </>
       ) : (
         <div className="maatkeuze">
           <span className="zacht klein">Labelrol</span>
@@ -130,6 +133,24 @@ export function Labels({ inSheet = false }: { inSheet?: boolean }) {
         </>
       )}
     </div>
+  );
+}
+
+/** Hoe je met de Fichero (Action) print: eenmalig klaarzetten, dan gewoon printen. */
+function FicheroUitleg() {
+  return (
+    <details className="afstellen fichero-uitleg">
+      <summary>Zo print je met de Fichero</summary>
+      <ol>
+        <li><strong>Rol erin:</strong> labels van 30 × 14 mm (de rol van Action). Klep dicht en de printer aanzetten. Opladen gaat met de USB-C-kabel.</li>
+        <li><strong>Niet koppelen</strong> in de Bluetooth-instellingen van je gsm, en sluit de app van de printer zelf: die houdt de verbinding anders vast.</li>
+        <li><strong>Verbinden:</strong> tik hierboven op <em>Verbinden</em> en kies de printer (heet FICHERO_… of D11s_…). Android: in Chrome, met Bluetooth en locatie aan. iPhone: in de gratis app Bluefy.</li>
+        <li><strong>De eerste keer:</strong> print een <em>Proeflabel</em> en scan het met Scan. Print ook een <em>Randtest</em>: staat de print te ver links of rechts, schuif per halve mm; te licht, kies <em>Donker</em>.</li>
+        <li><strong>Daarna:</strong> bij <em>Te printen</em> kies je de kaarten en tik je <em>Print</em>. Plak het label achteraan op de toploader en scan het: pas dan staat de kaart op de klantenpagina.</li>
+        <li><strong>Lukt het niet?</strong> Komt een label leeg of half uit de printer: zet <em>Trager printen</em> aan. Vindt de gsm de printer niet: printer aan, dichterbij, de app van de printer dicht. De app zegt het ook als de klep openstaat of de labels op zijn.</li>
+      </ol>
+      <p className="zacht klein">Dit geldt per gsm: kies op elke gsm één keer de Fichero. De Niimbot blijft ook werken (kies hierboven Niimbot).</p>
+    </details>
   );
 }
 

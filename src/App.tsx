@@ -122,7 +122,7 @@ export function App() {
       </nav>
       <Vangnet sleutel={JSON.stringify(open ?? null)}>
         {open?.soort === "exemplaar" && <ExemplaarSheet id={open.id} />}
-        {open?.soort === "artikel" && <ArtikelSheet key={open.id ?? `nieuw-${open.type}`} id={open.id} type={open.type} vanLijst={open.vanLijst} />}
+        {open?.soort === "artikel" && <ArtikelSheet key={open.id ?? `nieuw-${open.type}`} id={open.id} type={open.type} vanLijst={open.vanLijst} naarMandje={open.naarMandje} />}
         {open?.soort === "artikelen" && <Artikelen type={open.type} />}
         {open?.soort === "toevoegen" && <Toevoegen key={open.kaartId || "nieuw"} kaartId={open.kaartId} catalogus={open.catalogus} opslag={open.opslag} />}
         {open?.soort === "labels" && <Sheet titel="Labels" onSluit={sluit} vol><Labels inSheet /></Sheet>}

@@ -157,7 +157,7 @@ interface Formulier {
 
 const vorigeBinder: ArtikelDetails = { merk: "Vault X", grootte: "9-pocket", toploader: false, techniek: "laser" };
 
-export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | null; type?: ArtikelType; vanLijst?: boolean }) {
+export function ArtikelSheet({ id, type: nieuwType, vanLijst, naarMandje }: { id: string | null; type?: ArtikelType; vanLijst?: boolean; naarMandje?: boolean }) {
   const app = useApp();
   const { artikelen, instellingen } = app;
   const a = id ? artikelen.find((x) => x.id === id) : null;
@@ -200,7 +200,11 @@ export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | n
     } else {
       const nieuw = voegArtikelToe({ ...w, naam, aantal: Math.max(0, v.aantal) });
       for (const f of v.extra) voegArtikelfotoToe(nieuw, f);
-      meld(`${naam} toegevoegd`);
+      // Vanuit de kassa (Artikel › Nieuw): meteen in het mandje, als er een prijs is en iets op voorraad.
+      if (naarMandje && nieuw.aantal > 0 && nieuw.prijs != null) {
+        inMandje(regelArtikelUit(nieuw));
+        meld(`${naam} toegevoegd en in het mandje`);
+      } else meld(naarMandje ? `${naam} toegevoegd${nieuw.prijs == null ? ", maar zonder prijs: niet in het mandje" : ""}` : `${naam} toegevoegd`);
     }
     terug();
   };
@@ -274,7 +278,7 @@ export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | n
           <input value={v.naam} onChange={(e) => setV({ ...v, naam: e.target.value })} placeholder={naamVoorstel || (type === "sealed" ? "Booster pack Ascended Heroes" : type === "3d-print" ? "3D-print deckbox" : "Naam")} />
         </Veld>
         <div className="twee">
-          <Veld label="Verkoopprijs per stuk (€)"><input inputMode="decimal" value={v.prijs} onChange={(e) => setV({ ...v, prijs: e.target.value })} /></Veld>
+          <Veld label="Verkoopprijs per stuk (€)" hint={naarMandje && !v.prijs.trim() ? "Nodig om het meteen te verkopen." : undefined}><input inputMode="decimal" value={v.prijs} onChange={(e) => setV({ ...v, prijs: e.target.value })} /></Veld>
           <Veld label={type === "binder" || type === "3d-print" ? "Kostprijs per stuk (€)" : "Inkoopprijs per stuk (€)"}
             hint={marge != null && instellingen.toonMarge ? `Marge ${marge >= 0 ? "+" : "−"}${euro(Math.abs(marge))} per stuk` : "Optioneel: enkel voor de voorraad op 31/12. De kosten zelf geef je apart in Dexxter in."}>
             <input inputMode="decimal" value={v.aankoopprijs} onChange={(e) => setV({ ...v, aankoopprijs: e.target.value })} />
@@ -312,7 +316,7 @@ export function ArtikelSheet({ id, type: nieuwType, vanLijst }: { id: string | n
         <Veld label="Opmerking"><input value={v.opmerking} onChange={(e) => setV({ ...v, opmerking: e.target.value })} /></Veld>
         {a && <Verwijderen a={a} onWeg={terug} />}
         <div className="sheet-actie">
-          <button className="knop groot" disabled={type === "binder" && !a && !d.artwork?.trim() && !v.naam.trim()} onClick={bewaar}>{a ? "Bewaar" : "Toevoegen"}</button>
+          <button className="knop groot" disabled={type === "binder" && !a && !d.artwork?.trim() && !v.naam.trim()} onClick={bewaar}>{a ? "Bewaar" : naarMandje ? "Toevoegen en in het mandje" : "Toevoegen"}</button>
         </div>
       </div>
     </Sheet>

@@ -838,9 +838,11 @@ function fouten(page) {
   }
 
   stap("verkocht buiten een beurs: Morpeko aan Lotte via Instagram, opgestuurd (€ 5 verzending), per overschrijving");
+  // Geen aparte knop meer in Profiel: zonder beurs is alles in de kassa "buiten een beurs".
   await tab("Profiel");
-  await page.locator(".profiel-tegel", { hasText: "Verkocht buiten een beurs" }).click();
-  await page.getByText(/Zet wat je verkocht in het mandje/).waitFor();
+  assert.equal(await page.locator(".profiel-tegel", { hasText: "Verkocht buiten een beurs" }).count(), 0, "geen aparte tegel");
+  await tab("Kassa");
+  assert.match(await page.locator(".kop-sub").first().innerText(), /Geen beurs bezig: wat je nu boekt, is buiten een beurs/);
   await scan("8VH-N7M");
   await sheet().getByRole("button", { name: /Verkopen aan Lotte/ }).click();
   await page.getByText(/Gereserveerd voor Lotte: aan de afgesproken €\s?20/).waitFor();
@@ -853,7 +855,11 @@ function fouten(page) {
   await sheet().getByRole("button", { name: "Aanrekenen" }).click();
   await sheet().locator(".verzend-rij", { hasText: /€\s?5/ }).waitFor();
   await sheet().locator(".afreken-netto", { hasText: /€\s?25/ }).waitFor();
-  await sheet().getByRole("button", { name: "Bank", exact: true }).click();
+  // Cash, SumUp, Beide (en Tegoed) als gewone keuze; per overschrijving is een klein knopje eronder.
+  assert.deepEqual(await sheet().locator(".segment").first().locator("button").allInnerTexts(), ["Cash", "SumUp", "Beide"]);
+  await sheet().getByRole("button", { name: "Per overschrijving" }).click();
+  await sheet().getByText(/De klant schrijft €\s?25(,00)? over/).waitFor();
+  assert.equal(await sheet().getByRole("button", { name: "Toch niet per overschrijving" }).count(), 1);
   await wacht(300);
   await foto("37-online-verkoop");
   await geenHorizontaleScroll("online verkoop");
@@ -890,8 +896,21 @@ function fouten(page) {
   await tab("Profiel");
   assert.match(await page.locator(".profiel-tegel", { hasText: "Tegoeden" }).innerText(), /€\s?25/);
 
+  stap("kassa › Artikel: een nieuw artikel aanmaken en meteen in het mandje");
+  await tab("Kassa");
+  await wijGeven().getByRole("button", { name: "Artikel" }).click();
+  await sheet().locator(".nieuw-artikel .chip", { hasText: "3D-print" }).click();
+  await sheet().getByLabel("Naam").fill("Pikachu-lamp");
+  await sheet().getByLabel("Verkoopprijs per stuk (€)").fill("15");
+  await wacht(200);
+  await foto("39a-nieuw-artikel-kassa");
+  await sheet().getByRole("button", { name: "Toevoegen en in het mandje" }).click();
+  await page.getByText(/Pikachu-lamp toegevoegd en in het mandje/).waitFor();
+  assert.equal(bedrag(await page.locator(".regel", { hasText: "Pikachu-lamp" }).locator(".prijs-knop strong").innerText()), 15);
+  await page.getByRole("button", { name: "Leegmaken" }).click();
+  await wacht(200);
+
   stap("storecredit: later koopt Jonas Raichu en Skarmory (€ 25) met zijn bon");
-  await page.locator(".profiel-tegel", { hasText: "Verkocht buiten een beurs" }).click();
   await verkoop("FMX-FSF", "EN9-7HJ");
   assert.equal(bedrag(await wijGeven().locator(".totaal-rij .prijs-knop strong").innerText()), 25);
   await page.getByRole("button", { name: "Afrekenen" }).click();

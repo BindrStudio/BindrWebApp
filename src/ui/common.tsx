@@ -17,6 +17,7 @@ const PADEN: Record<string, ReactNode> = {
   doos: <><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5v-9Z" /><path d="m3 7.5 9 4.5 9-4.5M12 12v9" /></>,
   verzending: <><path d="M2.5 7h11v9h-11Z" /><path d="M13.5 10h4l3 3v3h-7" /><circle cx="6.5" cy="17.5" r="1.8" /><circle cx="17" cy="17.5" r="1.8" /></>,
   tegoed: <><rect x="3" y="6" width="18" height="12" rx="2.5" /><path d="M3 10.5h18M7 14.5h4" /><path d="M16 13.5l1.2 1.2 2.3-2.4" /></>,
+  bank: <><path d="M3 9.5 12 4.5l9 5" /><path d="M5 10v7M9.7 10v7M14.3 10v7M19 10v7" /><path d="M3 19.5h18" /></>,
   scan: <><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" /><path d="M7 12h10" /></>,
   label: <><path d="M3.5 12.2V5a1.5 1.5 0 0 1 1.5-1.5h7.2l8.3 8.3a1.5 1.5 0 0 1 0 2.1l-6.9 6.9a1.5 1.5 0 0 1-2.1 0l-8-8.6Z" /><circle cx="8" cy="8" r="1.4" /></>,
   meer: <><circle cx="5.5" cy="12" r="1.3" /><circle cx="12" cy="12" r="1.3" /><circle cx="18.5" cy="12" r="1.3" /></>,
@@ -158,10 +159,10 @@ export function FotoGroot({ src, kaart, alt, onderschrift, onSluit }: { src: str
 }
 
 export function Segment<T extends string>({ waarde, opties, onKies }: { waarde: T; opties: { waarde: T; label: ReactNode }[]; onKies: (w: T) => void }) {
-  const i = Math.max(0, opties.findIndex((o) => o.waarde === waarde));
+  const i = opties.findIndex((o) => o.waarde === waarde); // −1: geen van de knoppen (bv. per overschrijving gekozen)
   return (
-    <div className="segment" style={{ ["--n" as string]: opties.length, ["--i" as string]: i }}>
-      <span className="segment-duim" />
+    <div className="segment" style={{ ["--n" as string]: opties.length, ["--i" as string]: Math.max(0, i) }}>
+      {i >= 0 && <span className="segment-duim" />}
       {opties.map((o) => (
         <button key={o.waarde} className={o.waarde === waarde ? "aan" : ""} onClick={() => onKies(o.waarde)}>{o.label}</button>
       ))}
