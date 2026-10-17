@@ -1,8 +1,8 @@
 // Profiel › Thema: de klantenpagina in het thema van een feest of seizoen (Halloween, kerst …). Per thema een eigen
 // logo, een kleur, versiering in de achtergrond en een korte zin, elk jaar in dezelfde periode (of met de hand aan).
 import { useEffect, useRef, useState } from "react";
-import { bewaarThema, kanThema, laadThemas, meld, SCHEMA_013, sluit, themaLijst, useApp } from "../state";
-import { actiefThema, LOGO_SOORTEN, maandDag, maandDagMooi, nieuwThema, THEMA_SOORTEN, veiligeKleur, VORMEN, type LogoSoort, type ThemaSoort } from "../lib/thema";
+import { bewaarThema, kanThema, laadThemas, meld, SCHEMA_013, sluit, themaLijst, themaLijstVolledig, useApp } from "../state";
+import { actiefThema, LOGO_SOORTEN, maandDag, maandDagMooi, nieuwThema, THEMA_SOORTEN, themaZin, veiligeKleur, VORMEN, type LogoSoort, type ThemaSoort } from "../lib/thema";
 import type { Thema, ThemaAan } from "../types";
 import { vandaag } from "../lib/format";
 import { veiligeFoto, verkleinUitgeknipt } from "../lib/eigenfoto";
@@ -24,7 +24,8 @@ export function ThemaSheet() {
   const kan = kanThema(app);
   const [bewerk, setBewerk] = useState<string | null>(null);
   useEffect(() => { if (kan) void laadThemas(); }, [kan]);
-  const lijst = themaLijst();
+  // Pas als alle thema's met hun logo's er zijn (het beheer laadt eerst enkel die van vandaag).
+  const lijst = themaLijstVolledig() ? themaLijst() : null;
   const md = maandDag(vandaag());
   const soort = THEMA_SOORTEN.find((s) => s.id === bewerk);
   if (soort) {
@@ -121,7 +122,7 @@ function ThemaBewerk({ soort, bewaard, demo, onTerug }: { soort: ThemaSoort; bew
         </div>
         <p className="thema-proef-zin">
           <img src={bron("logo_eend").src} alt="" />
-          <span>{v.tekst?.trim() || soort.hint}</span>
+          <span>{themaZin(v, soort)}</span>
         </p>
         <div className="thema-proef-vormen">
           {[...soort.zweef, ...soort.fonkel].slice(0, 5).map((n, i) => <VormSvg key={i} vorm={VORMEN[n]} className={`v${i}`} />)}
@@ -178,8 +179,8 @@ function ThemaBewerk({ soort, bewaard, demo, onTerug }: { soort: ThemaSoort; bew
             {kleur !== soort.kleur && <button className="tekstknop" onClick={() => setV({ ...v, kleur: soort.kleur })}>Standaardkleur</button>}
           </div>
         </Veld>
-        <Veld label="Zin bovenaan (optioneel)">
-          <input value={v.tekst ?? ""} maxLength={120} placeholder={soort.hint} onChange={(e) => setV({ ...v, tekst: e.target.value })} />
+        <Veld label="Zin bovenaan (optioneel)" hint={`Leeg = „${soort.zin}” Staan we live op een beurs (gestart in de kassa), dan staat daar „Nu live” met „${soort.live}”.`}>
+          <input value={v.tekst ?? ""} maxLength={120} placeholder={soort.zin} onChange={(e) => setV({ ...v, tekst: e.target.value })} />
         </Veld>
         <a className="knop zacht" href={proefUrl(soort.id, demo)} target="_blank" rel="noreferrer"><Icoon naam="oog" maat={18} /> Bekijk op de site{gewijzigd ? " (na bewaren)" : ""}</a>
       </div>

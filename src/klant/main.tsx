@@ -13,11 +13,12 @@ import { BEHEER_PAD, FACEBOOK, INSTAGRAM, SUPABASE_KEY, SUPABASE_URL } from "../
 // Afbeeldingen en gegevens zoeken we relatief aan dit script (catalogus/app.js).
 const BASIS = new URL("../", import.meta.url).href;
 import { TALEN, type BedrijfPubliek, type Thema } from "../types";
-import { actiefThema, GEWOON, LOGO_SOORTEN, maandDag, soortVan, veiligeKleur, VORMEN, type LogoSoort, type ThemaSoort } from "../lib/thema";
+import { actiefThema, GEWOON, LOGO_SOORTEN, maandDag, nieuwThema, soortVan, themaZin, veiligeKleur, VORMEN, type LogoSoort, type ThemaSoort } from "../lib/thema";
 import { VormSvg } from "../gedeeld/Vorm";
 import { euro, vandaag as vandaagLokaal } from "../lib/format";
 import { kantel, kantelVrij } from "../lib/kantel";
 import { veiligeFoto } from "../lib/eigenfoto";
+import { siteBerichten, zelfdeBericht, type InstaBericht } from "../lib/instafeed";
 import { TECHNIEKEN } from "../lib/categorie";
 import { fotoBronnen, setLogo, type FotoKaart } from "../lib/foto";
 import { SetKiezer } from "../gedeeld/SetKiezer";
@@ -80,6 +81,8 @@ interface KomendeBeurs { naam: string; datum: string; locatie: string | null; ur
 /** Een foto op de startpagina: een binder vooraan (Profiel › Binders vooraan) of een bericht in de Instagram-strook. */
 interface EtalageRij { id: string; foto?: string | null; titel?: string | null; link?: string | null; volgorde?: number; plek?: string | null }
 interface EtalageFoto { id: string; src: string; titel: string | null; link: string | null; kaal?: boolean }
+/** Een tegel in de Instagram-strook: automatisch van Instagram, of een foto uit Profiel › Instagram (`eigen`: apart te laden). */
+interface InstaTegel { id: string; src: string | null; link: string | null; titel: string | null; eigen: boolean }
 
 const CONDITIE: Record<string, string> = { M: "Mint", NM: "Near Mint", EX: "Excellent", GD: "Good", LP: "Light Played", PL: "Played", PO: "Poor" };
 const taalNaam = (t: string) => TALEN.find((x) => x.code === t)?.label ?? t;
@@ -296,12 +299,25 @@ function KlantPagina() {
   const vulInsta = async (ids: string[]) => {
     for (let i = 0; i < ids.length; i += 4) await vulEtalage(ids.slice(i, i + 4));
   };
+  // Onze laatste berichten, automatisch van Instagram (bij het publiceren op onze site gezet: scripts/instagram.mjs).
+  const [feed, setFeed] = useState<InstaBericht[]>([]);
+  useEffect(() => {
+    let weg = false;
+    fetch(`${BASIS}data/instagram.json`, { cache: "no-cache" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!weg && j) setFeed(siteBerichten(j)); })
+      .catch(() => undefined); // geen bestand (nog geen feed): enkel de foto's uit Profiel
+    return () => { weg = true; };
+  }, []);
 
   // Het thema van vandaag (Halloween, kerst …), of met ?thema=halloween een thema vooraf bekijken.
   const proefThema = useMemo(() => new URLSearchParams(location.search).get("thema"), []);
   const thema = useMemo<Thema | null>(() => {
     const lijst = data?.themas ?? [];
-    return (proefThema ? lijst.find((t) => t.id === proefThema) : actiefThema(lijst, maandDag(vandaagLokaal()))) ?? null;
+    if (!proefThema) return actiefThema(lijst, maandDag(vandaagLokaal()));
+    // Vooraf bekijken kan ook voor een thema dat nog niet bewaard is (zoals de soort het voorstelt).
+    const soort = soortVan(proefThema);
+    return lijst.find((t) => t.id === proefThema) ?? (soort ? nieuwThema(soort) : null);
   }, [data?.themas, proefThema]);
   // De eigen logo's van het thema (met tekst, tekst en logo, de eend) komen apart, enkel van het thema van vandaag.
   // Een ouder schema (vóór 0.14) kent enkel het eerste: dan opnieuw met enkel dat.
@@ -421,7 +437,7 @@ function KlantPagina() {
         {live && route === "start" && <LiveBeurs beurs={live} soort={soort} eend={logos.logo_eend.thema ? logos.logo_eend.src : null} />}
         {route === "start" ? (
           <Start data={data} etalage={etalage} stukken={stukken} telling={telling} beurzen={beurzen} ig={ig} demo={!!demo} thema={thema} soort={soort}
-            proef={!!proefThema} onInsta={(ids) => void vulInsta(ids)} logoGroot={logos.logo_groot.src} eend={logos.logo_eend.thema ? logos.logo_eend.src : null} live={!!live} />
+            proef={!!proefThema} feed={feed} onInsta={(ids) => void vulInsta(ids)} logoGroot={logos.logo_groot.src} eend={logos.logo_eend.thema ? logos.logo_eend.src : null} live={!!live} />
         ) : route === "ontwerp" ? (
           <OntwerpPagina demo={!!demo} sleutel={data?.sleutel ?? null} ig={ig} igLink={igProfiel(ig)} basis={BASIS} />
         ) : route === "privacy" ? (
@@ -487,12 +503,13 @@ function LiveBeurs({ beurs, soort, eend }: { beurs: KomendeBeurs; soort: ThemaSo
 // ── Start: onze binders vooraan, wat we aanbieden, waar we staan ─────────────
 
 /** Zolang er nog geen foto's van ons werk zijn: voorbeeldbinders met een gravure (scripts/voorbeeldbinders.cjs). */
-const VOORBEELDEN = ["oceaanblauw", "geel", "rood", "roze", "paars"];
+/** Binders die we gemaakt hebben (scripts/voorbeeldbinders.cjs), zolang er niets bij Binders vooraan staat. */
+const VOORBEELDEN = ["mew", "gyarados", "dragonite", "espeon", "rayquaza"];
 const voorbeelden = (): EtalageFoto[] => VOORBEELDEN.map((k) => ({ id: `vb-${k}`, src: `${BASIS}img/voorbeeld/${k}.webp`, titel: null, link: "#binders", kaal: true }));
 
-function Start({ data, etalage, stukken, telling, beurzen, ig, demo, thema, soort, proef, onInsta, logoGroot, eend, live }: {
+function Start({ data, etalage, stukken, telling, beurzen, ig, demo, thema, soort, proef, feed, onInsta, logoGroot, eend, live }: {
   data: Data | null; etalage: Etalage | null; stukken: Stuk[]; telling: Record<Plek, number>; beurzen: KomendeBeurs[]; ig: string; demo: boolean;
-  thema: Thema | null; soort: ThemaSoort | null; proef: boolean; onInsta: (ids: string[]) => void; logoGroot: string; eend: string | null; live: boolean;
+  thema: Thema | null; soort: ThemaSoort | null; proef: boolean; feed: InstaBericht[]; onInsta: (ids: string[]) => void; logoGroot: string; eend: string | null; live: boolean;
 }) {
   // Vooraan: uitgeknipte foto's van onze binders (Profiel › Binders vooraan). Zolang die er niet zijn: de voorbeeldbinders.
   // Nooit door elkaar; en zolang de foto's nog laden, een lege waaier (geen voorbeelden die dan plots verspringen).
@@ -503,9 +520,19 @@ function Start({ data, etalage, stukken, telling, beurzen, ig, demo, thema, soor
     return uit;
   }, [vooraan]);
   const laden = !etalage || (vooraan.length > 0 && !fotos.length && !etalage.fout);
+  // De Instagram-strook: eerst wat automatisch van Instagram komt (het nieuwste eerst), dan de foto's uit Profiel
+  // (zonder een bericht dat er al bij staat). Hoogstens 16.
+  const insta = useMemo<InstaTegel[]>(() => {
+    const auto = feed.map((b) => ({ id: `ig-${b.id}`, src: BASIS + b.foto, link: b.link, titel: b.alt, eigen: false }));
+    const eigen = (etalage?.insta ?? [])
+      .filter((r) => !feed.some((b) => zelfdeBericht(b.link, r.link)))
+      .map((r) => ({ id: r.id, src: veiligeFoto(r.foto), link: veiligeLink(r.link), titel: r.titel ?? null, eigen: true }));
+    return [...auto, ...eigen].slice(0, 16);
+  }, [feed, etalage?.insta]);
   // Per soort een paar beelden: de duurste met een foto eerst.
   const beelden = (p: Plek): Stuk[] => stukken.filter((s) => s.plek === p && (p === "kaarten" ? s.afbeelding : s.foto)).sort((a, b) => b.prijs - a.prijs).slice(0, 3);
-  const zin = thema?.tekst?.trim() || (proef && thema ? `Voorbeeld van het thema ${thema.naam}` : "");
+  // De eigen zin (Profiel › Thema), anders de standaardzin van het thema. Vooraf bekijken (?thema=…) zegt dat het een voorbeeld is.
+  const zin = thema ? (proef ? `Voorbeeld van het thema ${thema.naam}: ` : "") + themaZin(thema, soort) : "";
   return (
     <>
       {/* Staan we live op een beurs, dan zegt die melding (in de stijl van het thema) het al: geen tweede band. */}
@@ -546,7 +573,7 @@ function Start({ data, etalage, stukken, telling, beurzen, ig, demo, thema, soor
         <span className="ontwerp-banner-pijl" aria-hidden="true"><OntwerpIcoon maat={24} /></span>
       </a>
 
-      {(etalage?.insta.length ?? 0) > 0 && <InstaStrook rijen={etalage!.insta} ig={ig} onNodig={onInsta} />}
+      {insta.length > 0 && <InstaStrook tegels={insta} ig={ig} onNodig={onInsta} />}
 
       {/* Geen beurs gepland: dan geen lege sectie (onderaan staat al waar je ons volgt). */}
       {beurzen.length > 0 && <Beurzen beurzen={beurzen} ig={ig} geladen={!!data} />}
@@ -573,22 +600,24 @@ function Start({ data, etalage, stukken, telling, beurzen, ig, demo, thema, soor
  * het toetsenbord erin (dan staat ze vooraan, zodat je ziet waar je bent); bij "minder beweging" staat ze stil en veeg
  * je zelf. De foto's laden pas als je ernaartoe scrolt.
  */
-function InstaStrook({ rijen, ig, onNodig }: { rijen: EtalageRij[]; ig: string; onNodig: (ids: string[]) => void }) {
+function InstaStrook({ tegels: rijen, ig, onNodig }: { tegels: InstaTegel[]; ig: string; onNodig: (ids: string[]) => void }) {
   const ref = useRef<HTMLElement>(null);
   const [inBeeld, setInBeeld] = useState(false);
   const [stil, setStil] = useState(false);
   const [breedte, setBreedte] = useState(() => (typeof innerWidth === "number" ? innerWidth : 1280));
   const nodig = useRef(onNodig);
   nodig.current = onNodig;
-  const ids = rijen.map((r) => r.id).join(",");
+  // Enkel de foto's uit Profiel komen apart (die van Instagram staan als bestand op onze site).
+  const ids = rijen.filter((r) => r.eigen).map((r) => r.id).join(",");
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    if (typeof IntersectionObserver === "undefined") { nodig.current(ids.split(",")); setInBeeld(true); return; }
+    const vraag = () => { if (ids) nodig.current(ids.split(",")); };
+    if (typeof IntersectionObserver === "undefined") { vraag(); setInBeeld(true); return; }
     // Elke keer dat ze in de buurt komt: wat nog ontbreekt (een foto die eerder niet kwam, opnieuw).
     const io = new IntersectionObserver(([x]) => {
       setInBeeld(x.isIntersecting);
-      if (x.isIntersecting) nodig.current(ids.split(","));
+      if (x.isIntersecting) vraag();
     }, { rootMargin: "500px 0px" });
     io.observe(el);
     return () => io.disconnect();
@@ -618,10 +647,10 @@ function InstaStrook({ rijen, ig, onNodig }: { rijen: EtalageRij[]; ig: string; 
         <ul className="insta-baan">
           {[0, 1].map((kopie) => ronde.map((r, i) => {
             const extra = kopie > 0 || i >= rijen.length; // herhalingen: niet voor schermlezers en het toetsenbord
-            const src = veiligeFoto(r.foto);
+            const src = r.src;
             return (
               <li key={`${kopie}-${i}`} className={`insta-tegel t${i % 4}${extra ? " extra" : ""}`} aria-hidden={extra || undefined}>
-                <a href={veiligeLink(r.link) ?? igProfiel(ig)} target="_blank" rel="noreferrer" tabIndex={extra ? -1 : undefined}
+                <a href={r.link ?? igProfiel(ig)} target="_blank" rel="noreferrer" tabIndex={extra ? -1 : undefined}
                   aria-label={r.titel ? `${r.titel}, op Instagram` : "Bekijk dit bericht op Instagram"} draggable={false}>
                   {src ? <img src={src} alt="" loading="lazy" decoding="async" draggable={false} /> : <span className="insta-wacht" />}
                   <span className="insta-ig" aria-hidden="true"><IgIcoon maat={15} /></span>

@@ -1575,3 +1575,35 @@ body { transition: background-color .4s ease; }
 .thema-logo-tekst span { font-size: 12.5px; color: var(--inkt-2); line-height: 1.3; }
 .thema-logo-tekst em { font-style: normal; font-size: 12px; font-weight: 700; color: var(--zee-donker); }
 .thema-logo-knoppen { display: flex; align-items: center; gap: 4px; }
+
+/* ── Het thema van de klantenpagina ook in het beheer (0.15): logo, eend en wat versiering langs de randen ── */
+.merkbalk img.thema-logo { height: 48px; width: auto; max-width: 44vw; object-fit: contain; margin: -9px 0 -7px -4px; }
+.eend-beeld { object-fit: contain; }
+.beheer-sfeer { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.beheer-sfeer svg { position: absolute; width: var(--d); height: var(--d); overflow: visible; }
+.beheer-sfeer .bz { opacity: .55; filter: drop-shadow(0 3px 4px rgba(59, 42, 18, .12));
+  animation: beheer-zweef var(--t, 16s) ease-in-out var(--v, 0s) infinite alternate; }
+.beheer-sfeer .bf { opacity: 0; animation: beheer-fonkel 14s ease-in-out var(--v, 0s) infinite; }
+@keyframes beheer-zweef { from { transform: translate(0, 0) rotate(-6deg); } to { transform: translate(var(--dx, 6px), var(--dy, -16px)) rotate(6deg); } }
+@keyframes beheer-fonkel {
+  0%, 22%, 100% { opacity: 0; transform: scale(.3) rotate(0deg); }
+  5% { opacity: .75; transform: scale(1.12) rotate(8deg); }
+  14% { opacity: .6; transform: scale(1) rotate(12deg); }
+}
+.bz0 { --d: 30px; top: 17%; left: max(-8px, calc(50% - 500px)); --t: 15s; --v: -2s; }
+.bz1 { --d: 24px; top: 41%; right: max(-6px, calc(50% - 494px)); --t: 17s; --v: -7s; --dx: -6px; }
+.bz2 { --d: 34px; top: 66%; left: max(-10px, calc(50% - 506px)); --t: 13s; --v: -4s; }
+.bz3 { --d: 22px; top: 82%; right: max(-4px, calc(50% - 490px)); --t: 18s; --v: -9s; --dx: -8px; }
+.bz4 { --d: 26px; top: 6%; right: 38%; --t: 16s; --v: -11s; }
+.bf0 { --d: 14px; top: 27%; right: max(6px, calc(50% - 470px)); --v: 0s; }
+.bf1 { --d: 12px; top: 54%; left: max(6px, calc(50% - 476px)); --v: -3.5s; }
+.bf2 { --d: 15px; top: 76%; left: max(10px, calc(50% - 470px)); --v: -7s; }
+.bf3 { --d: 12px; top: 12%; left: 30%; --v: -10.5s; }
+@media (max-width: 599px) { .bz4, .bf3 { display: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .beheer-sfeer .bz { animation: none; }
+  .beheer-sfeer .bf { display: none; }
+}
+/* Profiel › Instagram: automatisch (feed) en eigen foto's */
+.etalage-kop { margin: 6px 0 0; font-size: 19px; }
+.insta-auto { margin-top: 2px; }

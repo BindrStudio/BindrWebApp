@@ -9,7 +9,7 @@ import { PRODUCTSOORTEN } from "../lib/kassa";
 import { TALEN } from "../types";
 import { euro } from "../lib/format";
 import { toonCode } from "../lib/code";
-import { Icoon, Segment, Sheet } from "./common";
+import { Eend, Icoon, Segment, Sheet } from "./common";
 import { useSoortVan } from "./Historiek";
 
 type Periode = "alles" | "jaar" | "30" | string; // of een beurs-id
@@ -57,7 +57,7 @@ export function Inzichten({ onSluit }: { onSluit: () => void }) {
 
       {!stukken.length ? (
         <div className="leeg inzicht-leeg">
-          <img src="img/eend.png" alt="" width={96} height={96} />
+          <Eend maat={96} />
           <strong>Nog niets verkocht{periode !== "alles" ? " in deze periode" : ""}</strong>
           <span className="zacht">Na je eerste verkopen zie je hier wat het best loopt.</span>
         </div>

@@ -3,7 +3,7 @@
 // achter het tandwiel rechtsboven.
 import { useMemo, useState } from "react";
 import {
-  actieveBeurs, actieveOmgeving, boekhoudingAan, inkoopThuis, logUit, openAanvragen, openArtikelen, openBoekhouding, openEtalage, openHistoriek, openInzichten, openOverzicht, openPrive, openThema,
+  actieveBeurs, actieveOmgeving, beheerThema, boekhoudingAan, inkoopThuis, logUit, openAanvragen, openArtikelen, openBoekhouding, openEtalage, openHistoriek, openInzichten, openOverzicht, openPrive, openThema,
   synchroniseer, useApp,
 } from "../state";
 import { PinKiezen, WachtwoordWijzigen } from "./Login";
@@ -111,7 +111,7 @@ export function Profiel() {
           <button className="profiel-tegel thema" onClick={openThema}>
             <Icoon naam="thema" maat={26} />
             <strong>Thema</strong>
-            <span>Halloween, kerst …: logo, kleur en versiering</span>
+            <span>{(() => { const t = beheerThema(); return t ? `Nu op de site: ${t.thema.naam}` : "Halloween, kerst …: logo, kleur en versiering"; })()}</span>
           </button>
           <button className="profiel-tegel aanvragen" onClick={() => openAanvragen()}>
             <Icoon naam="brief" maat={26} />

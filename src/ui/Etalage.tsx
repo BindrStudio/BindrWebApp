@@ -1,23 +1,26 @@
 // Profiel › Binders vooraan en Profiel › Instagram: de foto's op de startpagina van de klanten.
-// - Vooraan: uitgeknipte foto's van onze binders (zonder achtergrond), in de waaier bovenaan.
-// - Instagram: onze laatste berichten, in een strook die doorloopt net boven de beurzen. Instagram laat geen foto's
-//   ophalen zonder een app bij Meta; daarom zet je ze hier zelf (bewaar de foto op je gsm en plak de link erbij).
+// - Vooraan: foto's van onze binders; de app haalt de achtergrond weg, zet ze recht en knipt ze bij (waaier bovenaan).
+// - Instagram: onze laatste berichten, in een strook die doorloopt net boven de beurzen. Automatisch via een feed van
+//   Behold (bij het publiceren opgehaald: scripts/instagram.mjs), en/of zelf een foto met de link naar het bericht.
 import { useEffect, useRef, useState } from "react";
 import {
-  etalageLijst, kanEtalage, kanThema, laadEtalage, meld, nieuweEtalagefoto, SCHEMA_010, SCHEMA_013, schuifEtalagefoto, sluit, useApp, verwijderEtalagefoto, voegEtalagefotoToe, wijzigEtalagefoto,
+  etalageLijst, kanEtalage, kanFeed, kanThema, laadEtalage, meld, nieuweEtalagefoto, SCHEMA_010, SCHEMA_013, SCHEMA_015, schuifEtalagefoto, sluit, useApp, verwijderEtalagefoto,
+  voegEtalagefotoToe, wijzigEtalagefoto, zetInstagramFeed,
 } from "../state";
 import type { Etalagefoto, EtalagePlek } from "../types";
 import { veiligeFoto, verkleinFoto, verkleinUitgeknipt } from "../lib/eigenfoto";
+import { feedSamenvatting, geldigeFeed, siteBerichten } from "../lib/instafeed";
+import { datumKort } from "../lib/format";
 import { klantUrl } from "../config";
-import { Icoon, Sheet } from "./common";
+import { Icoon, Sheet, Veld } from "./common";
 
 const TEKST: Record<EtalagePlek, { titel: string; max: number; uitleg: string; leeg: string; tip: string; link: string; titelVeld: string; toegevoegd: (n: number) => string }> = {
   voorpagina: {
     titel: "Binders vooraan",
     max: 12,
-    uitleg: "De binders bovenaan de startpagina, in de waaier die om de paar seconden draait. Gebruik foto's zonder achtergrond: dan zweven ze echt over de pagina.",
-    leeg: "Nog geen binders. Zolang hier niets staat, tonen we voorbeeldbinders.",
-    tip: "Zonder achtergrond op een iPhone: open de foto, hou de binder ingedrukt tot hij loskomt en kies Deel › Bewaar afbeelding. Die nieuwe foto kies je hier. Een foto op een vlakke achtergrond (een wit blad) knipt de app zelf uit. Recht van voren staat het mooist.",
+    uitleg: "De binders bovenaan de startpagina, in de waaier die om de paar seconden draait. Een gewone foto volstaat: de app haalt de achtergrond weg, zet de binder recht en knipt hem bij, zodat hij over de pagina zweeft.",
+    leeg: "Nog geen binders. Zolang hier niets staat, tonen we vijf binders die we al maakten.",
+    tip: "Zet de binder op een wit blad of een effen achtergrond, met wat ruimte errond, en fotografeer hem van voren. De app haalt de achtergrond weg, zet hem recht en knipt hem bij. Een foto die al uitgeknipt is (iPhone: hou de binder ingedrukt › Deel › Bewaar afbeelding) kan ook.",
     link: "Link (optioneel)",
     titelVeld: "Naam (niet zichtbaar)",
     toegevoegd: (n) => (n === 1 ? "Binder vooraan gezet" : `${n} binders vooraan gezet`),
@@ -25,9 +28,9 @@ const TEKST: Record<EtalagePlek, { titel: string; max: number; uitleg: string; l
   instagram: {
     titel: "Instagram",
     max: 30,
-    uitleg: "Onze laatste berichten lopen onderaan de startpagina voorbij, net boven de beurzen. Bewaar de foto van je bericht op je gsm, kies ze hier en plak de link naar het bericht erbij.",
-    leeg: "Nog geen berichten. Zolang hier niets staat, is er geen strook.",
-    tip: "De bovenste staat eerst; een nieuwe foto komt bovenaan. De strook toont er hoogstens 16.",
+    uitleg: "Onze laatste berichten lopen onderaan de startpagina voorbij, net boven de beurzen.",
+    leeg: "Nog geen eigen foto's.",
+    tip: "Eigen foto's: bewaar de foto van je bericht op je gsm, kies ze hier en plak de link naar het bericht erbij. Ze staan na de berichten die automatisch komen; de bovenste eerst, een nieuwe komt bovenaan. De strook toont er samen hoogstens 16.",
     link: "Link naar het bericht op Instagram",
     titelVeld: "Titel (optioneel)",
     toegevoegd: (n) => (n === 1 ? "Foto in de Instagram-strook" : `${n} foto's in de Instagram-strook`),
@@ -47,21 +50,23 @@ export function EtalageSheet({ plek }: { plek: EtalagePlek }) {
     if (!bestanden?.length) return;
     setBezig(true);
     try {
-      let n = 0, metAchtergrond = 0, weggehaald = 0;
+      let n = 0, metAchtergrond = 0, weggehaald = 0, rechtgezet = 0;
       for (const f of Array.from(bestanden).slice(0, t.max - (lijst?.length ?? 0))) {
         if (plek === "voorpagina") {
-          const r = await verkleinUitgeknipt(f);
+          // Achtergrond weg, rechtzetten en bijknippen: alles zelf (een binder die al recht staat, blijft zoals hij is).
+          const r = await verkleinUitgeknipt(f, 900, 450_000, { rechtzetten: true });
           if (!r.doorzichtig) metAchtergrond++;
           if (r.weggehaald) weggehaald++;
-          const url = r.url;
-          voegEtalagefotoToe(nieuweEtalagefoto(url, plek));
+          if (r.rechtgezet) rechtgezet++;
+          voegEtalagefotoToe(nieuweEtalagefoto(r.url, plek));
         } else {
           voegEtalagefotoToe(nieuweEtalagefoto(await verkleinFoto(f, 480), plek)); // de tegels zijn hoogstens 188 px breed
         }
         n++;
       }
-      if (metAchtergrond) meld(`${metAchtergrond === 1 ? "Die foto heeft" : `${metAchtergrond} foto's hebben`} nog een achtergrond. Ze staan vooraan, maar zonder achtergrond is het mooier.`, "info", undefined, 7000);
-      else if (weggehaald) meld(`${t.toegevoegd(n)}. ${weggehaald === 1 ? "Een vlakke achtergrond is" : "Vlakke achtergronden zijn"} weggehaald.`, "info", undefined, 5000);
+      const gedaan = [weggehaald && "achtergrond weggehaald", rechtgezet && "rechtgezet"].filter(Boolean).join(" en ");
+      if (metAchtergrond) meld(`${metAchtergrond === 1 ? "Die foto heeft" : `${metAchtergrond} foto's hebben`} nog een achtergrond die de app niet kon weghalen. Ze staan vooraan, maar op een wit blad of effen achtergrond is het mooier.`, "info", undefined, 8000);
+      else if (gedaan) meld(`${t.toegevoegd(n)}: ${gedaan}.`, "info", undefined, 5000);
       else if (n) meld(t.toegevoegd(n));
     } catch (e) {
       meld(e instanceof Error ? e.message : String(e), "fout");
@@ -74,6 +79,8 @@ export function EtalageSheet({ plek }: { plek: EtalagePlek }) {
   return (
     <Sheet titel={t.titel} onSluit={sluit} vol>
       <p className="zacht">{t.uitleg}</p>
+      {plek === "instagram" && <InstaAutomatisch />}
+      {plek === "instagram" && <h3 className="etalage-kop">Eigen foto's</h3>}
       {!kan ? <p className="nakijken">{plek === "voorpagina" ? SCHEMA_013 : SCHEMA_010}</p> : (
         <>
           <div className="knoppenrij">
@@ -127,5 +134,91 @@ function EtalageRij({ f, plek, eerste, laatste }: { f: Etalagefoto; plek: Etalag
         </div>
       </div>
     </li>
+  );
+}
+
+/**
+ * Onze Instagram-berichten automatisch op de site: een gratis JSON-feed van Behold (behold.so) koppelt ons account via
+ * de officiële Instagram-API. Bij het publiceren (twee keer per dag) zet de site de laatste berichten in de strook;
+ * klanten vragen de feed nooit zelf op. Geen scraping: dat verbiedt Instagram.
+ */
+function InstaAutomatisch() {
+  const app = useApp();
+  const feed = app.instagramFeed;
+  const [open, setOpen] = useState(false);
+  const [v, setV] = useState(feed ?? "");
+  const [test, setTest] = useState<{ ok: boolean; tekst: string } | null>(null);
+  const [bezig, setBezig] = useState(false);
+  const [site, setSite] = useState<{ op: string | null; aantal: number } | null>(null);
+  useEffect(() => setV(feed ?? ""), [feed]);
+  // Wat staat er nu op de site (bij het laatste publiceren opgehaald)?
+  useEffect(() => {
+    let weg = false;
+    fetch("data/instagram.json", { cache: "no-cache" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!weg && j) setSite({ op: typeof j.bijgewerkt === "string" ? j.bijgewerkt : null, aantal: siteBerichten(j).length }); })
+      .catch(() => undefined);
+    return () => { weg = true; };
+  }, []);
+  const geldig = geldigeFeed(v);
+  const probeer = async () => {
+    if (!geldig) return;
+    setBezig(true);
+    setTest(null);
+    try {
+      const r = await fetch(geldig, { cache: "no-store" });
+      if (!r.ok) throw new Error(String(r.status));
+      const s = feedSamenvatting(await r.json());
+      setTest(s.aantal
+        ? { ok: true, tekst: `In orde: ${s.aantal} ${s.aantal === 1 ? "bericht" : "berichten"}${s.naam ? ` van @${s.naam}` : ""}${s.nieuwste ? `, het nieuwste van ${datumKort(s.nieuwste)}` : ""}.` }
+        : { ok: true, tekst: "De feed werkt, maar er staan nog geen berichten in." });
+    } catch {
+      setTest({ ok: false, tekst: "De feed antwoordt niet. Kijk de link na (https://feeds.behold.so/…). Vulde je bij Behold domeinen in, zet er dan ook bindrstudio.github.io bij." });
+    } finally {
+      setBezig(false);
+    }
+  };
+  const bewaar = () => {
+    if (geldig == null) return;
+    zetInstagramFeed(geldig || null);
+    setOpen(false);
+    if (geldig && !kanFeed()) meld(SCHEMA_015, "info", undefined, 9000);
+    else meld(geldig ? "Bewaard. De volgende keer dat de site bijwerkt (twee keer per dag) staan de berichten erop." : "Automatisch van Instagram staat uit");
+  };
+  const stand = site?.op && site.aantal
+    ? `Nu op de site: ${site.aantal} ${site.aantal === 1 ? "bericht" : "berichten"}, opgehaald op ${datumKort(site.op)} om ${new Date(site.op).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" })}.`
+    : null;
+  return (
+    <section className="groep insta-auto">
+      <h2 className="groep-titel">Automatisch van Instagram</h2>
+      <div className="groep-inhoud">
+        <p className="groep-uitleg">
+          {feed
+            ? <>Aan. Zet je iets op Instagram, dan komt het vanzelf in de strook (de site werkt twee keer per dag bij). {stand}</>
+            : "Zet je iets op Instagram, dan komt het vanzelf op de site. Eén keer instellen, gratis."}
+        </p>
+        {!open && <button className="rij-knop" onClick={() => setOpen(true)}><Icoon naam="instagram" maat={18} /> {feed ? "Feed aanpassen" : "Instellen"}</button>}
+        {open && (
+          <>
+            <ol className="stappen klein">
+              <li>Ons Instagram-account moet een professioneel account zijn (bedrijf of maker; in Instagram: Instellingen › Accounttype). Dat is gratis.</li>
+              <li>Maak een gratis account op <a href="https://behold.so" target="_blank" rel="noreferrer">behold.so</a> en koppel ons Instagram-account (<em>basic source</em>: rechtstreeks via Instagram, geen Facebook-pagina nodig). Behold gebruikt de officiële koppeling van Instagram en ziet ons wachtwoord nooit.</li>
+              <li>Kies <em>New feed</em> › <em>JSON feed</em>. Wil je domeinen invullen, zet er dan bindrstudio.github.io bij.</li>
+              <li>Kopieer de link van de feed (https://feeds.behold.so/…) en plak ze hieronder.</li>
+            </ol>
+            <Veld label="Link van de feed" hint="Gratis: de 6 laatste berichten, één keer per dag bijgewerkt. Leeg = uit. De link is openbaar bedoeld, zoals een feed op een website.">
+              <input value={v} onChange={(e) => { setV(e.target.value); setTest(null); }} placeholder="https://feeds.behold.so/…" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+            </Veld>
+            {geldig == null && <p className="nakijken klein">Dat is geen feed van Behold: de link begint met https://feeds.behold.so/</p>}
+            {test && <p className={test.ok ? "zacht klein" : "nakijken klein"} role="status">{test.tekst}</p>}
+            <div className="knoppenrij">
+              <button className="knop" disabled={geldig == null} onClick={bewaar}>Bewaren</button>
+              <button className="knop zacht" disabled={!geldig || bezig} onClick={() => void probeer()}>{bezig ? "Bezig…" : "Test de feed"}</button>
+              <button className="tekstknop" onClick={() => { setV(feed ?? ""); setTest(null); setOpen(false); }}>Annuleren</button>
+            </div>
+          </>
+        )}
+      </div>
+    </section>
   );
 }

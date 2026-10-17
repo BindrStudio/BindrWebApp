@@ -1,5 +1,5 @@
 import { Component, useEffect, useRef, useState, type ReactNode } from "react";
-import { meldAanwezig, naarTab, sluit, sluitToast, start, useApp, type Tab } from "./state";
+import { beheerThema, kanThema, laadBeheerThema, meldAanwezig, naarTab, sluit, sluitToast, start, useApp, type Tab } from "./state";
 import { Voorraad } from "./ui/Voorraad";
 import { Scan } from "./ui/Scan";
 import { Labels } from "./ui/Labels";
@@ -21,6 +21,8 @@ import { Toevoegen } from "./ui/Toevoegen";
 import { Kassa } from "./ui/Kassa";
 import { BeursRapport, Overzicht, TransactieSheet } from "./ui/Beurs";
 import { Icoon, Sheet } from "./ui/common";
+import { BeheerSfeer } from "./ui/Sfeer";
+import { veiligeKleur } from "./lib/thema";
 
 const TABS: { id: Tab; label: string; icoon: string }[] = [
   { id: "catalogus", label: "Catalogus", icoon: "vitrine" },
@@ -44,6 +46,10 @@ export function App() {
   }, [omgeving, omgevingen]);
 
   useEffect(() => { void start(); }, []);
+  // Het thema van de klantenpagina (Halloween …) ook hier: het logo, de eend en wat versiering.
+  const thema = fase === "klaar" ? beheerThema() : null;
+  const kanT = kanThema();
+  useEffect(() => { if (fase === "klaar" && online && kanT) void laadBeheerThema(); }, [fase, online, backend, kanT, thema?.thema.id]);
   // Van welke kant komt het nieuwe scherm? Een tab naar rechts schuift van rechts binnen.
   const vorige = useRef(tab);
   const [richting, setRichting] = useState<"rechts" | "links" | null>(null);
@@ -83,7 +89,8 @@ export function App() {
   const nieuweAanvragen = (aanvragen ?? []).filter((a) => a.status === "nieuw").length;
 
   return (
-    <div className={`app${intro ? " intro" : ""}`}>
+    <div className={`app${intro ? " intro" : ""}${thema ? ` thema thema-${thema.thema.id}` : ""}`}>
+      {thema && <BeheerSfeer soort={thema.soort} kleur={veiligeKleur(thema.thema.kleur) ?? thema.soort.kleur} />}
       {backend?.soort === "demo" && <div className="demo-band">Demo · alleen op dit toestel</div>}
       {backend?.soort === "supabase" && (!online || wachtrij > 0) && (
         <div className={`offline-band${online ? " bezig" : ""}`}>

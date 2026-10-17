@@ -11,7 +11,7 @@ import { euro, getal, zonderAccenten } from "../lib/format";
 import { metFactuurBron, verwervingen } from "../lib/boekhouding";
 import { marktwaardeVan } from "../lib/markt";
 import { toonCode } from "../lib/code";
-import { Icoon, KaartFoto, Segment, Sheet } from "./common";
+import { Eend, Icoon, KaartFoto, Segment, Sheet } from "./common";
 import { KlantKaart } from "./Kassa";
 import { FotoKnop, FotoRij } from "./Fotos";
 import { BewijsKnop, BewijsSheet } from "./Boekhouding";
@@ -31,7 +31,7 @@ export function Prive({ onSluit }: { onSluit: () => void }) {
       {!kan && <p className="nakijken">{OUD_SCHEMA}</p>}
       {geboekt ? (
         <div className="gelukt">
-          <img src="img/eend.png" alt="" width={96} height={96} />
+          <Eend maat={96} />
           <h2>{geboekt.regels.some((r) => r.richting === "in") ? "Ingebracht uit privé" : "Naar privé"}</h2>
           <p className="zacht">{geboekt.regels.length} {geboekt.regels.length === 1 ? "kaart" : "kaarten"} · {euro(rond2(geboekt.regels.reduce((x, r) => x + r.prijs, 0)))}</p>
           {geboekt.status === "conflict" && <p className="nakijken">Niet alles kon: een kaart was al weg. Bekijk de transactie in de historiek.</p>}

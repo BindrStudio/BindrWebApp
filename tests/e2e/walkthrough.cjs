@@ -957,17 +957,53 @@ function fouten(page) {
   await foto("14f-aanvraag");
   await sheet().getByRole("button", { name: "Sluiten", exact: true }).last().click();
   await page.keyboard.press("Escape"); await wacht(200);
-  // Binders vooraan: uitgeknipte foto's (doorzichtig) in de waaier.
+  // Binders vooraan: twee gewone foto's van een binder op een fotobord (de app haalt de achtergrond weg en zet ze recht)
+  // en een die al uitgeknipt is (die blijft zoals ze is).
   await page.locator(".profiel-tegel", { hasText: "Binders vooraan" }).click();
-  await sheet().locator('input[type="file"]').setInputFiles(["rood", "geel", "paars"].map((k) => path.resolve(__dirname, `../../public/img/voorbeeld/${k}.webp`)));
-  await sheet().locator(".etalage-rij").nth(2).waitFor();
+  await sheet().locator('input[type="file"]').setInputFiles([
+    path.resolve(__dirname, "../../scripts/data/binders/gyarados.jpg"),
+    path.resolve(__dirname, "../../scripts/data/binders/espeon.jpg"),
+    path.resolve(__dirname, "../../public/img/voorbeeld/mew.webp"),
+  ]);
+  await sheet().locator(".etalage-rij").nth(2).waitFor({ timeout: 20000 });
+  await page.getByText("3 binders vooraan gezet: achtergrond weggehaald en rechtgezet.").waitFor();
   assert.match(await sheet().locator(".etalage-rij img").first().getAttribute("src"), /^data:image\/(webp|png);/, "de doorzichtigheid blijft");
+  const recht = await sheet().locator(".etalage-rij img").first().evaluate(async (img) => {
+    await img.decode();
+    const c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const x = c.getContext("2d"); x.drawImage(img, 0, 0);
+    const d = x.getImageData(0, 0, c.width, c.height).data;
+    const links = (y) => { let i = 0; while (i < c.width && d[(y * c.width + i) * 4 + 3] <= 128) i++; return i; };
+    return { hoek: d[3], links: [0.3, 0.5, 0.7].map((f) => links(Math.round(f * c.height))) };
+  });
+  assert.equal(recht.hoek, 0, "de achtergrond is weg");
+  assert.ok(Math.max(...recht.links) - Math.min(...recht.links) <= 2, `de binder staat recht (linkerzijde op ${recht.links})`);
   await sheet().getByLabel("Link").first().fill("https://www.instagram.com/p/test/");
   await sheet().getByLabel("Titel").nth(1).click();
   await foto("14g-binders-vooraan");
   await page.keyboard.press("Escape"); await wacht(200);
   // Instagram: de strook boven de beurzen (het nieuwste bovenaan).
   await page.locator(".profiel-tegel", { hasText: "Instagram" }).click();
+  // Automatisch van Instagram: de feed van Behold instellen en testen (de feed is nagebootst).
+  const jaar = new Date().getFullYear();
+  await page.route("https://feeds.behold.so/**", (r) => r.fulfill({
+    status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
+    body: JSON.stringify({ username: "bindrstudio", posts: [
+      { id: "A1", permalink: "https://www.instagram.com/p/A1/", timestamp: `${jaar}-10-16T10:00:00+0000` },
+      { id: "B2", permalink: "https://www.instagram.com/reel/B2/", timestamp: `${jaar}-10-15T10:00:00+0000` },
+    ] }),
+  }));
+  await sheet().locator(".insta-auto").getByRole("button", { name: "Instellen" }).click();
+  await sheet().getByLabel("Link van de feed").fill("https://evil.example/feed");
+  await sheet().getByText("Dat is geen feed van Behold").waitFor();
+  assert.ok(await sheet().getByRole("button", { name: "Bewaren" }).isDisabled(), "een andere link kan niet");
+  await sheet().getByLabel("Link van de feed").fill("https://feeds.behold.so/zFgp2Jbbk23Ovf1ZUOhq");
+  await sheet().getByRole("button", { name: "Test de feed" }).click();
+  await sheet().getByText("In orde: 2 berichten van @bindrstudio, het nieuwste van 16 okt.").waitFor();
+  await foto("14g-instagram-automatisch");
+  await sheet().getByRole("button", { name: "Bewaren" }).click();
+  await page.getByText(/De volgende keer dat de site bijwerkt/).waitFor();
+  assert.match(await sheet().locator(".insta-auto").innerText(), /Aan\. Zet je iets op Instagram/);
   await sheet().locator('input[type="file"]').setInputFiles([path.resolve(__dirname, "../../public/img/logo.png"), path.resolve(__dirname, "../../public/img/eend.png")]);
   await sheet().locator(".etalage-rij").nth(1).waitFor();
   await sheet().getByLabel("Titel").first().fill("De eend");

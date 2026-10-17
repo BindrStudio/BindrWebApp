@@ -16,8 +16,8 @@ const beeld = (p) => `data:image/${p.endsWith(".png") ? "png" : "webp"};base64,$
 const LOGO = beeld("logo-zwart.png");
 
 const ETALAGE = [
-  ...["rood", "geel", "paars"].map((k, i) => ({ id: `aaaaaaaa-0000-4000-8000-00000000000${i}`, titel: null, link: null, volgorde: i + 1, plek: "voorpagina", foto: beeld(`voorbeeld/${k}.webp`) })),
-  ...["eend.png", "voorbeeld/roze.webp"].map((k, i) => ({ id: `bbbbbbbb-0000-4000-8000-00000000000${i}`, titel: null, link: `https://www.instagram.com/p/${i}/`, volgorde: -i, plek: "instagram", foto: beeld(k) })),
+  ...["dragonite", "espeon", "rayquaza"].map((k, i) => ({ id: `aaaaaaaa-0000-4000-8000-00000000000${i}`, titel: null, link: null, volgorde: i + 1, plek: "voorpagina", foto: beeld(`voorbeeld/${k}.webp`) })),
+  ...["eend.png", "voorbeeld/mew.webp"].map((k, i) => ({ id: `bbbbbbbb-0000-4000-8000-00000000000${i}`, titel: null, link: `https://www.instagram.com/p/${i}/`, volgorde: -i, plek: "instagram", foto: beeld(k) })),
 ];
 
 /** Vandaag en het uur in Brussel. */
@@ -73,6 +73,11 @@ function server({ oud = false, schema013 = false, fotoFout = 0, beurzen = [] } =
     page.on("pageerror", (e) => fouten.push(String(e)));
     const s = server(opties);
     await page.route(`${SUPABASE}/rest/v1/**`, s.route);
+    // Onze laatste Instagram-berichten, zoals scripts/instagram.mjs ze bij het publiceren op de site zet.
+    if (opties.feed) {
+      await page.route("**/data/instagram.json", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ bijgewerkt: new Date().toISOString(), bron: "behold", posts: opties.feed }) }));
+      await page.route("**/img/insta/*", (r) => r.fulfill({ status: 200, contentType: "image/webp", body: fs.readFileSync(path.resolve(__dirname, "../../public/img/voorbeeld/mew.webp")) }));
+    }
     await page.goto(BASIS + pad);
     return { ctx, page, log: s.log };
   };
@@ -81,7 +86,12 @@ function server({ oud = false, schema013 = false, fotoFout = 0, beurzen = [] } =
   globalThis.laatsteStap = "binders vooraan en het thema";
   console.log("· binders vooraan, één fout onderweg, en het thema met zijn logo");
   {
-    const { ctx, page, log } = await open({ fotoFout: 1 });
+    const feed = [
+      { id: "Nieuw1", foto: "img/insta/Nieuw1.webp", link: "https://www.instagram.com/p/Nieuw1/", alt: "Mew in een bubbel", datum: "2026-10-16T10:00:00+0000" },
+      { id: "Oud0", foto: "img/insta/Oud0.webp", link: "https://www.instagram.com/p/0/", alt: null, datum: "2026-10-01T10:00:00+0000" }, // staat ook bij de eigen foto's
+      { id: "Slecht", foto: "https://evil.example/x.webp", link: "https://www.instagram.com/p/x/", alt: null, datum: null },
+    ];
+    const { ctx, page, log } = await open({ fotoFout: 1, feed });
     await page.locator(".waaier-foto.kaal").nth(2).waitFor({ timeout: 15000 });
     assert.equal(await page.locator('.waaier-foto img[src*="voorbeeld/"]').count(), 0, "geen voorbeeldbinders: de echte");
     const fotoAanvragen = log.filter((l) => l.startsWith("publieke_etalage?select=id%2Cfoto") || l.startsWith("publieke_etalage?select=id,foto"));
@@ -95,6 +105,12 @@ function server({ oud = false, schema013 = false, fotoFout = 0, beurzen = [] } =
     assert.ok(!log.some((l) => decodeURIComponent(l).includes("bbbbbbbb")), "nog geen Instagram-foto's");
     await page.locator(".insta").scrollIntoViewIfNeeded();
     await page.locator(".insta-tegel img").first().waitFor();
+    // Eerst wat automatisch van Instagram komt, dan de eigen foto's (zonder het bericht dat er al bij stond).
+    const links = await page.locator(".insta-tegel:not(.extra) a").evaluateAll((l) => l.map((a) => a.getAttribute("href")));
+    assert.deepEqual(links, ["https://www.instagram.com/p/Nieuw1/", "https://www.instagram.com/p/0/", "https://www.instagram.com/p/1/"], "feed eerst, geen dubbel, geen vreemde foto");
+    assert.equal(await page.locator(".insta-tegel:not(.extra) a").first().getAttribute("aria-label"), "Mew in een bubbel, op Instagram");
+    assert.match(await page.locator(".insta-tegel:not(.extra) img").first().getAttribute("src"), /\/img\/insta\/Nieuw1\.webp$/);
+    await page.waitForFunction(() => document.querySelectorAll(".insta-tegel:not(.extra) img").length === 3, null, { timeout: 15000 });
     await page.screenshot({ path: path.join(SHOTS, "k1-online.png") });
     await ctx.close();
   }
@@ -165,6 +181,11 @@ function server({ oud = false, schema013 = false, fotoFout = 0, beurzen = [] } =
     await page.waitForTimeout(500);
     assert.equal(await page.locator(".klant.thema").count(), 0);
     await ctx.close();
+    // Een thema dat nog niet bewaard is (kerst): vooraf bekijken zoals de soort het voorstelt, met de standaardzin.
+    const kerst = await open({}, "?thema=kerst");
+    await kerst.page.locator(".klant.thema-kerst").waitFor();
+    assert.match(await kerst.page.locator(".thema-band").innerText(), /Voorbeeld van het thema Kerst en winter: Een binder als cadeau\?/);
+    await kerst.ctx.close();
   }
 
   assert.deepEqual(fouten, [], "geen JavaScript-fouten");

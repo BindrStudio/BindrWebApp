@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { actieveBeurs, actieveOmgeving, naarTab, openInstellingen, useApp, wisselOmgeving } from "../state";
+import { actieveBeurs, actieveOmgeving, beheerThema, naarTab, openInstellingen, useApp, wisselOmgeving } from "../state";
 import { Icoon, Sheet } from "./common";
 import { klantUrl } from "../config";
 
@@ -28,7 +28,8 @@ export function Bovenbalk() {
 
   return (
     <header className="merkbalk">
-      <img src="img/logo-woord.png" alt="Bind'r" width={68} height={30} />
+      {/* In een thema (Halloween …) het logo van het thema, wat groter: het heeft meer rond de letters. */}
+      {(() => { const logo = beheerThema()?.logo; return logo ? <img className="thema-logo" src={logo} alt="Bind'r" /> : <img src="img/logo-woord.png" alt="Bind'r" width={68} height={30} />; })()}
       <div className="merk-rechts">
         {anderen.length > 0 && (
           <button className="aanwezigen" onClick={() => setOpen(true)} aria-label={`${anderen.length} anderen bezig`}>

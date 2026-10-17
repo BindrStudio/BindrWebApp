@@ -14,7 +14,7 @@ import { uitCatalogus } from "../lib/foto";
 import { voorstelVoor } from "../lib/pricing";
 import { tril } from "../lib/camera";
 import { uuid } from "../lib/uuid";
-import { Badges, Hartje, Icoon, KaartFoto, Kiezer, Leeg, Segment, Sheet, Veld } from "./common";
+import { Badges, Eend, Hartje, Icoon, KaartFoto, Kiezer, Leeg, Segment, Sheet, Veld } from "./common";
 import { MandjeActie } from "./MandjeActie";
 import { Scanner, type FotoResultaat } from "./Scan";
 import { KiesKaart } from "./Toevoegen";
@@ -992,7 +992,7 @@ function Gelukt({ t, wisselgeld, onVolgende }: { t: Transactie; wisselgeld: numb
   const titel = t.soort === "verkoop" ? "Verkocht" : t.soort === "inkoop" ? "Ingekocht" : t.soort === "ruil" ? "Ruil geboekt" : "Geboekt";
   return (
     <div className="gelukt">
-      <img src="img/eend.png" alt="" width={110} height={110} />
+      <Eend maat={110} />
       <h2>{huidigT.status === "ongedaan" ? "Ongedaan gemaakt" : titel}</h2>
       {huidigT.status !== "ongedaan" && <p className="gelukt-grapje">{kies(GELUKT[t.soort], t.id)}</p>}
       <p className="gelukt-bedrag">

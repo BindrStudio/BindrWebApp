@@ -253,8 +253,13 @@ export class DemoBackend implements Backend {
     this.bewaar();
   }
 
-  async laadThemas() {
-    return [...(this.data.themas ?? [])];
+  async laadThemas(opties: { zonderLogos?: boolean } = {}) {
+    return (this.data.themas ?? []).map((t) => (opties.zonderLogos ? { ...t, logo: undefined, logo_groot: undefined, logo_eend: undefined } : { ...t }));
+  }
+
+  async laadThemaLogos(id: string) {
+    const t = (this.data.themas ?? []).find((x) => x.id === id);
+    return t ? { logo: t.logo ?? null, logo_groot: t.logo_groot ?? null, logo_eend: t.logo_eend ?? null } : null;
   }
 
   async bewaarThema(t: Thema) {

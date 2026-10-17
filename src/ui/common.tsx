@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { fotoBronnen, type FotoKaart } from "../lib/foto";
 import type { Exemplaar } from "../types";
 import { euro } from "../lib/format";
+import { beheerThema, useApp } from "../state";
 
 const PADEN: Record<string, ReactNode> = {
   chevron: <path d="m6 9 6 6 6-6" />,
@@ -166,10 +167,17 @@ export function Segment<T extends string>({ waarde, opties, onKies }: { waarde: 
   );
 }
 
+/** Onze eend, of die van het thema van vandaag (met een heksenhoed …). */
+export function Eend({ maat }: { maat: number }) {
+  useApp();
+  const thema = beheerThema()?.eend;
+  return <img className="eend-beeld" src={thema ?? "img/eend.png"} alt="" width={maat} height={maat} />;
+}
+
 export function Leeg({ titel, tekst, children }: { titel: string; tekst?: string; children?: ReactNode }) {
   return (
     <div className="leeg">
-      <img src="img/eend.png" alt="" width={112} height={112} />
+      <Eend maat={112} />
       <h3>{titel}</h3>
       {tekst && <p>{tekst}</p>}
       {children}

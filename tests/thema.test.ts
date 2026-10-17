@@ -1,7 +1,7 @@
 // Thema's op de klantenpagina: welk thema geldt op welke dag (ook over nieuwjaar heen).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { actiefThema, geldigeMaandDag, inPeriode, maandDagMooi, nieuwThema, THEMA_SOORTEN, themaActief, veiligeKleur, VORMEN } from "../src/lib/thema";
+import { actiefThema, geldigeMaandDag, inPeriode, maandDagMooi, nieuwThema, soortVan, THEMA_SOORTEN, themaActief, themaZin, veiligeKleur, VORMEN } from "../src/lib/thema";
 import type { Thema } from "../src/types";
 
 const t = (id: string, van: string, tot: string, aan: Thema["aan"] = "periode"): Thema => ({ id, naam: id, van, tot, aan });
@@ -37,7 +37,13 @@ test("soorten, datums en kleuren", () => {
     assert.ok(veiligeKleur(s.kleur), s.id);
     for (const v of [...s.zweef, ...s.fonkel]) assert.ok(VORMEN[v], `${s.id}: ${v}`);
     assert.equal(nieuwThema(s).aan, "periode");
+    assert.ok(s.zin && s.zin.length <= 120 && s.live, `${s.id}: een standaardzin en een zin voor Nu live`);
   }
+  // De zin bovenaan: de eigen zin, anders de standaardzin (ook als de eigen zin enkel spaties is).
+  const h = soortVan("halloween")!;
+  assert.equal(themaZin({ ...nieuwThema(h), tekst: "Boe!" }, h), "Boe!");
+  assert.equal(themaZin({ ...nieuwThema(h), tekst: "   " }, h), h.zin);
+  assert.equal(themaZin(null, null), "");
   assert.equal(maandDagMooi("10-15"), "15 okt");
   assert.equal(maandDagMooi("01-06"), "6 jan");
   assert.equal(veiligeKleur("#E8772E"), "#e8772e");

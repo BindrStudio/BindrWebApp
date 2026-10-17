@@ -6,7 +6,7 @@
 import { useSyncExternalStore } from "react";
 import { Fout, isNetwerkFout, type Alles, type Backend, type PrijsMarkering } from "./store/backend";
 import { DemoBackend } from "./store/demo";
-import { BOEKHOUDING_VANAF, ETALAGE_VANAF, SupabaseBackend, THEMA_VANAF } from "./store/supabase";
+import { BOEKHOUDING_VANAF, ETALAGE_VANAF, FEED_VANAF, SupabaseBackend, THEMA_VANAF } from "./store/supabase";
 import type { Aankoopfoto, Aanvraag, AanvraagStatus, Aanwezig, Artikel, Artikelfoto, Etalagefoto, EtalagePlek, Thema, ArtikelType, Bedrijf, BedrijfPubliek, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Tegenpartij, Transactie } from "./types";
 import { bewaarPin, controleerPin, isOudePin, isVergrendeld, leesPin, maakPinVanToestel, markeerActief, pinFout, teVeelPogingen, wachtwoordFout, wisPin, wisPogingen, VERGRENDEL_NA_MS } from "./lib/pin";
 import { laadPrijsgids, type Prijsgids } from "./lib/prices";
@@ -18,6 +18,8 @@ import { printLabels, printRandtest, printerNaam, verbindPrinter, ontkoppelPrint
 import { laadCatalogus } from "./lib/catalog";
 import { laadOcr } from "./lib/ocr";
 import { uuid } from "./lib/uuid";
+import { actiefThema, maandDag, soortVan, themaLogo, type ThemaSoort } from "./lib/thema";
+import { veiligeFoto } from "./lib/eigenfoto";
 import { inVoorraad, metTelling, metVitrineSinds, schoonArtikel, schoonExemplaar, standaardArtikel, standaardExemplaar } from "./lib/exemplaar";
 import {
   aanvaardConflict, losConflictOp, maakOngedaan, nieuweKasbeweging, nieuwePrive, nieuweRetour, nieuweTransactie, pasToe, pasTotaalAan, stand,
@@ -78,6 +80,7 @@ export interface State {
   facebook: string;                // link naar onze Facebook-pagina (leeg = niet tonen)
   bedrijfPubliek: BedrijfPubliek | null; // wettelijke gegevens op de klantenpagina
   aanvraagSleutel: string | null; // Web3Forms: aanvragen van klanten ook per mail (openbaar bedoeld)
+  instagramFeed: string | null; // JSON-feed van Behold: onze Instagram-berichten automatisch op de klantenpagina (openbaar bedoeld)
   /** Boekhouding (gedeeld via de database): bedrijfsgegevens en welke dagen al in Dexxter staan, per omgeving. */
   boekhouding: { bedrijven: Record<string, Bedrijf>; ingegeven: Record<string, Record<string, boolean>> };
   toasts: Toast[];
@@ -138,6 +141,7 @@ let state: State = {
   facebook: FACEBOOK,
   bedrijfPubliek: null,
   aanvraagSleutel: null,
+  instagramFeed: null,
   boekhouding: { bedrijven: {}, ingegeven: {} },
   toasts: [],
   online: typeof navigator === "undefined" ? true : navigator.onLine,
@@ -937,6 +941,7 @@ function pasGedeeldToe(g: Record<string, unknown>) {
     facebook: typeof g.facebook === "string" ? g.facebook : FACEBOOK,
     bedrijfPubliek: g.bedrijf_publiek && typeof g.bedrijf_publiek === "object" ? g.bedrijf_publiek as BedrijfPubliek : null,
     aanvraagSleutel: typeof g.aanvraag_sleutel === "string" && g.aanvraag_sleutel ? g.aanvraag_sleutel : null,
+    instagramFeed: typeof g.instagram_feed === "string" && g.instagram_feed ? g.instagram_feed : null,
   };
   const bedrijven: Record<string, Bedrijf> = {};
   const ingegeven: Record<string, Record<string, boolean>> = {};
@@ -1008,6 +1013,8 @@ async function afmelden() {
   artikelfotoCache.clear();
   etalageCache = null;
   themaCache = null;
+  themasVolledig = false;
+  themaLogosGeladen.clear();
   await weg?.catch(() => undefined);
 }
 
@@ -1394,6 +1401,21 @@ export function zetAanvraagSleutel(sleutel: string | null) {
   // Leeg = geen mail (de kolom waarde mag niet null zijn).
   inRij({ soort: "instelling", sleutel: "aanvraag_sleutel", waarde: sleutel || "" });
 }
+
+/** De JSON-feed van Behold met onze Instagram-berichten (of null = uit). Bij het publiceren haalt de site ze op. */
+export function zetInstagramFeed(url: string | null) {
+  zet({ instagramFeed: url || null });
+  inRij({ soort: "instelling", sleutel: "instagram_feed", waarde: url || "" });
+}
+
+/** Kan de klantenpagina de feed al lezen (schema 0.15)? Bewaren kan altijd; de site haalt ze pas op na de update. */
+export function kanFeed(s: State = state): boolean {
+  const b = s.backend;
+  if (!b || b.soort !== "supabase") return true;
+  const v = (b as SupabaseBackend).versie;
+  return v == null || v >= FEED_VANAF;
+}
+export const SCHEMA_015 = "Bewaard. De site haalt de berichten pas op na de update van de database naar 0.15: voer supabase/schema.sql opnieuw uit in Supabase (zie de README).";
 
 // ── Offline klaarzetten ──────────────────────────────────────────────────────
 /**
@@ -1967,18 +1989,69 @@ export function themaLijst(): Thema[] | null {
   return [...lijst.values()];
 }
 
+/** Zijn alle thema's met hun logo's geladen (Profiel › Thema), of enkel de lijst en het thema van vandaag (het beheer)? */
+let themasVolledig = false;
+const themaLogosGeladen = new Set<string>();
+export const themaLijstVolledig = () => themasVolledig;
+
 export async function laadThemas(): Promise<void> {
   const b = state.backend;
   if (!b || themasLaden || !kanThema()) return;
   themasLaden = true;
   try {
     themaCache = await b.laadThemas();
+    themasVolledig = true;
+    for (const t of themaCache) themaLogosGeladen.add(t.id);
     zet({ fotoVersie: state.fotoVersie + 1 });
   } catch (e) {
     if (!isNetwerkFout(e)) fout(e);
   } finally {
     themasLaden = false;
   }
+}
+
+/**
+ * Het beheer in het thema van de klantenpagina: eerst de lijst zonder logo's (klein), dan enkel de logo's van het thema
+ * van vandaag. Niet erg als het niet lukt (offline): dan gewoon ons logo.
+ */
+let beheerThemaBezig = false;
+export async function laadBeheerThema(): Promise<void> {
+  const b = state.backend;
+  if (!b || beheerThemaBezig || themasLaden || !kanThema()) return;
+  beheerThemaBezig = true;
+  try {
+    if (!themaCache) {
+      const kort = await b.laadThemas({ zonderLogos: true });
+      if (!themaCache) themaCache = kort;
+    }
+    const lijst = themaLijst();
+    const t = lijst ? actiefThema(lijst, maandDag(vandaag())) : null;
+    if (t && !themaLogosGeladen.has(t.id)) {
+      const logos = await b.laadThemaLogos(t.id);
+      if (!themasVolledig && themaCache) themaCache = themaCache.map((x) => (x.id === t.id ? { ...x, logo: logos?.logo ?? null, logo_groot: logos?.logo_groot ?? null, logo_eend: logos?.logo_eend ?? null } : x));
+      themaLogosGeladen.add(t.id);
+    }
+    zet({ fotoVersie: state.fotoVersie + 1 });
+  } catch {
+    // versiering: zonder thema werkt alles gewoon
+  } finally {
+    beheerThemaBezig = false;
+  }
+}
+
+/** Het thema dat nu op de klantenpagina staat, met zijn logo's (eigen, anders meegeleverd; null = ons gewone logo). */
+export function beheerThema(): { thema: Thema; soort: ThemaSoort; logo: string | null; eend: string | null } | null {
+  const lijst = themaLijst();
+  const t = lijst ? actiefThema(lijst, maandDag(vandaag())) : null;
+  const soort = t ? soortVan(t.id) : undefined;
+  if (!t || !soort) return null;
+  // Zolang de eigen logo's van dit thema niet geladen zijn: ons gewone logo (niet eerst het meegeleverde en dan het eigen).
+  const klaar = themaLogosGeladen.has(t.id) || wachtendeOps("thema").some((o) => o.t.id === t.id);
+  return {
+    thema: t, soort,
+    logo: klaar ? themaLogo(t, soort, "logo", veiligeFoto(t.logo)) : null,
+    eend: klaar ? themaLogo(t, soort, "logo_eend", veiligeFoto(t.logo_eend)) : null,
+  };
 }
 
 const LOGOS = ["logo", "logo_groot", "logo_eend"] as const;

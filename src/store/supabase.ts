@@ -6,8 +6,8 @@ import { schoonArtikel, schoonExemplaar } from "../lib/exemplaar";
 
 const SESSIE_SLEUTEL = "bindr-sessie-v1";
 const VERSIE_SLEUTEL = "bindr-schema-v1";
-/** De versie van het schema die alles van de app kan (supabase/schema.sql van 0.14). */
-export const NIEUWSTE = 13;
+/** De versie van het schema die alles van de app kan (supabase/schema.sql van 0.15). */
+export const NIEUWSTE = 14;
 /** Vanaf deze versie (schema 0.10): meer foto's per artikel, de etalage en aanvragen voor een eigen binder. */
 export const ETALAGE_VANAF = 9;
 /** Vanaf deze versie (schema 0.11): aanvragen met toploader ja/nee en afbeeldingen van het idee. */
@@ -16,6 +16,8 @@ export const AANVRAAG_BEELDEN_VANAF = 10;
 export const THEMA_VANAF = 12;
 /** Vanaf deze versie (schema 0.14): drie logo's per thema. */
 export const LOGOS_VANAF = 13;
+/** Vanaf deze versie (schema 0.15): de feed met onze Instagram-berichten staat in publieke_instellingen. */
+export const FEED_VANAF = 14;
 /** Vanaf deze versie kan de boekhouding van 0.8 (kas, overschrijving, privé, aankoopfoto's …) naar de server. */
 export const BOEKHOUDING_VANAF = 7;
 const PAGINA = 1000;
@@ -198,7 +200,7 @@ export class SupabaseBackend implements Backend {
   /** True als de database nog het schema van fase 1 heeft (geen beurzen en transacties). */
   schemaOud = false;
 
-  /** 13 = drie logo's per thema, "nu live" (0.14), 12 = binders vooraan, Instagram-strook en thema's (0.13), 10 = aanvragen met toploader en afbeeldingen, wettelijke gegevens (0.11), 9 = etalage, meer foto's per artikel en aanvragen (0.10), 8 = beurzen met uren en link, artikels zichtbaar per stuk (0.9), 7 = inbreng van kaarten die al in de app staan (0.8), 6 = aankoopfoto's en privé (0.7), 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
+  /** 14 = Instagram-berichten automatisch (0.15), 13 = drie logo's per thema, "nu live" (0.14), 12 = binders vooraan, Instagram-strook en thema's (0.13), 10 = aanvragen met toploader en afbeeldingen, wettelijke gegevens (0.11), 9 = etalage, meer foto's per artikel en aanvragen (0.10), 8 = beurzen met uren en link, artikels zichtbaar per stuk (0.9), 7 = inbreng van kaarten die al in de app staan (0.8), 6 = aankoopfoto's en privé (0.7), 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
   versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v >= 2 && v <= NIEUWSTE ? v : null; })();
 
   private async zekerVersie() {
@@ -232,7 +234,7 @@ export class SupabaseBackend implements Backend {
         if (e instanceof Fout && (e.status === 400 || e.status === 404)) return false; // onbekende kolom of tabel
         throw e;
       });
-      // Vanaf 0.8 zegt de database zelf welke versie ze heeft (schema_versie: 8 = 0.8, 9 = 0.9, 10 = 0.10, 11 = 0.11, 13 = 0.13, 14 = 0.14).
+      // Vanaf 0.8 zegt de database zelf welke versie ze heeft (schema_versie: 8 = 0.8, 9 = 0.9, 10 = 0.10, 11 = 0.11, 13 = 0.13, 14 = 0.14, 15 = 0.15).
       const schema = await this.vraag<number>("GET", "rpc/schema_versie").then((n) => Number(n) || 0, (e) => {
         if (e instanceof Fout && (e.status === 400 || e.status === 404)) return 0;
         throw e;
@@ -625,11 +627,19 @@ export class SupabaseBackend implements Backend {
   }
 
   // ── Schema 0.13: thema's ──
-  async laadThemas(): Promise<Thema[]> {
+  async laadThemas(opties: { zonderLogos?: boolean } = {}): Promise<Thema[]> {
     await this.zekerVersie();
     if ((this.versie ?? 0) < THEMA_VANAF) return [];
-    const meer = (this.versie ?? 0) >= LOGOS_VANAF ? ",logo_groot,logo_eend" : "";
-    return this.vraag<Thema[]>("GET", `themas?select=id,naam,van,tot,aan,kleur,tekst,logo${meer}&order=id.asc`);
+    const logos = opties.zonderLogos ? "" : (this.versie ?? 0) >= LOGOS_VANAF ? ",logo,logo_groot,logo_eend" : ",logo";
+    return this.vraag<Thema[]>("GET", `themas?select=id,naam,van,tot,aan,kleur,tekst${logos}&order=id.asc`);
+  }
+
+  async laadThemaLogos(id: string): Promise<Pick<Thema, "logo" | "logo_groot" | "logo_eend"> | null> {
+    await this.zekerVersie();
+    if ((this.versie ?? 0) < THEMA_VANAF) return null;
+    const select = (this.versie ?? 0) >= LOGOS_VANAF ? "logo,logo_groot,logo_eend" : "logo";
+    const r = await this.vraag<Pick<Thema, "logo" | "logo_groot" | "logo_eend">[]>("GET", `themas?select=${select}&id=eq.${encodeURIComponent(id)}`);
+    return r[0] ?? null;
   }
 
   async bewaarThema(t: Thema) {

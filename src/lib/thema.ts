@@ -79,8 +79,8 @@ export interface ThemaSoort {
   zweef: VormNaam[];
   fonkel: VormNaam[];
   bellen: boolean;
-  /** Een voorbeeld voor de zin bovenaan (enkel als hint in het beheer). */
-  hint: string;
+  /** De zin bovenaan op de klantenpagina zolang er geen eigen zin is. */
+  zin: string;
   /** Wat er bij "Nu live op …" staat, in de sfeer van het thema. */
   live: string;
   /** Logo's die met de app meekomen (pad onder public/): gelden zolang er geen eigen logo is. */
@@ -91,13 +91,13 @@ export interface ThemaSoort {
 export const THEMA_SOORTEN: ThemaSoort[] = [
   {
     id: "halloween", naam: "Halloween", van: "10-15", tot: "11-01", kleur: "#e8772e", zweef: ["pompoen", "spookje", "vleermuis"], fonkel: ["ster", "vleermuis"], bellen: false,
-    hint: "Fijne Halloween! Kom griezelen aan onze stand.", live: "Kom griezelen aan onze stand!",
+    zin: "Fijne Halloween! Griezelig mooie binders voor elke TCG.", live: "Kom griezelen aan onze stand!",
     logos: { logo: "img/thema/halloween-tekst.webp", logo_groot: "img/thema/halloween-groot.webp", logo_eend: "img/thema/halloween-eend.webp" },
   },
-  { id: "kerst", naam: "Kerst en winter", van: "12-01", tot: "01-06", kleur: "#c8423b", zweef: ["sneeuwvlok", "kerstbal", "sneeuwvlok"], fonkel: ["ster", "sneeuwvlok"], bellen: false, hint: "Een binder als cadeau? Bestel op tijd voor kerst.", live: "Kom gezellig langs aan onze stand!" },
-  { id: "valentijn", naam: "Valentijn", van: "02-07", tot: "02-14", kleur: "#e0607e", zweef: ["hartje"], fonkel: ["ster", "hartje"], bellen: true, hint: "Een binder met jullie naam, voor je lief.", live: "Kom langs, met of zonder lief!" },
-  { id: "pasen", naam: "Pasen", van: "03-20", tot: "04-06", kleur: "#6fb08c", zweef: ["ei", "ei2"], fonkel: ["ster"], bellen: true, hint: "Vrolijk Pasen!", live: "Kom eitjes zoeken aan onze stand!", uitleg: "Pasen valt elk jaar anders: kijk de data na." },
-  { id: "zomer", naam: "Zomer", van: "07-01", tot: "08-31", kleur: "#f2a33a", zweef: ["zon"], fonkel: ["ster"], bellen: true, hint: "Zomerbeurzen: kom langs!", live: "Kom langs, we staan in de zon!" },
+  { id: "kerst", naam: "Kerst en winter", van: "12-01", tot: "01-06", kleur: "#c8423b", zweef: ["sneeuwvlok", "kerstbal", "sneeuwvlok"], fonkel: ["ster", "sneeuwvlok"], bellen: false, zin: "Een binder als cadeau? Bestel op tijd voor kerst.", live: "Kom gezellig langs aan onze stand!" },
+  { id: "valentijn", naam: "Valentijn", van: "02-07", tot: "02-14", kleur: "#e0607e", zweef: ["hartje"], fonkel: ["ster", "hartje"], bellen: true, zin: "Een binder met jullie naam, voor je lief.", live: "Kom langs, met of zonder lief!" },
+  { id: "pasen", naam: "Pasen", van: "03-20", tot: "04-06", kleur: "#6fb08c", zweef: ["ei", "ei2"], fonkel: ["ster"], bellen: true, zin: "Vrolijk Pasen van Bind'r!", live: "Kom eitjes zoeken aan onze stand!", uitleg: "Pasen valt elk jaar anders: kijk de data na." },
+  { id: "zomer", naam: "Zomer", van: "07-01", tot: "08-31", kleur: "#f2a33a", zweef: ["zon"], fonkel: ["ster"], bellen: true, zin: "Fijne zomer! Kom ons zeker eens tegen op een beurs.", live: "Kom langs, we staan in de zon!" },
 ];
 
 /** Zonder thema: belletjes en sterretjes zoals in ons logo. */
@@ -110,6 +110,9 @@ export function themaLogo(t: Thema | null, soort: ThemaSoort | undefined | null,
 }
 
 export const soortVan = (id: string): ThemaSoort | undefined => THEMA_SOORTEN.find((s) => s.id === id);
+
+/** De zin bovenaan: de eigen zin, anders de standaardzin van de soort. */
+export const themaZin = (t: Thema | null, soort: ThemaSoort | null | undefined): string => t?.tekst?.trim() || soort?.zin || "";
 
 /** Een nieuw thema zoals de soort het voorstelt (nog uit tot je het bewaart). */
 export function nieuwThema(s: ThemaSoort): Thema {

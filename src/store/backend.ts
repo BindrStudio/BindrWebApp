@@ -62,7 +62,9 @@ export interface Backend {
   wijzigEtalage(id: string, w: Partial<Pick<Etalagefoto, "titel" | "link" | "volgorde">>): Promise<void>;
   verwijderEtalage(id: string): Promise<void>;
   /** Thema's van de klantenpagina (schema 0.13). Zonder `logo` in het thema blijft het logo op de server staan. */
-  laadThemas(): Promise<Thema[]>;
+  laadThemas(opties?: { zonderLogos?: boolean }): Promise<Thema[]>;
+  /** De logo's van één thema (voor het beheer: enkel van het thema van vandaag). */
+  laadThemaLogos(id: string): Promise<Pick<Thema, "logo" | "logo_groot" | "logo_eend"> | null>;
   bewaarThema(t: Thema): Promise<void>;
   /** Aanvragen voor een eigen binder: de lijst zonder afbeeldingen, de afbeeldingen apart. */
   laadAanvragen(): Promise<Aanvraag[]>;

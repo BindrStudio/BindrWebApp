@@ -1,4 +1,4 @@
--- Bind'r Stock & Beurs App — databaseschema (versie 0.14: drie logo's per thema, "nu live" op de klantenpagina)
+-- Bind'r Stock & Beurs App — databaseschema (versie 0.15: Instagram-berichten automatisch op de klantenpagina)
 --
 -- Uitvoeren: Supabase-dashboard › SQL Editor › New query › dit hele bestand plakken › Run.
 -- Het script mag gerust een tweede keer lopen; het overschrijft geen gegevens.
@@ -433,6 +433,16 @@ alter table public.themas drop constraint if exists themas_logos_check;
 alter table public.themas add constraint themas_logos_check check (
   (logo_groot is null or (length(logo_groot) <= 400000 and logo_groot ~ '^data:image/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$'))
   and (logo_eend is null or (length(logo_eend) <= 400000 and logo_eend ~ '^data:image/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$'))
+);
+
+-- ── Versie 0.15: onze laatste Instagram-berichten automatisch op de klantenpagina ──
+-- Profiel › Instagram: de link naar een JSON-feed van Behold (behold.so, via de officiële Instagram-API). Bij het
+-- publiceren haalt de site er de berichten mee op (scripts/instagram.mjs, via publieke_instellingen). Enkel zo'n link,
+-- of leeg (uit).
+alter table public.instellingen drop constraint if exists instellingen_instagram_feed_check;
+alter table public.instellingen add constraint instellingen_instagram_feed_check check (
+  sleutel <> 'instagram_feed' or waarde = '""'::jsonb
+  or (jsonb_typeof(waarde) = 'string' and (waarde #>> '{}') ~ '^https://feeds\.behold\.so/[A-Za-z0-9_-]{6,64}$')
 );
 
 -- ── Triggers: gewijzigd_op bijhouden en elke wijziging loggen ────────────────
@@ -1017,12 +1027,12 @@ revoke all on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid)
 grant execute on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid),
   public.los_conflict_op(uuid, uuid, uuid), public.aanvaard_conflict(uuid, text), public.markeer_prijzen(uuid, jsonb) to authenticated;
 
--- Welke versie van dit schema draait er? De app vraagt het na het inloggen (0.8 = 8, 0.9 = 9, 0.10 = 10, 0.11 = 11, 0.13 = 13, 0.14 = 14).
+-- Welke versie van dit schema draait er? De app vraagt het na het inloggen (0.8 = 8, 0.9 = 9, 0.10 = 10, 0.11 = 11, 0.13 = 13, 0.14 = 14, 0.15 = 15).
 create or replace function public.schema_versie()
 returns integer
 language sql
 stable
-as $$ select 14 $$;
+as $$ select 15 $$;
 revoke all on function public.schema_versie() from public, anon;
 grant execute on function public.schema_versie() to authenticated;
 
@@ -1081,12 +1091,13 @@ create view public.publieke_themas as
   select id, naam, van, tot, aan, kleur, tekst, logo, logo_groot, logo_eend
     from public.themas;
 
--- Instellingen die de klantenpagina nodig heeft: Instagram en Facebook, de sleutel om aanvragen te mailen en de
--- wettelijke gegevens van de onderneming (naam, vestigingsadres, ondernemingsnummer, contact).
+-- Instellingen die de klantenpagina nodig heeft: Instagram en Facebook, de sleutel om aanvragen te mailen, de
+-- wettelijke gegevens van de onderneming (naam, vestigingsadres, ondernemingsnummer, contact) en de feed met onze
+-- laatste Instagram-berichten (0.15; die is openbaar bedoeld, zoals een feed op een website).
 create or replace view public.publieke_instellingen as
   select sleutel, waarde
     from public.instellingen
-   where sleutel in ('instagram', 'catalogus_tekst', 'aanvraag_sleutel', 'facebook', 'bedrijf_publiek');
+   where sleutel in ('instagram', 'catalogus_tekst', 'aanvraag_sleutel', 'facebook', 'bedrijf_publiek', 'instagram_feed');
 
 -- Komende beurzen ("kom langs op onze stand"), met uren en de website van de beurs. bezig = we staan er nu (de beurs
 -- is gestart in de kassa): de klantenpagina toont dan "nu live". Staan twee omgevingen op dezelfde beurs, dan telt bezig.

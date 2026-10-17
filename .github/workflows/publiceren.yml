@@ -1,4 +1,5 @@
-# Zet de app online op GitHub Pages, met elke nacht een verse Cardmarket-prijsgids.
+# Zet de app online op GitHub Pages, met elke nacht een verse Cardmarket-prijsgids en twee keer per dag onze
+# laatste Instagram-berichten (via de feed uit Profiel › Instagram).
 name: App publiceren
 
 on:
@@ -7,6 +8,8 @@ on:
   schedule:
     # Elke nacht om 03:20 UTC (05:20 Belgische zomertijd), na de nachtelijke update van Cardmarket.
     - cron: "20 3 * * *"
+    # En 's middags nog eens, voor nieuwe Instagram-berichten (de gratis feed van Behold wordt één keer per dag bijgewerkt).
+    - cron: "20 15 * * *"
   workflow_dispatch:
 
 permissions:
@@ -31,6 +34,11 @@ jobs:
 
       - name: Cardmarket-prijsgids ophalen
         run: node scripts/fetch-prices.mjs || echo "::warning::Prijsgids niet opgehaald; de vorige versie blijft online"
+
+      # Onze laatste berichten voor de Instagram-strook (de klanten vragen de feed zo nooit zelf op). Lukt het niet,
+      # dan blijven de berichten van de vorige keer staan; het script laat de publicatie nooit mislukken.
+      - name: Instagram ophalen
+        run: node scripts/instagram.mjs
 
       # Een gratis Supabase-project pauzeert na een week zonder verkeer. Eén vraag per nacht houdt het wakker.
       - name: Supabase wakker houden

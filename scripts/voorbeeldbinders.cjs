@@ -1,32 +1,31 @@
-// De voorbeeldbinders op de startpagina (public/img/voorbeeld): de zip-binder in een kleur met een eigen
-// voorbeeldgravure (scripts/data/voorbeeldgravure.svg: sterretjes en belletjes, geen naam). Ze tonen wat we
-// maken zolang er nog geen foto's van ons werk in de etalage staan. Rekent met dezelfde code als de proef op
-// de klantenpagina (src/klant/binder.ts) in een echte browser.
-//   npm run serve
-//   node scripts/voorbeeldbinders.cjs     (nodig: playwright, zoals voor de e2e-tests; daarna naar webp, zie onderaan)
+// De voorbeeldbinders op de startpagina (public/img/voorbeeld): binders die we echt gemaakt hebben. De foto's staan in
+// scripts/data/binders (op een wit blad of fotobord, gewoon met de gsm). Ze gaan door exact dezelfde verwerking als een
+// foto in Profiel › Binders vooraan (verkleinUitgeknipt met rechtzetten: achtergrond weg, rechtzetten, bijknippen), in
+// een echte browser, en komen er als kleine webp uit. Ze staan op de site zolang er nog niets bij Binders vooraan staat.
+//   node scripts/voorbeeldbinders.cjs     (nodig: playwright, zoals voor de e2e-tests)
+// Een nieuwe binder: zet de foto in scripts/data/binders, draai dit script en zet de naam in VOORBEELDEN (src/klant/main.tsx).
 const { chromium } = require("playwright");
 const esbuild = require("esbuild");
 const fs = require("node:fs");
 const path = require("node:path");
 
 const ROOT = path.resolve(__dirname, "..");
-const BASIS = process.env.BASIS || "http://localhost:8080/";
-const KLEUREN = ["oceaanblauw", "geel", "rood", "roze", "paars"];
-const UIT = path.join(ROOT, ".tests/voorbeeld");
+const BRON = path.join(ROOT, "scripts/data/binders");
+const UIT = path.join(ROOT, "public/img/voorbeeld");
+const HOOGTE = 640; // de waaier toont ze hoogstens ~300 px hoog; scherp genoeg op een gsm met een scherm van 3×
 
 (async () => {
-  fs.mkdirSync(UIT, { recursive: true });
   const code = esbuild.buildSync({
     stdin: {
-      contents: `import { BINDER_KLEUREN, BINDER_H, BINDER_W, binderIn, grenzen, leesOntwerp, lichtOpDonker, maakMasker, midden, teken } from "./src/klant/binder";
-        window.maak = async (id, svg, breed) => {
-          const b = await binderIn(BINDER_KLEUREN.find((x) => x.id === id), "img/binder-zip.webp");
-          const o = await leesOntwerp(new File([svg], "gravure.svg", { type: "image/svg+xml" })).then((c) => maakMasker(c, lichtOpDonker(c)));
-          const groot = document.createElement("canvas"); groot.width = BINDER_W; groot.height = BINDER_H;
-          teken(groot.getContext("2d"), b, o, midden(o, grenzen(o).vullend));
-          const uit = document.createElement("canvas"); uit.width = breed; uit.height = Math.round(breed * BINDER_H / BINDER_W);
-          uit.getContext("2d").drawImage(groot, 0, 0, uit.width, uit.height);
-          return uit.toDataURL("image/png");
+      contents: `import { verkleinUitgeknipt } from "./src/lib/eigenfoto";
+        window.maak = async (b64, type, hoogte) => {
+          const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+          const r = await verkleinUitgeknipt(new File([bytes], "binder", { type }), 1200, 4_000_000, { rechtzetten: true });
+          const img = new Image(); img.src = r.url; await img.decode();
+          const s = Math.min(1, hoogte / img.naturalHeight);
+          const c = document.createElement("canvas"); c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
+          const x = c.getContext("2d"); x.imageSmoothingQuality = "high"; x.drawImage(img, 0, 0, c.width, c.height);
+          return { url: c.toDataURL("image/webp", 0.84), weggehaald: r.weggehaald, rechtgezet: r.rechtgezet, w: c.width, h: c.height };
         };`,
       resolveDir: ROOT, loader: "ts",
     },
@@ -34,14 +33,15 @@ const UIT = path.join(ROOT, ".tests/voorbeeld");
   }).outputFiles[0].text;
   const browser = await chromium.launch();
   const page = await browser.newPage();
-  await page.goto(BASIS);
+  await page.setContent("<!doctype html><title>binders</title>");
   await page.addScriptTag({ content: code });
-  const svg = fs.readFileSync(path.join(ROOT, "scripts/data/voorbeeldgravure.svg"), "utf8");
-  for (const id of KLEUREN) {
-    const url = await page.evaluate(([i, s]) => window.maak(i, s, 480), [id, svg]);
-    fs.writeFileSync(path.join(UIT, `${id}.png`), Buffer.from(url.split(",")[1], "base64"));
-    console.log(path.join(".tests/voorbeeld", `${id}.png`));
+  for (const f of fs.readdirSync(BRON).filter((f) => /\.(jpe?g|png|webp)$/i.test(f)).sort()) {
+    const type = f.endsWith(".png") ? "image/png" : f.endsWith(".webp") ? "image/webp" : "image/jpeg";
+    const r = await page.evaluate(([b, t, h]) => window.maak(b, t, h), [fs.readFileSync(path.join(BRON, f)).toString("base64"), type, HOOGTE]);
+    const naam = f.replace(/\.\w+$/, "");
+    const doel = path.join(UIT, `${naam}.webp`);
+    fs.writeFileSync(doel, Buffer.from(r.url.split(",")[1], "base64"));
+    console.log(`${path.relative(ROOT, doel)}  ${r.w}×${r.h}  ${Math.round(fs.statSync(doel).size / 1024)} kB${r.weggehaald ? "  achtergrond weg" : ""}${r.rechtgezet ? "  rechtgezet" : ""}`);
   }
   await browser.close();
-  console.log('Naar webp: python3 -c "from PIL import Image; [Image.open(f\'.tests/voorbeeld/{k}.png\').save(f\'public/img/voorbeeld/{k}.webp\', quality=82, method=6) for k in ' + JSON.stringify(KLEUREN) + ']"');
 })().catch((e) => { console.error(e); process.exit(1); });

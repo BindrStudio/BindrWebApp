@@ -184,8 +184,8 @@ async function doorloop(ctx, page, motor, naam, opties) {
   // De klantenpagina, met binders vooraan, de Instagram-strook en een thema (Halloween), zoals ze in de demo staan.
   await page.waitForLoadState("networkidle").catch(() => undefined);
   const beeld = (p) => `data:image/${p.endsWith(".png") ? "png" : "webp"};base64,${fs.readFileSync(path.resolve(__dirname, "../../public/img", p)).toString("base64")}`;
-  const vooraan = ["rood", "geel", "oceaanblauw", "paars"].map((k, i) => ({ id: `v${i}`, foto: beeld(`voorbeeld/${k}.webp`), titel: null, link: null, volgorde: i + 1, plek: "voorpagina" }));
-  const insta = ["eend.png", "voorbeeld/roze.webp", "voorbeeld/geel.webp"].map((k, i) => ({ id: `i${i}`, foto: beeld(k), titel: null, link: `https://www.instagram.com/p/${i}/`, volgorde: i + 1, plek: "instagram" }));
+  const vooraan = ["dragonite", "espeon", "mew", "rayquaza"].map((k, i) => ({ id: `v${i}`, foto: beeld(`voorbeeld/${k}.webp`), titel: null, link: null, volgorde: i + 1, plek: "voorpagina" }));
+  const insta = ["eend.png", "voorbeeld/gyarados.webp", "voorbeeld/mew.webp"].map((k, i) => ({ id: `i${i}`, foto: beeld(k), titel: null, link: `https://www.instagram.com/p/${i}/`, volgorde: i + 1, plek: "instagram" }));
   await page.evaluate(([etalage]) => {
     const d = JSON.parse(localStorage.getItem("bindr-demo-v1"));
     d.etalage = etalage;
