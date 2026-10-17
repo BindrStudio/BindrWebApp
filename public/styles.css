@@ -1528,9 +1528,8 @@ body { transition: background-color .4s ease; }
 .thema-nu.aan { background: #e6f1e6; color: var(--inkt); }
 .thema-lijst { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .thema-rij { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; background: var(--room); box-shadow: var(--schaduw); text-align: left; }
-.thema-vormpje { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; flex: none;
-  background: color-mix(in srgb, var(--thema) 18%, var(--room)); }
-@supports not (background: color-mix(in srgb, red 10%, white)) { .thema-vormpje { background: var(--boter-licht); } }
+.thema-vormpje { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; flex: none; background: var(--boter-licht); }
+@supports (background: color-mix(in srgb, red 10%, white)) { .thema-vormpje { background: color-mix(in srgb, var(--thema) 18%, var(--room)); } }
 .thema-vormpje svg { width: 30px; height: 30px; }
 .thema-rij-tekst { flex: 1; min-width: 0; display: grid; gap: 1px; }
 .thema-rij-tekst strong { font-family: var(--titel); font-weight: 600; font-size: 17px; }
@@ -1545,7 +1544,10 @@ body { transition: background-color .4s ease; }
 .thema-proef-balk { position: relative; display: flex; align-items: center; height: 44px; }
 .thema-proef-balk img { height: 40px; width: auto; max-width: 70%; object-fit: contain; }
 .thema-proef-zin { position: relative; margin: 10px 0 0; padding: 7px 12px; border-radius: 12px; color: var(--inkt); font-size: 13.5px; font-weight: 700; width: fit-content; max-width: 100%;
-  background: var(--boter-licht); background: color-mix(in srgb, var(--thema) 18%, var(--room)); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--thema) 40%, transparent); }
+  background: var(--boter-licht); box-shadow: inset 0 0 0 1.5px var(--boter); }
+@supports (background: color-mix(in srgb, red 10%, white)) {
+  .thema-proef-zin { background: color-mix(in srgb, var(--thema) 18%, var(--room)); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--thema) 40%, transparent); }
+}
 .thema-proef-vormen svg { position: absolute; width: 30px; height: 30px; }
 .thema-proef-vormen .v0 { right: 18px; top: 12px; width: 36px; height: 36px; }
 .thema-proef-vormen .v1 { right: 70px; bottom: 14px; }

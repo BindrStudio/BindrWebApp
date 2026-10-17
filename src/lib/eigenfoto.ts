@@ -37,7 +37,7 @@ export async function verkleinFoto(bestand: Blob, max = 720): Promise<string> {
  * en de lege rand errond gaat eraf, zodat elke binder even groot in de waaier staat. Heeft de foto toch een
  * achtergrond, dan een JPEG zoals gewoonlijk (doorzichtig = false: het beheer zegt het dan).
  */
-export async function verkleinUitgeknipt(bestand: Blob, max = 900, maxTekens = 690_000): Promise<{ url: string; doorzichtig: boolean }> {
+export async function verkleinUitgeknipt(bestand: Blob, max = 900, maxTekens = 450_000): Promise<{ url: string; doorzichtig: boolean }> {
   const img = await laadBeeld(bestand);
   const w = img.naturalWidth, h = img.naturalHeight;
   // Op een kleine kopie: hoeveel is doorzichtig, en waar staat het onderwerp?
@@ -63,7 +63,12 @@ export async function verkleinUitgeknipt(bestand: Blob, max = 900, maxTekens = 6
     sx = Math.max(0, (x0 - rand) / k); sy = Math.max(0, (y0 - rand) / k);
     sw = Math.min(w, (x1 + 1 + rand) / k) - sx; sh = Math.min(h, (y1 + 1 + rand) / k) - sy;
   }
-  for (const maat of [max, Math.round(max * 0.85), Math.round(max * 0.7), Math.round(max * 0.58), Math.round(max * 0.48)]) {
+  // Safari maakt geen WebP: een PNG is wel tien keer groter, dus dan kleiner (de waaier toont ze hoogstens 220 px breed).
+  const webp = (() => { const t = document.createElement("canvas"); t.width = t.height = 1; return t.toDataURL("image/webp").startsWith("data:image/webp"); })();
+  const png = doorzichtig && !webp;
+  const grootste = png ? Math.min(max, 600) : max;
+  const limiet = png ? Math.min(maxTekens, 380_000) : maxTekens;
+  for (const maat of [grootste, Math.round(grootste * 0.85), Math.round(grootste * 0.72), Math.round(grootste * 0.6), Math.round(grootste * 0.5)]) {
     const schaal = Math.min(1, maat / Math.max(sw, sh));
     const c = document.createElement("canvas");
     c.width = Math.max(1, Math.round(sw * schaal)); c.height = Math.max(1, Math.round(sh * schaal));
@@ -71,13 +76,9 @@ export async function verkleinUitgeknipt(bestand: Blob, max = 900, maxTekens = 6
     if (!doorzichtig) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); }
     ctx.drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
     let url: string;
-    if (doorzichtig) {
-      url = c.toDataURL("image/webp", 0.86);
-      if (!url.startsWith("data:image/webp")) url = c.toDataURL("image/png"); // Safari maakt geen WebP
-    } else {
-      url = c.toDataURL("image/jpeg", 0.8);
-    }
-    if (url.length <= maxTekens) return { url, doorzichtig };
+    if (doorzichtig) url = png ? c.toDataURL("image/png") : c.toDataURL("image/webp", 0.86);
+    else url = c.toDataURL("image/jpeg", 0.8);
+    if (url.length <= limiet) return { url, doorzichtig };
   }
   throw new Error("Deze foto is te groot, ook verkleind. Probeer een andere.");
 }

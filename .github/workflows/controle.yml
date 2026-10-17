@@ -61,7 +61,7 @@ jobs:
           sleep 1
           node tests/e2e/browsers.cjs .tests/browsers
 
-      - name: Doorloop beursdag, inloggen en printen (Chromium)
+      - name: Doorloop beursdag, inloggen, printen en de klantenpagina online (Chromium)
         run: |
           python3 -m http.server 8080 --directory public >/dev/null 2>&1 &
           sleep 1

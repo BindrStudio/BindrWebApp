@@ -22,7 +22,7 @@ body { overflow-x: hidden; }
   border-bottom: 1px solid rgba(59, 42, 18, .06);
 }
 .klant-merk { display: block; line-height: 0; transition: transform .3s var(--veer); flex: none; }
-.klant-merk img { height: 40px; width: auto; }
+.klant-merk img { height: 40px; width: auto; max-width: min(170px, 40vw); object-fit: contain; object-position: left center; } /* ook een breed logo van een thema */
 .klant-merk:hover { transform: rotate(-2deg) scale(1.04); }
 .klant.balk-weg .klant-balk { transform: translateY(-100%); }
 .klant-balk-rechts { display: flex; align-items: center; gap: 2px; flex: none; }
@@ -168,14 +168,19 @@ body { overflow-x: hidden; }
 .insta { display: grid; gap: 6px; margin-top: 44px; }
 .insta-kop { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
 .insta h2 { font-size: 24px; line-height: 1.15; color: var(--inkt); }
+.insta-acties { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.insta-pauze { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--room); color: var(--inkt); box-shadow: inset 0 0 0 1.5px var(--lijn); }
+.insta-pauze:hover { box-shadow: inset 0 0 0 1.5px var(--zee); }
 .insta-volg { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 12px; border-radius: 999px; background: var(--room); color: var(--zee-donker);
   font-weight: 700; font-size: 14px; text-decoration: none; box-shadow: inset 0 0 0 1.5px var(--zee-licht); min-width: 0; overflow-wrap: anywhere; }
-.insta-strook { --tegel: 148px; --tussen: 16px; margin-inline: calc(50% - 50vw); padding: 14px 0 22px; overflow: hidden;
+.insta-strook { --tegel: 148px; --tussen: 16px; margin-inline: calc(50% - 50vw); padding: 14px 0 40px; margin-bottom: -18px; overflow: hidden;
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent); mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent); }
 /* Twee keer dezelfde rij: van -50% naar 0 schuift ze precies één rij op en begint dan onzichtbaar opnieuw. */
 .insta-baan { list-style: none; margin: 0; padding: 0; display: flex; width: max-content; animation: insta-loop var(--duur, 40s) linear infinite; animation-play-state: paused; }
 .insta-strook.loopt .insta-baan { animation-play-state: running; }
-.insta-strook.loopt:hover .insta-baan, .insta-strook:focus-within .insta-baan { animation-play-state: paused; }
+.insta-strook.loopt:hover .insta-baan { animation-play-state: paused; }
+/* Met het toetsenbord in de strook: ze staat stil en vooraan, zodat de focus in beeld is. */
+.insta-strook:focus-within .insta-baan { animation: none; transform: none; }
 @keyframes insta-loop { from { transform: translateX(-50%); } to { transform: translateX(0); } }
 .insta-tegel { flex: none; width: var(--tegel); margin-right: var(--tussen); transform: translateY(var(--y, 0)) rotate(var(--r, 0deg)); }
 .insta-tegel.t0 { --r: -2deg; }
@@ -193,12 +198,16 @@ body { overflow-x: hidden; }
 
 /* ── Een thema (Halloween, kerst …): een zin bovenaan en een gloed in de kleur van het thema achter de binders ── */
 .thema-band { display: flex; align-items: center; gap: 10px; margin: 16px 0 -6px; padding: 9px 14px; border-radius: 16px; color: var(--inkt); font-size: 14.5px; font-weight: 650; line-height: 1.3;
-  background: var(--boter-licht); background: color-mix(in srgb, var(--thema) 18%, var(--room));
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--thema) 40%, transparent); }
+  background: var(--boter-licht); box-shadow: inset 0 0 0 1.5px var(--boter); }
 .thema-band svg { width: 28px; height: 28px; flex: none; }
 .thema-band span { min-width: 0; }
 .klant.thema .waaier::before { content: ""; position: absolute; left: 50%; top: 46%; width: min(92%, 420px); aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none;
-  background: radial-gradient(circle, color-mix(in srgb, var(--thema) 30%, transparent), transparent 68%); }
+  background: radial-gradient(circle, rgba(243, 201, 129, .3), transparent 68%); }
+/* De kleur van het thema waar de browser color-mix kent (oudere Safari: de boterkleur hierboven). */
+@supports (background: color-mix(in srgb, red 10%, white)) {
+  .thema-band { background: color-mix(in srgb, var(--thema) 18%, var(--room)); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--thema) 40%, transparent); }
+  .klant.thema .waaier::before { background: radial-gradient(circle, color-mix(in srgb, var(--thema) 30%, transparent), transparent 68%); }
+}
 .waaier.laden { pointer-events: none; }
 
 /* ── Sfeer: belletjes en sterretjes uit ons logo, zacht in de achtergrond (langs de randen) ── */
@@ -281,6 +290,7 @@ body { overflow-x: hidden; }
   .insta-strook { overflow-x: auto; scroll-snap-type: x mandatory; -webkit-mask-image: none; mask-image: none; }
   .insta-tegel { scroll-snap-align: start; scroll-margin-left: 16px; }
   .insta-tegel.extra { display: none; }
+  .insta-pauze { display: none; }
   .sterretje { animation: none; opacity: .7; }
   .waaier-foto, .vak-kaart { transition: none; }
   .waaier-glans, .waaier-ster { display: none; }
@@ -432,7 +442,7 @@ body { overflow-x: hidden; }
 .sociaal-knop span { display: grid; text-align: left; font-family: var(--titel); font-weight: 600; font-size: 16px; line-height: 1.15; }
 .sociaal-knop em { font-style: normal; font-family: var(--tekst); font-weight: 500; font-size: 12.5px; color: var(--inkt-2); }
 .sociaal-tekst { max-width: 44ch; margin-bottom: 8px !important; }
-.voet-logo { width: 120px; height: auto; margin-top: 6px; opacity: .95; }
+.voet-logo { width: 120px; height: auto; max-height: 70px; object-fit: contain; margin-top: 6px; opacity: .95; }
 .voet-wettelijk { display: grid; gap: 3px; max-width: 64ch; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--lijn); font-size: 12.5px; line-height: 1.45; color: var(--inkt-2); overflow-wrap: anywhere; }
 .voet-wettelijk strong { color: var(--inkt-2); }
 .voet-wettelijk a { color: inherit; }

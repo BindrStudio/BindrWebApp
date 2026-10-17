@@ -54,7 +54,7 @@ export function EtalageSheet({ plek }: { plek: EtalagePlek }) {
           if (!doorzichtig) metAchtergrond++;
           voegEtalagefotoToe(nieuweEtalagefoto(url, plek));
         } else {
-          voegEtalagefotoToe(nieuweEtalagefoto(await verkleinFoto(f, 720), plek));
+          voegEtalagefotoToe(nieuweEtalagefoto(await verkleinFoto(f, 480), plek)); // de tegels zijn hoogstens 188 px breed
         }
         n++;
       }

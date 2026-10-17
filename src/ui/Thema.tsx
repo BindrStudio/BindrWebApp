@@ -2,7 +2,7 @@
 // logo, een kleur, versiering in de achtergrond en een korte zin, elk jaar in dezelfde periode (of met de hand aan).
 import { useEffect, useRef, useState } from "react";
 import { bewaarThema, kanThema, laadThemas, meld, SCHEMA_013, sluit, themaLijst, useApp } from "../state";
-import { maandDag, maandDagMooi, nieuwThema, THEMA_SOORTEN, themaActief, veiligeKleur, VORMEN, type ThemaSoort } from "../lib/thema";
+import { actiefThema, maandDag, maandDagMooi, nieuwThema, THEMA_SOORTEN, veiligeKleur, VORMEN, type ThemaSoort } from "../lib/thema";
 import type { Thema, ThemaAan } from "../types";
 import { vandaag } from "../lib/format";
 import { veiligeFoto, verkleinUitgeknipt } from "../lib/eigenfoto";
@@ -31,7 +31,8 @@ export function ThemaSheet() {
     const bewaard = lijst?.find((t) => t.id === soort.id) ?? null;
     return <ThemaBewerk key={soort.id} soort={soort} bewaard={bewaard} demo={app.backend?.soort === "demo"} onTerug={() => setBewerk(null)} />;
   }
-  const nu = lijst?.find((t) => themaActief(t, md)) ?? null;
+  // Hetzelfde thema als de klantenpagina: met de hand aan gaat voor een periode.
+  const nu = lijst ? actiefThema(lijst, md) : null;
   return (
     <Sheet titel="Thema" onSluit={sluit} vol>
       <p className="zacht">
@@ -54,7 +55,7 @@ export function ThemaSheet() {
                       <strong>{s.naam}</strong>
                       <span>{status}{t && logo ? " · eigen logo" : ""}</span>
                     </span>
-                    {t && themaActief(t, md) && <span className="thema-live">Nu</span>}
+                    {t && nu?.id === t.id && <span className="thema-live">Nu</span>}
                     <Icoon naam="chevron" maat={18} className="thema-pijl" />
                   </button>
                 </li>
@@ -134,7 +135,7 @@ function ThemaBewerk({ soort, bewaard, demo, onTerug }: { soort: ThemaSoort; bew
           </div>
         </Veld>
         <input ref={invoer} type="file" accept="image/png,image/webp,image/*" hidden onChange={(e) => { void kiesLogo(e.target.files?.[0]); e.target.value = ""; }} />
-        <Veld label="Kleur" hint="Voor de gloed achter de binders, de sterretjes en de zin bovenaan.">
+        <Veld label="Kleur" hint="Voor de gloed achter de binders en de zin bovenaan.">
           <div className="thema-kleur">
             <input type="color" value={kleur} onChange={(e) => setV({ ...v, kleur: e.target.value })} aria-label="Kleur" />
             {kleur !== soort.kleur && <button className="tekstknop" onClick={() => setV({ ...v, kleur: soort.kleur })}>Standaardkleur</button>}
