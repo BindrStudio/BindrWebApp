@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import {
-  actieveBeurs, bewaarBeurs, boekhoudingAan, conflictAanvaarden, conflictOplossen, huidig, kanNieuweBoekhouding, magOngedaan, meld, ongedaanMaken, openBeurs, openExemplaar,
+  actieveBeurs, bewaarBeurs, boekhoudingAan, conflictAanvaarden, conflictOplossen, huidig, kanNieuweBoekhouding, kanTegoed, magOngedaan, meld, ongedaanMaken, openBeurs, openExemplaar,
   openTransactie, planBeurs, retour, schemaOud, SCHEMA_09, schrapBeurs, sluit, sluitBeurs, startBeurs, useApp, veiligeLink, wijzigBeurs,
 } from "../state";
 import type { Beurs, Regel, Stand, Transactie } from "../types";
 import { beursCijfers, beursOverzicht, CASH_GRENS, PRODUCTSOORTEN, retourBedrag, stand } from "../lib/kassa";
 import { bewijsNummer, csv, heeftBewijs } from "../lib/boekhouding";
-import { bonCode } from "../lib/tegoed";
+import { bonCode, tegoedbonnen } from "../lib/tegoed";
 import { datumKort, euro, getal, vandaag } from "../lib/format";
 import { normaliseerCode, toonCode } from "../lib/code";
 import { inVoorraad } from "../lib/exemplaar";
@@ -220,6 +220,8 @@ export function TransactieSheet({ id }: { id: string }) {
   const [retourKeuze, setRetourKeuze] = useState<Set<number> | null>(null);
   const [eigenBedrag, setEigenBedrag] = useState<string | null>(null);
   const [perBank, setPerBank] = useState(false);
+  const [alsTegoed, setAlsTegoed] = useState<boolean | null>(null); // null = zoals de oorspronkelijke betaling
+  const [bonNaam, setBonNaam] = useState<string | null>(null);
   const [borderel, setBorderel] = useState(false);
   if (!t) return null;
   const nieuw = kanNieuweBoekhouding();
@@ -243,6 +245,20 @@ export function TransactieSheet({ id }: { id: string }) {
   const standaard = retourBedrag(terugIn, terugUit);
   const bedrag = eigenBedrag != null ? getal(eigenBedrag) : standaard;
   const naam = (r: Regel) => `${r.naam}${r.aantal && r.aantal > 1 ? ` × ${r.aantal}` : ""}`;
+  // Tegoed bij een retour: wij betalen terug met een nieuwe bon (standaard als de klant met tegoed betaalde),
+  // of de klant geeft de bon terug die hij voor deze inkoop kreeg (zolang er nog iets op staat).
+  const terugTeken = bedrag == null ? null : (standaard < 0 ? -Math.abs(bedrag) : Math.abs(bedrag));
+  const oudTegoed = t.tegoed ?? 0;
+  const eigenBon = oudTegoed < 0 ? tegoedbonnen(transacties).find((b) => b.id === t.id) ?? null : null;
+  const bonnenVan = (t.tegoed_van ?? []).map((g) => transacties.find((x) => x.id === g.bon)).filter(Boolean) as Transactie[];
+  const standaardNaam = bonnenVan[0]?.tegenpartij?.naam ?? t.tegenpartij?.naam ?? "";
+  const tegoedKan = kanTegoed() && terugTeken != null && terugTeken !== 0 && (terugTeken > 0 || (eigenBon?.rest ?? 0) > 0.004);
+  const tegoedAan = tegoedKan && (alsTegoed ?? (terugTeken! > 0 ? oudTegoed > 0 : !!eigenBon));
+  const tegoedBedrag = !tegoedAan ? 0 : terugTeken! > 0
+    ? Math.min(terugTeken!, oudTegoed > 0 ? oudTegoed : terugTeken!)
+    : Math.min(-terugTeken!, eigenBon?.rest ?? 0);
+  const geldDeel = terugTeken == null ? null : Math.round((Math.abs(terugTeken) - tegoedBedrag) * 100) / 100;
+  const naamVoorBon = (bonNaam ?? standaardNaam).trim();
 
   return (
     <Sheet titel={`${SOORT_NAAM[t.soort]} · ${datumKort(t.tijd)} ${tijdKort(t.tijd)}`} onSluit={sluit}>
@@ -298,7 +314,7 @@ export function TransactieSheet({ id }: { id: string }) {
           {(t.tegoed ?? 0) < 0 && <div className="afsluit-rij"><span>Tegoedbon {bonCode(t)} voor {t.tegenpartij?.naam ?? "?"}</span><strong>{euro(t.tegoed!)}</strong></div>}
           {(t.tegoed ?? 0) > 0 && (t.tegoed_van ?? []).map((g) => {
             const bon = huidig().transacties.find((x) => x.id === g.bon);
-            return <div key={g.bon} className="afsluit-rij"><span>Met tegoed{bon ? ` (${bonCode(bon)}, ${bon.tegenpartij?.naam ?? "?"})` : ""}</span><strong>{euro(g.bedrag)}</strong></div>;
+            return <div key={g.bon} className="afsluit-rij"><span>{t.soort === "retour" ? "Tegoed terug van bon" : "Met tegoed"}{bon ? ` (${bonCode(bon)}, ${bon.tegenpartij?.naam ?? "?"})` : ""}</span><strong>{euro(g.bedrag)}</strong></div>;
           })}
           {t.beheerder && <div className="afsluit-rij"><span>Door</span><strong>{beheerders[t.beheerder] ?? "beheerder"}</strong></div>}
         </section>
@@ -311,12 +327,26 @@ export function TransactieSheet({ id }: { id: string }) {
       {retourKeuze && (
         <section className="blok retour-blok">
           <h3>{terugUit.length ? "Deal terugdraaien" : "Retour"}</h3>
-          <p className="zacht klein">Vink aan wat teruggaat. Onze stukken komen terug in voorraad; wat de klant ons gaf, geven we terug (dat moet nog in voorraad zijn). Altijd cash.</p>
+          <p className="zacht klein">Vink aan wat teruggaat. Onze stukken komen terug in voorraad; wat de klant ons gaf, geven we terug (dat moet nog in voorraad zijn). Cash of per overschrijving{kanTegoed() ? ", of in tegoed" : ""}.</p>
           <Veld label={standaard < 0 ? "De klant betaalt ons terug (€)" : "Wij betalen terug (€)"} hint={eigenBedrag != null ? `Volgens de prijzen: ${euro(Math.abs(standaard))}` : "Pas aan als je iets anders afspreekt."}>
             <span className="euro-invoer"><span>€</span><input inputMode="decimal" value={eigenBedrag ?? String(Math.abs(standaard)).replace(".", ",")}
               onChange={(e) => setEigenBedrag(e.target.value)} aria-label="Bedrag terug" /></span>
           </Veld>
-          {nieuw && (
+          {tegoedKan && (
+            <label className="schakel">
+              <input type="checkbox" checked={tegoedAan} onChange={(e) => setAlsTegoed(e.target.checked)} />
+              <span>{terugTeken! > 0 ? "Terug als tegoedbon" : `Met de tegoedbon ${eigenBon ? bonCode(eigenBon.transactie) : ""}`}
+                <span className="zacht klein"> {terugTeken! > 0
+                  ? (oudTegoed > 0 ? `(betaald met ${euro(oudTegoed)} tegoed: dat komt terug op een nieuwe bon)` : "(de klant krijgt een bon in plaats van geld)")
+                  : `(de klant geeft de bon terug die hij voor deze kaarten kreeg; er staat nog ${euro(eigenBon?.rest ?? 0)} op)`}</span></span>
+            </label>
+          )}
+          {tegoedAan && terugTeken! > 0 && (
+            <Veld label="Op naam van"><input value={bonNaam ?? standaardNaam} onChange={(e) => setBonNaam(e.target.value)} maxLength={120} placeholder="Naam (en eventueel @instagram)" /></Veld>
+          )}
+          {tegoedAan && geldDeel != null && geldDeel > 0 && <p className="zacht klein">{euro(tegoedBedrag)} in tegoed, de rest ({euro(geldDeel)}) {terugTeken! > 0 ? "betalen wij" : "betaalt de klant"} in geld.</p>}
+          {oudTegoed < 0 && !eigenBon?.rest && terugTeken != null && terugTeken < 0 && <p className="zacht klein">De tegoedbon van deze inkoop is al gebruikt: de klant betaalt terug in geld.</p>}
+          {nieuw && (!tegoedAan || (geldDeel ?? 0) > 0) && (
             <label className="schakel">
               <input type="checkbox" checked={perBank || Math.abs(bedrag ?? 0) > CASH_GRENS} disabled={Math.abs(bedrag ?? 0) > CASH_GRENS} onChange={(e) => setPerBank(e.target.checked)} />
               <span>Per overschrijving{Math.abs(bedrag ?? 0) > CASH_GRENS ? ` (boven ${euro(CASH_GRENS, true)} kan cash niet)` : ""}</span>
@@ -342,17 +372,26 @@ export function TransactieSheet({ id }: { id: string }) {
                     return { ...r, van: t.id, vorige_status: ex?.status ?? null, vorige_afgeboekt_op: ex?.afgeboekt_op ?? null, vorige_transactie_id: ex?.transactie_id ?? null };
                   });
                   const x = Math.round(terug! * 100) / 100;
-                  const bank = nieuw && (perBank || Math.abs(x) > CASH_GRENS);
+                  const bank = nieuw && (perBank || Math.abs(geldDeel ?? x) > CASH_GRENS);
+                  if (tegoedAan && x > 0 && !naamVoorBon) return meld("Op wiens naam komt de tegoedbon?", "fout");
                   try {
-                    const geboekt = retour(regelsIn, x, terugUit.map((r) => ({ ...r, van: t.id })), bank);
+                    const metTegoed = tegoedAan ? { bedrag: tegoedBedrag, naam: naamVoorBon, bon: eigenBon?.id ?? null } : undefined;
+                    const geboekt = retour(regelsIn, x, terugUit.map((r) => ({ ...r, van: t.id })), bank, metTegoed);
                     const hoe = bank ? "per overschrijving" : "cash";
-                    meld(geboekt.status === "conflict" ? "Retour geboekt, maar niet alles kon terug: bekijk de transactie" : x > 0 ? `Retour: ${euro(x)} ${hoe} terug` : x < 0 ? `Teruggedraaid: klant betaalt ${euro(-x)} ${hoe}` : "Teruggedraaid zonder geld", geboekt.status === "conflict" ? "fout" : "ok");
+                    const tegoedTekst = tegoedAan ? (x > 0 ? `tegoedbon ${bonCode(geboekt)} van ${euro(tegoedBedrag)} voor ${naamVoorBon}` : `${euro(tegoedBedrag)} van de tegoedbon terug`) : "";
+                    meld(geboekt.status === "conflict" ? "Retour geboekt, maar niet alles kon terug: bekijk de transactie"
+                      : tegoedAan ? `${x > 0 ? "Retour" : "Teruggedraaid"}: ${tegoedTekst}${geldDeel ? `, ${euro(geldDeel)} ${hoe}` : ""}`
+                      : x > 0 ? `Retour: ${euro(x)} ${hoe} terug` : x < 0 ? `Teruggedraaid: klant betaalt ${euro(-x)} ${hoe}` : "Teruggedraaid zonder geld", geboekt.status === "conflict" ? "fout" : "ok");
                     setRetourKeuze(null);
                     setEigenBedrag(null);
+                    setAlsTegoed(null);
+                    setBonNaam(null);
                   } catch (e) {
                     meld(e instanceof Error ? e.message : String(e), "fout");
                   }
-                }}>{terug == null ? "Bedrag?" : terug > 0 ? `${euro(terug)} ${perBank || Math.abs(terug) > CASH_GRENS ? "terug per overschrijving" : "cash terug"}` : terug < 0 ? `Klant betaalt ${euro(-terug)}` : "Terugdraaien"}</button>
+                }}>{terug == null ? "Bedrag?"
+                  : tegoedAan ? (terug > 0 ? `${euro(terug)} terug${geldDeel ? "" : " als tegoedbon"}` : `Klant geeft ${euro(tegoedBedrag)} tegoed terug${geldDeel ? ` + ${euro(geldDeel)}` : ""}`)
+                  : terug > 0 ? `${euro(terug)} ${perBank || Math.abs(terug) > CASH_GRENS ? "terug per overschrijving" : "cash terug"}` : terug < 0 ? `Klant betaalt ${euro(-terug)}` : "Terugdraaien"}</button>
                 <button className="tekstknop" onClick={() => { setRetourKeuze(null); setEigenBedrag(null); }}>Annuleer</button>
               </>
             );

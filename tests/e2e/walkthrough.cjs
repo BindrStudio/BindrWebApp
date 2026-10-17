@@ -913,6 +913,22 @@ function fouten(page) {
   await geenHorizontaleScroll("tegoeden");
   await page.keyboard.press("Escape"); await wacht(200);
 
+  stap("retour van een kaart die met tegoed betaald was: terug op een nieuwe bon, niet in geld");
+  await page.locator(".profiel-tegel", { hasText: "Historiek" }).click();
+  await sheet().getByRole("button", { name: "Alle transacties" }).click();
+  await sheet().locator(".transactie-rij", { hasText: "Raichu" }).filter({ hasText: "Skarmory" }).first().click();
+  await sheet().getByRole("button", { name: "Retour of terugdraaien" }).click();
+  await sheet().locator(".regel", { hasText: "Raichu" }).locator("input[type=checkbox]").uncheck();
+  assert.ok(await sheet().getByLabel("Terug als tegoedbon").isChecked(), "met tegoed betaald: standaard terug als tegoed");
+  assert.equal(await sheet().getByLabel("Op naam van").inputValue(), "Jonas");
+  await wacht(200);
+  await foto("40b-retour-tegoed");
+  await sheet().getByRole("button", { name: /^€\s?3(,00)? terug als tegoedbon$/ }).click();
+  await page.getByText(/Retour: tegoedbon TG-\d{4}-[0-9A-F]{6} van €\s?3(,00)? voor Jonas/).waitFor();
+  await page.keyboard.press("Escape"); await wacht(150);
+  await page.keyboard.press("Escape"); await wacht(200);
+  assert.match(await page.locator(".profiel-tegel", { hasText: "Tegoeden" }).innerText(), /€\s?3/);
+
   stap("boekhouding: verzendkosten en de tegoedbon elk op een eigen lijn, alles klopt nog");
   await page.locator(".profiel-tegel", { hasText: "Boekhouding" }).click();
   await sheet().locator(".boek-dag").first().click();

@@ -23,7 +23,7 @@ import { veiligeFoto } from "./lib/eigenfoto";
 import { tegoedbonnen } from "./lib/tegoed";
 import { actieveReservering, inVoorraad, metTelling, metVitrineSinds, schoonArtikel, schoonExemplaar, standaardArtikel, standaardExemplaar } from "./lib/exemplaar";
 import {
-  aanvaardConflict, losConflictOp, maakOngedaan, nieuweKasbeweging, nieuwePrive, nieuweRetour, nieuweTransactie, pasToe, pasTotaalAan, stand,
+  aanvaardConflict, losConflictOp, maakOngedaan, nieuweKasbeweging, nieuwePrive, nieuweRetour, nieuweTransactie, pasToe, pasTotaalAan, stand, type RetourTegoed,
   type Betaling,
 } from "./lib/kassa";
 import { toonCode } from "./lib/code";
@@ -1461,8 +1461,13 @@ export function reserveer(ex: Exemplaar, r: { voor: string; prijs: number | null
   const voor = r.voor.trim().slice(0, 80);
   if (!voor) throw new Error("Voor wie is de reservering?");
   if (!inVoorraad(ex)) throw new Error("Deze kaart is niet meer in voorraad");
+  // Leeg = de gewone prijs van nu (het hartje in de catalogus, anders de waarde in de vault): die blijft vast,
+  // ook als de kaart in de vault een andere waarde heeft.
+  const gewoon = ex.opslag === "vitrine" ? ex.hartjesprijs ?? ex.verkoopprijs : ex.verkoopprijs ?? ex.hartjesprijs;
+  const prijs = r.prijs != null && r.prijs > 0 ? r.prijs : gewoon != null && gewoon > 0 ? gewoon : null;
+  if (prijs == null) throw new Error("Deze kaart heeft nog geen prijs: vul de afgesproken prijs in");
   const reservering = {
-    voor, prijs: r.prijs != null && r.prijs > 0 ? Math.round(r.prijs * 100) / 100 : null, tot: r.tot || null,
+    voor, prijs: Math.round(prijs * 100) / 100, tot: r.tot || null,
     op: new Date().toISOString(), opmerking: r.opmerking?.trim().slice(0, 200) || null,
     vorige_opslag: ex.reservering?.vorige_opslag ?? ex.opslag,
   };
@@ -1768,9 +1773,9 @@ export function magOngedaan(t: Transactie, nu = new Date().toISOString()): boole
 }
 
 /** Retour of een deal terugdraaien: onze stukken komen terug (terugIn), hun stukken gaan terug (terugUit). */
-export function retour(terugIn: Regel[], terug: number, terugUit: Regel[] = [], perBank = false) {
+export function retour(terugIn: Regel[], terug: number, terugUit: Regel[] = [], perBank = false, tegoed?: RetourTegoed) {
   const beurs = actieveBeurs();
-  return boek(nieuweRetour(terugIn, terug, beurs?.id ?? null, undefined, terugUit, perBank));
+  return boek(nieuweRetour(terugIn, terug, beurs?.id ?? null, undefined, terugUit, perBank, tegoed));
 }
 
 /**

@@ -128,6 +128,13 @@ let toestel: Toestel | null = null;
 let schrijf: Kenmerk | null = null;
 let ontvangen: number[] = [];
 let wacht: (() => void) | null = null;
+let lees: Kenmerk | null = null; // het kenmerk waarop we luisteren (bij opnieuw verbinden eerst los)
+
+function opAntwoord(e: Event) {
+  const v = (e.target as Kenmerk).value;
+  if (v) for (let i = 0; i < v.byteLength; i++) ontvangen.push(v.getUint8(i));
+  wacht?.();
+}
 
 /** Opent de Bluetooth-keuze (enkel printers die als Fichero of D11 heten) en verbindt. Geeft de naam. */
 export async function verbindFichero(): Promise<string> {
@@ -151,11 +158,9 @@ async function koppel() {
       const dienst = await gatt.getPrimaryService(d.dienst);
       const s = await dienst.getCharacteristic(d.schrijf);
       const l = await dienst.getCharacteristic(d.lees);
-      l.addEventListener("characteristicvaluechanged", (e) => {
-        const v = (e.target as Kenmerk).value;
-        if (v) for (let i = 0; i < v.byteLength; i++) ontvangen.push(v.getUint8(i));
-        wacht?.();
-      });
+      lees?.removeEventListener("characteristicvaluechanged", opAntwoord);
+      l.addEventListener("characteristicvaluechanged", opAntwoord);
+      lees = l;
       await l.startNotifications();
       schrijf = s;
       return;
@@ -170,8 +175,10 @@ export function ficheroVerbonden(): boolean {
 
 export async function ontkoppelFichero() {
   try { toestel?.gatt?.disconnect(); } catch { /* al los */ }
+  lees?.removeEventListener("characteristicvaluechanged", opAntwoord);
   toestel = null;
   schrijf = null;
+  lees = null;
 }
 
 async function stuur(data: Uint8Array, pauze: number) {

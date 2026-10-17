@@ -86,7 +86,7 @@ export function Kassa() {
             </div>
             {uit.length === 0 && <p className="zacht klein kant-leeg">Scan het label achteraan de toploader, of zoek de kaart.</p>}
             {uit.map(({ r, i }) => <RegelRij key={i} r={r} i={i} />)}
-            {uit.length > 1 && <TotaalRij richting="uit" totaal={totaalUit(regels)} />}
+            {uit.filter(({ r }) => !r.extra).length > 1 && <TotaalRij richting="uit" totaal={totaalUit(regels)} />}
             {s.instellingen.toonMarge && uit.length > 0 && <MargeRij regels={regels} />}
             <div className="kant-knoppen">
               <button className="knop" onClick={() => setPaneel("scan")}><Icoon naam="scan" maat={18} /> Scan</button>
@@ -219,7 +219,7 @@ function RegelRij({ r, i }: { r: Regel; i: number }) {
           {r.nieuw && <> · {[r.nieuw.set_code, r.nieuw.nummer].filter(Boolean).join(" ")} {r.nieuw.conditie} {r.nieuw.taal !== "EN" ? r.nieuw.taal : ""}</>}
           {r.nieuw?.soort === "slab" && <> · {[r.nieuw.grader, r.nieuw.grade].filter(Boolean).join(" ")}</>}
         </span>
-        {toonMarge && r.richting === "uit" && (!r.artikel_id || r.aankoopprijs != null) && (
+        {toonMarge && r.richting === "uit" && !r.extra && (!r.artikel_id || r.aankoopprijs != null) && (
           r.aankoopprijs != null
             ? <span className={`regel-marge${r.prijs - r.aankoopprijs < 0 ? " min" : ""}`}>inkoop {euro(r.aankoopprijs)} · {plusMin(r.prijs - r.aankoopprijs)}</span>
             : <span className="regel-marge onbekend">inkoop niet ingevuld</span>

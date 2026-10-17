@@ -57,11 +57,11 @@ function BonRij({ b, open, onOpen }: { b: Tegoedbon; open: boolean; onOpen: () =
       {open && (
         <div className="bon-detail">
           <button className="lijst-knop" onClick={() => openTransactie(b.id)}>
-            <span>{datumKort(b.datum)} · bon gekregen voor kaarten</span><span className="rechts">+ {euro(b.bedrag)}</span>
+            <span>{datumKort(b.datum)} · {b.transactie.soort === "retour" ? "bon gekregen voor een retour" : "bon gekregen voor kaarten"}</span><span className="rechts">+ {euro(b.bedrag)}</span>
           </button>
           {b.gebruik.map((g) => (
             <button key={g.transactie.id} className="lijst-knop" onClick={() => openTransactie(g.transactie.id)}>
-              <span>{datumKort(g.transactie.tijd)} · gebruikt</span><span className="rechts">− {euro(g.bedrag)}</span>
+              <span>{datumKort(g.transactie.tijd)} · {g.transactie.soort === "retour" ? "teruggegeven (deal teruggedraaid)" : "gebruikt"}</span><span className="rechts">− {euro(g.bedrag)}</span>
             </button>
           ))}
           {b.rest < -0.004 && <p className="nakijken klein">Er werd {euro(-b.rest)} meer gebruikt dan er op de bon stond (bv. twee gsm's tegelijk offline). Kijk de betalingen na.</p>}

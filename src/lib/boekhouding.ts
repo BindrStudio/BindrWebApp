@@ -73,6 +73,8 @@ export interface Dag {
   aankopenFactuur: number; // waarvan met factuur (een vendor of webshop): die factuur geef je zelf in Dexxter in
   aankopenTegoed: number; // waarvan betaald met een tegoedbon (storecredit): een aankoop, de betaling volgt later in natura
   verkopenTegoed: number; // ontvangsten betaald met een tegoedbon (in natura, zoals een ruil): telt mee als omzet
+  tegoedLos: number;     // waarvan niet in een eigen lijn (boven € 500): de lijn "Verkoop betaald met tegoedbon"
+  retourTegoed: number;  // retour terugbetaald met een nieuwe tegoedbon (negatief): geen geld, wel minder omzet
   verzending: number;    // verzendkosten die de klant betaalde (online verkoop): omzet
   inbreng: number;       // uit privé ingebracht (kost, betaald met privémiddelen)
   onttrekking: number;   // naar privé, aan aankoopwaarde
@@ -89,7 +91,7 @@ export interface Dag {
 
 const legeDag = (datum: string): Dag => ({
   datum, verkopen: 0, ruil: 0, retour: 0, ontvangsten: 0, eigenLijnen: [], rest: 0, aankopen: 0, aankopenGeld: 0, aankopenRuil: 0, aankopenFactuur: 0,
-  aankopenTegoed: 0, verkopenTegoed: 0, verzending: 0,
+  aankopenTegoed: 0, verkopenTegoed: 0, tegoedLos: 0, retourTegoed: 0, verzending: 0,
   inbreng: 0, onttrekking: 0, kaarten: 0, artikels: 0, cash: 0, sumup: 0, bank: 0, kas: 0, kasSumup: 0, transacties: [], beurzen: [],
 });
 
@@ -114,13 +116,22 @@ export function dagontvangsten(transacties: Transactie[]): Dag[] {
     else d.verkopen += b.ontvangst;
     d.aankopen += b.aankoop;
     // Storecredit: een inkoop betaald met een tegoedbon (het deel in tegoed), een verkoop betaald met tegoed.
+    // Een retour: hun bon terug (tegoed > 0) maakt een aankoop tegen tegoed ongedaan; een nieuwe bon (tegoed < 0) betaalt terug.
     const tg = t.tegoed ?? 0;
-    const inTegoed = t.soort === "inkoop" && tg < 0 ? Math.min(b.aankoop, -tg) : 0;
-    if (tg > 0 && t.soort !== "retour") d.verkopenTegoed += tg;
+    const inTegoed = t.soort === "inkoop" && tg < 0 ? Math.min(b.aankoop, -tg)
+      : t.soort === "retour" && tg > 0 && b.aankoop < 0 ? -Math.min(-b.aankoop, tg) : 0;
+    const verzending = t.soort === "retour" ? 0 : som(t.regels.filter((r) => r.richting === "uit" && r.extra === "verzending").map((r) => r.prijs));
+    if (tg > 0 && t.soort !== "retour") {
+      d.verkopenTegoed += tg;
+      // Het deel van de bon dat niet al op een eigen lijn (stuk boven € 500) staat.
+      const eigen = som(t.regels.filter((r) => r.richting === "uit" && r.prijs / (r.aantal ?? 1) > EIGEN_LIJN).map((r) => r.prijs));
+      d.tegoedLos += Math.max(0, Math.min(tg, b.ontvangst - eigen - verzending));
+    }
+    if (t.soort === "retour" && tg < 0) d.retourTegoed += Math.max(tg, b.ontvangst);
     if (viaFactuur(t)) d.aankopenFactuur += b.aankoop;
     else if (t.soort === "ruil") d.aankopenRuil += b.aankoop; else { d.aankopenGeld += b.aankoop - inTegoed; d.aankopenTegoed += inTegoed; }
     // Verzendkosten (een regel zonder kaart of artikel): omzet, apart getoond.
-    if (t.soort !== "retour") d.verzending += som(t.regels.filter((r) => r.richting === "uit" && r.extra === "verzending").map((r) => r.prijs));
+    d.verzending += verzending;
     // Kaarten of artikels? (Een retour: wat terugkwam, telt negatief bij zijn soort.)
     const teken = t.soort === "retour" ? -1 : 1;
     const kant = t.soort === "retour" ? "in" : "uit";
@@ -144,7 +155,8 @@ export function dagontvangsten(transacties: Transactie[]): Dag[] {
       verkopen: rond2(d.verkopen), ruil: rond2(d.ruil), retour: rond2(d.retour), ontvangsten,
       rest: rond2(ontvangsten - som(d.eigenLijnen.map((l) => l.bedrag))),
       aankopen: rond2(d.aankopen), aankopenGeld: rond2(d.aankopenGeld), aankopenRuil: rond2(d.aankopenRuil), aankopenFactuur: rond2(d.aankopenFactuur),
-      aankopenTegoed: rond2(d.aankopenTegoed), verkopenTegoed: rond2(d.verkopenTegoed), verzending: rond2(d.verzending),
+      aankopenTegoed: rond2(d.aankopenTegoed), verkopenTegoed: rond2(d.verkopenTegoed), tegoedLos: rond2(d.tegoedLos), retourTegoed: rond2(d.retourTegoed),
+      verzending: rond2(d.verzending),
       inbreng: rond2(d.inbreng), onttrekking: rond2(d.onttrekking), kaarten: rond2(d.kaarten), artikels: rond2(d.artikels),
       cash: rond2(d.cash), sumup: rond2(d.sumup), bank: rond2(d.bank),
       kas: rond2(d.kas), kasSumup: rond2(d.kasSumup),
@@ -176,12 +188,15 @@ export function dexxterLijnen(d: Dag, beursNaam?: string): DexxterLijn[] {
   // Apart: wat met een tegoedbon betaald werd (geen geld, wel omzet) en de verzendkosten (online verkoop).
   // (Nooit meer apart dan er in de rest zit: een stuk boven € 500 staat al op een eigen lijn.)
   const vz = Math.max(0, Math.min(d.verzending, rond2(d.rest - d.retour)));
-  const tg = Math.max(0, Math.min(d.verkopenTegoed, rond2(d.rest - d.retour - vz)));
+  const tg = Math.max(0, Math.min(d.tegoedLos ?? d.verkopenTegoed, rond2(d.rest - d.retour - vz)));
   const restZonderRetour = rond2(d.rest - d.retour - tg - vz);
   if (restZonderRetour !== 0 || (!lijnen.length && !tg && !vz)) lijnen.push({ omschrijving: `Verkoop kaarten en artikels${waar}`, bedrag: restZonderRetour });
   if (tg) lijnen.push({ omschrijving: `Verkoop betaald met tegoedbon${waar}`, bedrag: rond2(tg) });
   if (vz) lijnen.push({ omschrijving: "Verzendkosten aangerekend (online verkoop)", bedrag: rond2(vz) }); // nooit op een beurs
-  if (d.retour !== 0) lijnen.push({ omschrijving: `Retour (terugbetaald)${waar}`, bedrag: d.retour });
+  // Een retour terugbetaald met een tegoedbon staat apart: er ging geen geld terug.
+  const rt = Math.max(d.retour, Math.min(0, d.retourTegoed ?? 0));
+  if (rond2(d.retour - rt) !== 0) lijnen.push({ omschrijving: `Retour (terugbetaald)${waar}`, bedrag: rond2(d.retour - rt) });
+  if (rt !== 0) lijnen.push({ omschrijving: `Retour, terug als tegoedbon${waar}`, bedrag: rond2(rt) });
   return lijnen;
 }
 

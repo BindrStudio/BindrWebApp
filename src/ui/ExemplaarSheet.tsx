@@ -175,6 +175,7 @@ function ReserveerBlok({ ex }: { ex: Exemplaar }) {
   }
   if (!kanReserveren()) return <p className="nakijken">{SCHEMA_016}</p>;
   const p = prijs.trim() ? getal(prijs) : null;
+  const gewoon = ex.opslag === "vitrine" ? ex.hartjesprijs ?? ex.verkoopprijs : ex.verkoopprijs ?? ex.hartjesprijs;
   const bewaar = () => {
     try {
       reserveer(ex, { voor, prijs: p, tot: tot || null, opmerking });
@@ -190,7 +191,7 @@ function ReserveerBlok({ ex }: { ex: Exemplaar }) {
       <Veld label="Voor wie?">
         <input value={voor} onChange={(e) => setVoor(e.target.value)} placeholder="Naam (of @instagram)" maxLength={80} autoFocus />
       </Veld>
-      <Veld label="Afgesproken prijs (€)" hint="Leeg = de gewone prijs.">
+      <Veld label="Afgesproken prijs (€)" hint={gewoon != null ? `Leeg = de gewone prijs (${euro(gewoon)}).` : "Deze kaart heeft nog geen prijs: vul er een in."}>
         <input inputMode="decimal" value={prijs} onChange={(e) => setPrijs(e.target.value)} />
       </Veld>
       <Veld label="Tot wanneer? (optioneel)">
@@ -200,7 +201,7 @@ function ReserveerBlok({ ex }: { ex: Exemplaar }) {
         <input value={opmerking} onChange={(e) => setOpmerking(e.target.value)} maxLength={200} placeholder="bv. komt naar de beurs in Gent" />
       </Veld>
       <div className="knoppenrij">
-        <button className="knop" disabled={!voor.trim() || (prijs.trim() !== "" && (p == null || p <= 0))} onClick={bewaar}>Reserveren</button>
+        <button className="knop" disabled={!voor.trim() || (prijs.trim() !== "" ? p == null || p <= 0 : !gewoon)} onClick={bewaar}>Reserveren</button>
         <button className="knop zacht" onClick={() => setOpen(false)}>Annuleer</button>
       </div>
     </section>

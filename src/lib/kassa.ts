@@ -52,8 +52,8 @@ export function netto(regels: Regel[]) {
  * we de aankoopprijs kennen. Alleen voor de beheerders, nooit voor de klant.
  */
 export function marge(regels: Regel[]) {
-  // Enkel kaarten (exemplaren): artikels zijn omzet, hun kosten zitten apart in de boekhouding.
-  regels = regels.filter((r) => !r.artikel_id);
+  // Enkel kaarten (exemplaren): artikels en verzendkosten zijn omzet, hun kosten zitten apart in de boekhouding.
+  regels = regels.filter((r) => !r.artikel_id && !r.extra);
   const gekend = regels.filter((r) => r.richting === "uit" && r.aankoopprijs != null);
   const verkoop = som(gekend.map((r) => r.prijs));
   const aankoop = som(gekend.map((r) => r.aankoopprijs!));
@@ -125,7 +125,10 @@ export function regelArtikelIn(a: Artikel, aantal: number, prijs: number): Regel
  * (12 + 14 = 26 wordt 25: 11,54 + 13,46), de kant van de klant volgens de referentieprijs.
  */
 export function pasTotaalAan(regels: Regel[], richting: "uit" | "in", nieuwTotaal: number): Regel[] {
-  const idx = regels.map((r, i) => (r.richting === richting ? i : -1)).filter((i) => i >= 0);
+  // Verzendkosten blijven wat ze zijn: de korting gaat enkel over de producten.
+  const vast = som(regels.filter((r) => r.richting === richting && r.extra).map((r) => r.prijs));
+  nieuwTotaal = rond2(nieuwTotaal - vast);
+  const idx = regels.map((r, i) => (r.richting === richting && !r.extra ? i : -1)).filter((i) => i >= 0);
   if (!idx.length) return regels;
   const basis = idx.map((i) => {
     const r = regels[i];
@@ -181,17 +184,45 @@ export function nieuweTransactie(regels: Regel[], b: Betaling, beursId: string |
  * betalen zij ons terug). `terug` = wat wij uitbetalen (negatief: wat zij ons betalen). Cash, of per
  * overschrijving (boven de cashgrens van € 3.000 verplicht).
  */
-export function nieuweRetour(terugIn: Regel[], terug: number, beursId: string | null, tijd = new Date().toISOString(), terugUit: Regel[] = [], perBank = false): Transactie {
-  if (!perBank && Math.abs(terug) > CASH_GRENS) throw new Error(`Cash mag hoogstens ${CASH_GRENS} euro zijn (wettelijke grens). Kies een overschrijving.`);
+export function nieuweRetour(terugIn: Regel[], terug: number, beursId: string | null, tijd = new Date().toISOString(), terugUit: Regel[] = [], perBank = false,
+  tegoed?: RetourTegoed): Transactie {
   const regels: Regel[] = [
     ...terugIn.map((r) => ({ ...r, richting: "in" as const, nieuw: null })),
     ...terugUit.map((r) => ({ ...r, richting: "uit" as const, exemplaar_id: r.exemplaar_id ?? r.nieuw?.id ?? null, nieuw: null })),
   ];
+  const t = rond2(terug);
+  // Een deel in tegoed: wij betalen terug met een nieuwe bon (tegoed < 0), of zij geven (een deel van) hun bon terug (tegoed > 0).
+  let tg = 0;
+  let tegoedVan: TegoedGebruik[] | null = null;
+  let tegenpartij: Tegenpartij | null = null;
+  if (tegoed && tegoed.bedrag > 0 && t !== 0) {
+    const b = rond2(Math.min(tegoed.bedrag, Math.abs(t)));
+    if (t > 0) {
+      if (!tegoed.naam?.trim()) throw new Error("Een tegoedbon heeft een naam nodig");
+      tg = -b;
+      tegenpartij = { naam: tegoed.naam.trim(), type: "particulier" };
+    } else {
+      if (!tegoed.bon) throw new Error("Van welke tegoedbon?");
+      tg = b;
+      tegoedVan = [{ bon: tegoed.bon, bedrag: b }];
+    }
+  }
+  const geld = rond2(-t - tg); // wat er nog in geld over en weer gaat (− = wij betalen)
+  if (!perBank && Math.abs(geld) > CASH_GRENS) throw new Error(`Cash mag hoogstens ${CASH_GRENS} euro zijn (wettelijke grens). Kies een overschrijving.`);
   return {
     id: uuid(), beurs_id: beursId, soort: "retour", tijd, regels,
-    totaal: -rond2(terug), cash: perBank ? 0 : -rond2(terug), sumup: 0, bank: perBank ? -rond2(terug) : 0, status: "ok", conflicten: [], opmerking: null,
+    totaal: -t, cash: perBank ? 0 : geld, sumup: 0, bank: perBank ? geld : 0,
+    ...(tg ? { tegoed: tg, tegoed_van: tegoedVan } : {}),
+    status: "ok", conflicten: [], opmerking: null, ...(tegenpartij ? { tegenpartij } : {}),
   };
 }
+
+/**
+ * Een retour met tegoed. Wij betalen terug (`terug` > 0): tot `bedrag` als een nieuwe tegoedbon op `naam`
+ * (bv. een kaart die met tegoed betaald was). Zij betalen terug (`terug` < 0): tot `bedrag` van bon `bon`
+ * (bv. een inkoop tegen een tegoedbon terugdraaien: ze geven de bon terug). De rest gaat in geld.
+ */
+export interface RetourTegoed { bedrag: number; naam?: string | null; bon?: string | null }
 
 /**
  * Kaarten tussen privé en de zaak, zonder geld. `in` = inbreng uit de privécollectie (nieuwe

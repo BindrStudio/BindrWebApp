@@ -110,7 +110,7 @@ export function Boekhouding({ onSluit }: { onSluit: () => void }) {
                     <strong>{dagLang(d.datum)}</strong>
                     <span className="zacht klein">
                       {[d.aankopenGeld ? `inkoop ${euro(d.aankopenGeld)}` : null, d.aankopenRuil ? `via ruil ${euro(d.aankopenRuil)}` : null,
-                        d.aankopenFactuur ? `met factuur ${euro(d.aankopenFactuur)}` : null,
+                        d.aankopenTegoed ? `tegen tegoedbon ${euro(d.aankopenTegoed)}` : null, d.aankopenFactuur ? `met factuur ${euro(d.aankopenFactuur)}` : null,
                         d.inbreng ? `uit privé ${euro(d.inbreng)}` : null, d.onttrekking ? `naar privé ${euro(d.onttrekking)}` : null].filter(Boolean).join(" · ")}
                     </span>
                   </span>
@@ -829,6 +829,8 @@ function DagstaatAankopen({ dag, lijst, beurzen, bedrijf }: { dag: Dag; lijst: T
 
 function DagDocument({ dag, beurzen, bedrijf, beheerders }: { dag: Dag; beurzen: Beurs[]; bedrijf: Bedrijf; beheerders: Record<string, string> }) {
   const lijnen = dexxterLijnen(dag, beurzen.map((b) => b.naam).join(", ") || undefined);
+  const metTegoed = dag.transacties.some((t) => t.tegoed);
+  const tegoedSom = rond2(dag.transacties.reduce((x, t) => x + (t.tegoed ?? 0), 0));
   return (
     <article className="doc">
       <DocKop bedrijf={bedrijf} titel="Dagontvangsten" sub={<><div>{dagLang(dag.datum)}</div>{beurzen.map((b) => <div key={b.id}>{b.naam}{b.locatie ? `, ${b.locatie}` : ""}</div>)}</>} />
@@ -838,7 +840,7 @@ function DagDocument({ dag, beurzen, bedrijf, beheerders }: { dag: Dag; beurzen:
         <tfoot><tr><td>Totaal dagontvangsten</td><td className="r">{euro(dag.ontvangsten)}</td></tr></tfoot>
       </table>
       <table className="doc-tabel">
-        <thead><tr><th>Tijd</th><th>Soort</th><th>Omschrijving</th><th className="r">Cash</th><th className="r">SumUp</th><th className="r">Bank</th></tr></thead>
+        <thead><tr><th>Tijd</th><th>Soort</th><th>Omschrijving</th><th className="r">Cash</th><th className="r">SumUp</th><th className="r">Bank</th>{metTegoed && <th className="r">Tegoed</th>}</tr></thead>
         <tbody>
           {dag.transacties.map((t) => (
             <tr key={t.id}>
@@ -848,12 +850,13 @@ function DagDocument({ dag, beurzen, bedrijf, beheerders }: { dag: Dag; beurzen:
               <td className="r">{t.cash ? euro(t.cash) : ""}</td>
               <td className="r">{t.sumup ? euro(t.sumup) : ""}</td>
               <td className="r">{t.bank ? euro(t.bank) : ""}</td>
+              {metTegoed && <td className="r">{t.tegoed ? `${euro(t.tegoed)}${t.tegoed < 0 ? ` (bon ${bonCode(t)})` : ""}` : ""}</td>}
             </tr>
           ))}
         </tbody>
-        <tfoot><tr><td colSpan={3}>Totaal geld</td><td className="r">{euro(rond2(dag.cash + dag.kas))}</td><td className="r">{euro(rond2(dag.sumup + dag.kasSumup))}</td><td className="r">{euro(dag.bank)}</td></tr></tfoot>
+        <tfoot><tr><td colSpan={3}>Totaal geld</td><td className="r">{euro(rond2(dag.cash + dag.kas))}</td><td className="r">{euro(rond2(dag.sumup + dag.kasSumup))}</td><td className="r">{euro(dag.bank)}</td>{metTegoed && <td className="r">{euro(tegoedSom)}</td>}</tr></tfoot>
       </table>
-      <p className="doc-klein">Verkopen {euro(dag.verkopen)} · ruil {euro(dag.ruil)} · retour {euro(dag.retour)} · waarvan kaarten {euro(dag.kaarten)} en artikels {euro(dag.artikels)} · aankopen {euro(dag.aankopen)}{dag.kas || dag.kasSumup ? ` · kasbewegingen ${euro(dag.kas)} cash, ${euro(dag.kasSumup)} SumUp (geen omzet)` : ""}.</p>
+      <p className="doc-klein">Verkopen {euro(dag.verkopen)} · ruil {euro(dag.ruil)} · retour {euro(dag.retour)} · waarvan kaarten {euro(dag.kaarten)} en artikels {euro(dag.artikels)}{dag.verzending ? ` · verzendkosten ${euro(dag.verzending)}` : ""} · aankopen {euro(dag.aankopen)}{dag.verkopenTegoed ? ` · betaald met tegoedbon ${euro(dag.verkopenTegoed)}` : ""}{dag.aankopenTegoed ? ` · gekocht tegen tegoedbon ${euro(dag.aankopenTegoed)}` : ""}{dag.kas || dag.kasSumup ? ` · kasbewegingen ${euro(dag.kas)} cash, ${euro(dag.kasSumup)} SumUp (geen omzet)` : ""}. Tegoed is geen geld: een bon die we gaven (−) of waarmee betaald werd (+).</p>
       <footer className="doc-voet">Gemaakt met Bind'r Voorraad op {datumKort(new Date().toISOString())}</footer>
     </article>
   );
@@ -883,20 +886,20 @@ function InventarisDocument({ inv, bedrijf }: { inv: Inventaris; bedrijf: Bedrij
 function dagenCsv(dagen: Dag[], beurzen: Beurs[]): string {
   const naam = (id: string) => beurzen.find((b) => b.id === id)?.naam ?? "";
   return csv([
-    ["datum", "beurs", "verkopen", "ruil", "retour", "dagontvangsten", "waarvan_kaarten", "waarvan_artikels", "eigen_lijnen_boven_500", "cash", "sumup", "overschrijving", "kasbewegingen_cash", "kasbewegingen_sumup", "aankopen", "inbreng_prive", "naar_prive"],
-    ...dagen.slice().reverse().map((d) => [d.datum, d.beurzen.map(naam).join(", "), d.verkopen, d.ruil, d.retour, d.ontvangsten, d.kaarten, d.artikels,
-      d.eigenLijnen.map((l) => `${l.omschrijving}${l.code ? ` ${toonCode(l.code)}` : ""}: ${l.bedrag.toFixed(2)}`).join(" | "), d.cash, d.sumup, d.bank, d.kas, d.kasSumup, d.aankopen, d.inbreng, d.onttrekking]),
+    ["datum", "beurs", "verkopen", "ruil", "retour", "dagontvangsten", "waarvan_kaarten", "waarvan_artikels", "waarvan_verzending", "eigen_lijnen_boven_500", "cash", "sumup", "overschrijving", "betaald_met_tegoed", "kasbewegingen_cash", "kasbewegingen_sumup", "aankopen", "waarvan_tegen_tegoed", "inbreng_prive", "naar_prive"],
+    ...dagen.slice().reverse().map((d) => [d.datum, d.beurzen.map(naam).join(", "), d.verkopen, d.ruil, d.retour, d.ontvangsten, d.kaarten, d.artikels, d.verzending,
+      d.eigenLijnen.map((l) => `${l.omschrijving}${l.code ? ` ${toonCode(l.code)}` : ""}: ${l.bedrag.toFixed(2)}`).join(" | "), d.cash, d.sumup, d.bank, d.verkopenTegoed, d.kas, d.kasSumup, d.aankopen, d.aankopenTegoed, d.inbreng, d.onttrekking]),
   ]);
 }
 
 function aankopenCsv(lijst: Transactie[], beurzen: Beurs[]): string {
-  const rijen: (string | number | null)[][] = [["bewijs", "datum", "tijd", "waar", "soort", "verkoper", "type", "gemeente", "getekend", "code", "kaart", "richting", "marktwaarde", "bron", "pct", "prijs", "cash", "overschrijving", "status", "transactie_id"]];
+  const rijen: (string | number | null)[][] = [["bewijs", "datum", "tijd", "waar", "soort", "verkoper", "type", "gemeente", "getekend", "code", "kaart", "richting", "marktwaarde", "bron", "pct", "prijs", "cash", "overschrijving", "tegoed", "status", "transactie_id"]];
   for (const t of lijst.slice().sort((a, b) => a.tijd.localeCompare(b.tijd))) {
     for (const r of t.regels) {
       const markt = r.richting === "in" ? r.referentie ?? null : r.hartjesprijs ?? null;
       rijen.push([bewijsNummer(t), dagVan(t.tijd), tijdKort(t.tijd), waarGekocht(t, beurzen), t.soort, t.tegenpartij?.naam ?? "", t.tegenpartij?.type ?? "",
         t.tegenpartij?.adres ?? "", t.tegenpartij?.handtekening ? "ja" : "nee", r.code ? toonCode(r.code) : "", r.naam, r.richting, markt,
-        r.richting === "in" ? r.referentie_bron ?? "" : "", markt ? Math.round((r.prijs / markt) * 100) : null, r.prijs, t.cash, t.bank ?? 0, t.status, t.id]);
+        r.richting === "in" ? r.referentie_bron ?? "" : "", markt ? Math.round((r.prijs / markt) * 100) : null, r.prijs, t.cash, t.bank ?? 0, t.tegoed ?? 0, t.status, t.id]);
     }
   }
   return csv(rijen);
@@ -912,10 +915,10 @@ function inventarisCsv(inv: Inventaris): string {
 
 function transactiesCsv(lijst: Transactie[], beurzen: Beurs[]): string {
   const naam = (id: string | null) => beurzen.find((b) => b.id === id)?.naam ?? "";
-  const rijen: (string | number | null)[][] = [["datum", "tijd", "beurs", "soort", "richting", "code", "naam", "aantal", "prijs", "marktwaarde", "cash", "sumup", "overschrijving", "transactie_id"]];
+  const rijen: (string | number | null)[][] = [["datum", "tijd", "beurs", "soort", "richting", "code", "naam", "aantal", "prijs", "marktwaarde", "cash", "sumup", "overschrijving", "tegoed", "transactie_id"]];
   for (const t of lijst) {
-    if (t.soort === "kas") { rijen.push([dagVan(t.tijd), tijdKort(t.tijd), naam(t.beurs_id), "kas", "", "", t.opmerking ?? kasOmschrijving(t), 1, 0, null, t.cash, t.sumup, 0, t.id]); continue; }
-    for (const r of t.regels) rijen.push([dagVan(t.tijd), tijdKort(t.tijd), naam(t.beurs_id), t.soort, r.richting, r.code ? toonCode(r.code) : "", r.naam, r.aantal ?? 1, r.prijs, r.referentie ?? null, t.cash, t.sumup, t.bank ?? 0, t.id]);
+    if (t.soort === "kas") { rijen.push([dagVan(t.tijd), tijdKort(t.tijd), naam(t.beurs_id), "kas", "", "", t.opmerking ?? kasOmschrijving(t), 1, 0, null, t.cash, t.sumup, 0, 0, t.id]); continue; }
+    for (const r of t.regels) rijen.push([dagVan(t.tijd), tijdKort(t.tijd), naam(t.beurs_id), t.soort, r.richting, r.code ? toonCode(r.code) : "", r.naam, r.aantal ?? 1, r.prijs, r.referentie ?? null, t.cash, t.sumup, t.bank ?? 0, t.tegoed ?? 0, t.id]);
   }
   return csv(rijen);
 }

@@ -2,7 +2,7 @@
 // een bon, de boekhouding (dagontvangsten, kosten, open bonnen op 31/12) en een gereserveerde kaart.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { betalingKlopt, maakOngedaan, nieuweRetour, nieuweTransactie, pasToe, regelVerzending } from "../src/lib/kassa";
+import { betalingKlopt, maakOngedaan, marge, nieuweRetour, nieuweTransactie, pasTotaalAan, pasToe, regelVerzending } from "../src/lib/kassa";
 import { bonCode, openBonnen, openTegoedOp, tegoedbonnen, verdeelOverBonnen, zoekBonnen } from "../src/lib/tegoed";
 import { dagontvangsten, dexxterLijnen, kostenLijnen } from "../src/lib/boekhouding";
 import { actieveReservering, reserveringVerlopen } from "../src/lib/exemplaar";
@@ -121,4 +121,52 @@ test("reserveren: enkel zolang de kaart in voorraad ligt; een retour begint opni
   const weer = pasToe(na.voorraad, retour);
   assert.equal(weer.voorraad.exemplaren[0].status, "in voorraad");
   assert.equal(weer.voorraad.exemplaren[0].reservering, null);
+});
+
+test("deal terugdraaien na een inkoop tegen een bon: de klant geeft de bon terug, geen geld, geen omzet", () => {
+  const terug = nieuweRetour([], -25, null, "2026-10-18T10:00:00Z", [{ ...kaartIn("Pikachu", 25, 30), exemplaar_id: "n-Pikachu", van: bon.id }], false,
+    { bedrag: 25, bon: bon.id });
+  assert.deepEqual([terug.totaal, terug.cash, terug.tegoed], [25, 0, 25]);
+  assert.deepEqual(terug.tegoed_van, [{ bon: bon.id, bedrag: 25 }]);
+  const [b] = tegoedbonnen([bon, terug]);
+  assert.equal(b.rest, 0, "de bon is terug");
+  assert.equal(openTegoedOp([bon, terug], "2026-12-31"), 0);
+  const [dag2, dag1] = dagontvangsten([bon, terug]);
+  assert.equal(dag1.aankopenTegoed, 25);
+  assert.deepEqual([dag2.ontvangsten, dag2.retour, dag2.aankopen, dag2.aankopenTegoed, dag2.aankopenGeld, dag2.cash], [0, 0, -25, -25, 0, 0]);
+  assert.deepEqual(kostenLijnen(dag2), [{ omschrijving: "Aankoop kaarten tegen tegoedbon", bedrag: -25 }], "de kost van gisteren valt weg");
+  // Een deel van de bon is al gebruikt (€ 10): de rest van het terugbetalen gaat in geld.
+  const deels = nieuweRetour([], -25, null, "2026-10-18T10:00:00Z", [], false, { bedrag: 15, bon: bon.id });
+  assert.deepEqual([deels.tegoed, deels.cash], [15, 10]);
+});
+
+test("retour van een kaart die met tegoed betaald was: terug als een nieuwe bon, niet in geld", () => {
+  const verkoop = nieuweTransactie([kaartUit("K7", 40)], { cash: 0, sumup: 0, tegoed: 40, tegoedVan: [{ bon: "oud", bedrag: 40 }] }, null, null, "2026-10-19T10:00:00Z");
+  assert.throws(() => nieuweRetour([{ ...kaartUit("K7", 40), van: verkoop.id }], 40, null, "2026-10-20T10:00:00Z", [], false, { bedrag: 40 }), /naam/);
+  const terug = nieuweRetour([{ ...kaartUit("K7", 40), van: verkoop.id }], 40, null, "2026-10-20T10:00:00Z", [], false, { bedrag: 40, naam: "Mila" });
+  assert.deepEqual([terug.totaal, terug.cash, terug.tegoed, terug.tegenpartij?.naam], [-40, 0, -40, "Mila"]);
+  const nieuweBon = tegoedbonnen([verkoop, terug]).find((b) => b.id === terug.id)!;
+  assert.deepEqual([nieuweBon.naam, nieuweBon.rest], ["Mila", 40]);
+  const [dag] = dagontvangsten([terug]);
+  assert.deepEqual([dag.ontvangsten, dag.retour, dag.retourTegoed, dag.cash, dag.aankopen], [-40, -40, -40, 0, 0]);
+  assert.deepEqual(dexxterLijnen(dag).filter((l) => l.bedrag), [{ omschrijving: "Retour, terug als tegoedbon", bedrag: -40 }]);
+  // Gewoon cash terug blijft zoals vroeger.
+  const cash = nieuweRetour([{ ...kaartUit("K8", 12), van: "x" }], 12, null);
+  assert.deepEqual([cash.cash, cash.tegoed, "tegenpartij" in cash], [-12, undefined, false]);
+});
+
+test("Dexxter: tegoed dat al op een eigen lijn staat, telt niet nog eens als lijn met tegoed", () => {
+  const duur = nieuweTransactie([kaartUit("DUUR", 600)], { cash: 0, sumup: 0, tegoed: 600, tegoedVan: [{ bon: "b", bedrag: 600 }] }, null, null, "2026-10-21T10:00:00Z");
+  const gewoon = nieuweTransactie([kaartUit("K9", 100)], { cash: 100, sumup: 0 }, null, null, "2026-10-21T11:00:00Z");
+  const [dag] = dagontvangsten([duur, gewoon]);
+  const l = dexxterLijnen(dag);
+  assert.deepEqual(l.map((x) => [x.omschrijving.split(" ·")[0], x.bedrag]), [["Kaart DUUR", 600], ["Verkoop kaarten en artikels", 100]]);
+  assert.equal(l.reduce((s, x) => s + x.bedrag, 0), dag.ontvangsten);
+});
+
+test("verzendkosten blijven buiten een korting en buiten de marge", () => {
+  const regels = [{ ...kaartUit("K10", 20), aankoopprijs: 8 }, regelVerzending(5)];
+  assert.deepEqual(pasTotaalAan(regels, "uit", 20).map((r) => r.prijs), [15, 5]);
+  const m = marge(regels);
+  assert.deepEqual([m.gekend, m.onbekend, m.winst], [1, 0, 12]);
 });
