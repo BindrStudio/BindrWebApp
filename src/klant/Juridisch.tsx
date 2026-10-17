@@ -13,7 +13,7 @@ export function kboMooi(kbo: string | null | undefined): string | null {
   return (kbo ?? "").trim() || null;
 }
 
-const BIJGEWERKT = "16 oktober 2026";
+const BIJGEWERKT = "17 oktober 2026";
 
 function Wie({ b }: { b: BedrijfPubliek | null }) {
   const kbo = kboMooi(b?.kbo);
@@ -107,7 +107,7 @@ export function Voorwaarden({ b }: { b: BedrijfPubliek | null }) {
         <ul>
           <li><strong>Aanvraag en voorstel.</strong> Een aanvraag is vrijblijvend. We sturen je een voorstel met de binder, het ontwerp, de prijs, de betaling en wanneer hij klaar is. De bestelling staat pas vast als je dat voorstel goedkeurt.</li>
           <li><strong>Je ontwerp.</strong> Geef je ons een eigen ontwerp, dan bevestig je dat je het mag gebruiken. We mogen een ontwerp weigeren, bijvoorbeeld als het de rechten van iemand anders schendt of kwetsend is. Een foto van je binder delen we enkel op Instagram of Facebook als je dat goed vindt.</li>
-          <li><strong>Lasergravure.</strong> Elke binder graveren we apart, op een materiaal met structuur. De kleur, de diepte, de scherpte en de plaats van de gravure kunnen per binder licht verschillen en wijken altijd wat af van het voorbeeld op het scherm (ook de voorbeelden op deze site zijn een indicatie, en elk scherm toont kleuren anders). Zulke kleine verschillen horen bij lasergravure en zijn geen gebrek.</li>
+          <li><strong>Gravure, UV-print en schilderwerk.</strong> Elke binder maken we apart, op een materiaal met structuur: gegraveerd met de laser, in kleur gedrukt met UV-print of met de hand geschilderd. De kleur, de diepte, de scherpte en de plaats van het ontwerp kunnen per binder licht verschillen en wijken altijd wat af van het voorbeeld op het scherm (ook de voorbeelden op deze site zijn een indicatie, en elk scherm toont kleuren anders). Zulke kleine verschillen horen bij dit handwerk en zijn geen gebrek.</li>
           <li><strong>Geen herroeping.</strong> Een binder die we volgens jouw wensen maken, kun je niet herroepen (artikel VI.53, 3° van het Wetboek van economisch recht).</li>
         </ul>
       </section>
@@ -125,7 +125,7 @@ export function Voorwaarden({ b }: { b: BedrijfPubliek | null }) {
       </section>
       <section>
         <h2>7. Garantie</h2>
-        <p>Je hebt de wettelijke garantie: 2 jaar voor nieuwe producten (binders, 3D-prints, sealed) en 1 jaar voor tweedehands producten (losse en graded kaarten). Meld een gebrek zo snel mogelijk en uiterlijk 2 maanden nadat je het vaststelde. Normale slijtage, verkeerd gebruik en de kleine verschillen van een lasergravure (punt 5) vallen niet onder de garantie.</p>
+        <p>Je hebt de wettelijke garantie: 2 jaar voor nieuwe producten (binders, 3D-prints, sealed) en 1 jaar voor tweedehands producten (losse en graded kaarten). Meld een gebrek zo snel mogelijk en uiterlijk 2 maanden nadat je het vaststelde. Normale slijtage, verkeerd gebruik en de kleine verschillen van een gravure, UV-print of schilderwerk (punt 5) vallen niet onder de garantie.</p>
       </section>
       <section>
         <h2>8. Betalen</h2>

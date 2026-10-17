@@ -531,21 +531,25 @@ function Start({ data, etalage, stukken, telling, beurzen, ig, demo, thema, soor
   }, [feed, etalage?.insta]);
   // Per soort een paar beelden: de duurste met een foto eerst.
   const beelden = (p: Plek): Stuk[] => stukken.filter((s) => s.plek === p && (p === "kaarten" ? s.afbeelding : s.foto)).sort((a, b) => b.prijs - a.prijs).slice(0, 3);
-  // De eigen zin (Profiel › Thema), anders de standaardzin van het thema. Vooraf bekijken (?thema=…) zegt dat het een voorbeeld is.
-  const zin = thema ? (proef ? `Voorbeeld van het thema ${thema.naam}: ` : "") + themaZin(thema, soort) : "";
+  // De eigen zin (Profiel › Thema), anders de standaardzin van het thema. De eend zegt hem in een ballon bovenaan.
+  const zin = thema ? themaZin(thema, soort) : "";
+  const eendBeeld = useContext(EendBeeld);
   return (
     <>
-      {/* Staan we live op een beurs, dan zegt die melding (in de stijl van het thema) het al: geen tweede band. */}
-      {thema && zin && !live && (
-        <p className={`thema-band${eend ? " met-eend" : ""}`}>
-          {eend ? <img src={eend} alt="" /> : soort && <VormSvg vorm={VORMEN[soort.zweef[0] ?? "ster"]} />}
-          <span>{zin}</span>
-        </p>
-      )}
       <section className="held" aria-labelledby="held-titel">
         <div className="held-tekst">
+          {/* Staan we live op een beurs, dan zegt die melding (met de eend) het al: geen tweede ballon. */}
+          {thema && zin && !live && (
+            <div className="thema-eend">
+              <img src={eend ?? eendBeeld} alt="" width={84} height={84} />
+              <p className="thema-ballon">
+                {proef && <small>Voorbeeld van het thema {thema.naam}:</small>}
+                {zin}
+              </p>
+            </div>
+          )}
           <h1 id="held-titel">Binders die even uniek zijn als je collectie</h1>
-          <p>Custom binders voor elke TCG: Pokémon, Lorcana, One Piece, Riftbound … of gewoon wat jij wilt. Met de laser gegraveerd.{demo ? " (Voorbeeld met de demo.)" : ""}</p>
+          <p>Custom binders voor elke TCG: Pokémon, Lorcana, One Piece, Riftbound … of gewoon wat jij wilt. Gegraveerd met de laser, in volle kleur met UV-print of met de hand geschilderd.{demo ? " (Voorbeeld met de demo.)" : ""}</p>
           <div className="held-knoppen">
             <a className="knop" href="#binders">Bekijk de binders</a>
           </div>
@@ -585,7 +589,7 @@ function Start({ data, etalage, stukken, telling, beurzen, ig, demo, thema, soor
           <p>Een gewone kaartmap wordt bij ons een stuk van je collectie, voor welke kaarten je ook verzamelt.</p>
           <ul className="over-lijst">
             <li><OntwerpIcoon /><span><strong>Eigen ontwerp.</strong> Elk artwork maken we zelf: voor Pokémon, Lorcana, One Piece, Riftbound of elke andere TCG, of helemaal naar jouw idee.</span></li>
-            <li><LaserIcoon /><span><strong>Lasergravure.</strong> Het ontwerp gaat er met de laser in, op de voorkant of op voor- én achterkant.</span></li>
+            <li><LaserIcoon /><span><strong>Laser, UV-print of verf.</strong> We graveren het ontwerp met de laser, drukken het in volle kleur met onze UV-printer of schilderen het met de hand. Op de voorkant of op voor- én achterkant.</span></li>
             <li><StandIcoon /><span><strong>Op de beurs.</strong> Aan onze stand verkopen we ook kaarten, slabs en sealed, en kopen en ruilen we kaarten.</span></li>
           </ul>
         </div>
@@ -1021,7 +1025,7 @@ function Kaarten({ data, stukken, sets, f, zetF, onOpen, onZoekFocus }: {
 const PLEK_TEKST: Record<Exclude<Plek, "kaarten">, { titel: string; uitleg: string; leeg: string }> = {
   binders: {
     titel: "Binders",
-    uitleg: "Ontworpen en gelaserd door Bind'r. Elke gravure is handwerk: kleine verschillen tussen binders horen erbij. Ligt er één niet op de stand? Vraag ernaar, we hebben ze mee.",
+    uitleg: "Ontworpen en gemaakt door Bind'r: gegraveerd met de laser, in kleur met UV-print of met de hand geschilderd. Elke binder is handwerk: kleine verschillen horen erbij. Ligt er één niet op de stand? Vraag ernaar, we hebben ze mee.",
     leeg: "Onze binders staan binnenkort online. Je ziet ze nu al aan onze stand en op Instagram.",
   },
   "3d": { titel: "3D-prints", uitleg: "Zelf geprint: standaards, deckboxen en andere handige spullen voor je kaarten.", leeg: "Er staan nog geen 3D-prints online. Kom kijken aan onze stand." },
@@ -1239,6 +1243,8 @@ function Detail({ g, beurzen, sets, demo, onSluit }: { g: Groep<Stuk>; beurzen: 
                     {s.binder?.merk && <><dt>Binder</dt><dd>{s.binder.merk}</dd></>}
                     <dt>Beschikbaar</dt><dd>{n > 5 ? "ja" : `nog ${n}`}{s.uitgestald === false ? " (niet uitgestald: vraag ernaar aan onze stand)" : ""}</dd>
                     {s.binder?.techniek === "laser" && <><dt>Gravure</dt><dd className="zacht">Handwerk: kleur en diepte kunnen licht verschillen van de foto.</dd></>}
+                    {s.binder?.techniek === "uv" && <><dt>UV-print</dt><dd className="zacht">In volle kleur op de binder gedrukt. Kleuren kunnen licht verschillen van de foto en je scherm.</dd></>}
+                    {s.binder?.techniek === "geschilderd" && <><dt>Geschilderd</dt><dd className="zacht">Met de hand geschilderd: elke binder is uniek.</dd></>}
                   </>
                 ) : s.soort === "eigen product" ? (
                   <><dt>Soort</dt><dd>Bind'r-product</dd><dt>Beschikbaar</dt><dd>{n > 1 ? `nog ${n}` : "één stuk"}</dd></>
@@ -1297,7 +1303,7 @@ function Voet({ ig, fb, b, logo }: { ig: string; fb: string | null; b: BedrijfPu
         <a className="sociaal-knop" href={igProfiel(ig)} target="_blank" rel="noreferrer"><IgIcoon /> <span>Instagram<em>@{ig}</em></span></a>
         {fb && <a className="sociaal-knop" href={fb} target="_blank" rel="noreferrer"><FbIcoon /> <span>Facebook<em>Bind'r</em></span></a>}
       </div>
-      <p className="sociaal-tekst">Onze nieuwste binders, lasergravures en kaarten, en waar we binnenkort staan.</p>
+      <p className="sociaal-tekst">Onze nieuwste binders (gegraveerd, in kleur geprint of geschilderd), kaarten en waar we binnenkort staan.</p>
       <img src={logo} alt="Bind'r" className="voet-logo" width={120} height={53} />
       <p>Collectibles, crafts en 3D-prints</p>
       <div className="voet-wettelijk">

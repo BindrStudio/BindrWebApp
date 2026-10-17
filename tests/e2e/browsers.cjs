@@ -260,7 +260,7 @@ async function doorloop(ctx, page, motor, naam, opties) {
   assert.equal(aanvraag?.kleur, "Koningsblauw");
   assert.match(aanvraag?.voorbeeld ?? "", /^data:image\/jpeg;base64,/, "het voorbeeld op de binder is gemaakt");
 
-  for (const [hash, tekst] of [["#privacy", /geen cookies/i], ["#voorwaarden", /Lasergravure/]]) {
+  for (const [hash, tekst] of [["#privacy", /geen cookies/i], ["#voorwaarden", /Gravure, UV-print en schilderwerk/]]) {
     await page.goto(BASIS + "?demo=1" + hash);
     await page.locator(".juridisch").getByText(tekst).first().waitFor();
     await nooitTeBreed(hash);

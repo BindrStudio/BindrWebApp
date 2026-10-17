@@ -97,7 +97,7 @@ function server({ oud = false, schema013 = false, fotoFout = 0, beurzen = [] } =
     const fotoAanvragen = log.filter((l) => l.startsWith("publieke_etalage?select=id%2Cfoto") || l.startsWith("publieke_etalage?select=id,foto"));
     assert.equal(decodeURIComponent(fotoAanvragen[0]).match(/in\.\(([^)]*)\)/)[1].split(",").length, 1, "eerst de eerste binder alleen");
     assert.ok(fotoAanvragen.length >= 3, "na de fout opnieuw, dan de rest");
-    assert.match(await page.locator(".thema-band").innerText(), /Fijne Halloween/);
+    assert.match(await page.locator(".thema-eend .thema-ballon").innerText(), /Fijne Halloween/, "de eend zegt de zin van het thema");
     await page.waitForFunction(() => document.querySelector(".klant-merk img")?.getAttribute("src")?.startsWith("data:image/png"));
     assert.ok(log.some((l) => /publieke_themas\?select=logo,logo_groot,logo_eend&id=eq\.halloween/.test(decodeURIComponent(l))), "de logo's apart, enkel van het thema van vandaag");
     assert.match(await page.locator(".over-logo").getAttribute("src"), /img\/thema\/halloween-groot\.webp$/, "geen eigen 'tekst en logo': het meegeleverde");
@@ -132,7 +132,7 @@ function server({ oud = false, schema013 = false, fotoFout = 0, beurzen = [] } =
     const { ctx, page, log } = await open({ oud: true });
     await page.locator(".waaier-foto").first().waitFor();
     assert.ok(await page.locator('.waaier-foto img[src*="voorbeeld/"]').count() >= 3, "de voorbeeldbinders");
-    assert.equal(await page.locator(".klant.thema, .thema-band").count(), 0);
+    assert.equal(await page.locator(".klant.thema, .thema-eend").count(), 0);
     await page.locator(".insta").scrollIntoViewIfNeeded();
     await page.locator(".insta-tegel img").first().waitFor();
     assert.equal(await page.locator(".insta-tegel:not(.extra)").count(), 5, "alle foto's van de oude etalage in de strook");
@@ -184,7 +184,7 @@ function server({ oud = false, schema013 = false, fotoFout = 0, beurzen = [] } =
     // Een thema dat nog niet bewaard is (kerst): vooraf bekijken zoals de soort het voorstelt, met de standaardzin.
     const kerst = await open({}, "?thema=kerst");
     await kerst.page.locator(".klant.thema-kerst").waitFor();
-    assert.match(await kerst.page.locator(".thema-band").innerText(), /Voorbeeld van het thema Kerst en winter: Een binder als cadeau\?/);
+    assert.match(await kerst.page.locator(".thema-ballon").innerText(), /Voorbeeld van het thema Kerst en winter:\s+Een binder als cadeau\?/);
     await kerst.ctx.close();
   }
 

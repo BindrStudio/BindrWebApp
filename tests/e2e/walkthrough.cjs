@@ -989,7 +989,7 @@ function fouten(page) {
   assert.equal(await klant.locator('.klant-inhoud a[href="#ontwerp"]').count(), 1, "Ontwerp je binder maar één keer op de start");
   assert.equal(await klant.locator(".insta").count(), 0, "nog geen Instagram-berichten: geen lege strook");
   assert.ok(await klant.locator(".sfeer .sterretje").count() >= 10 && await klant.locator(".sfeer .plop").count() >= 6, "sterretjes en ploppende belletjes");
-  assert.equal(await klant.locator(".klant.thema, .thema-band").count(), 0, "geen thema");
+  assert.equal(await klant.locator(".klant.thema, .thema-eend").count(), 0, "geen thema");
   assert.match(await klant.locator(".beurzen").innerText(), /Beurs Antwerpen[\s\S]*Antwerp Expo[\s\S]*10:00–17:00/, "geplande beurs op de klantenpagina, met de uren");
   assert.equal(await klant.locator(".ticket a", { hasText: "Website van de beurs" }).getAttribute("href"), "https://www.antwerpexpo.be/");
   assert.match(await klant.locator(".ticket .ticket-nog").innerText(), /Over \d+ (dagen|weken)/);
@@ -1073,7 +1073,7 @@ function fouten(page) {
   await geenHorizontaleScroll("privacy", klant);
   await klant.locator(".voet-links a", { hasText: "Verkoopvoorwaarden" }).click();
   await klant.locator(".juridisch h1", { hasText: "Verkoopvoorwaarden" }).waitFor();
-  assert.match(await klant.locator(".juridisch").innerText(), /Lasergravure[\s\S]*licht verschillen/);
+  assert.match(await klant.locator(".juridisch").innerText(), /Gravure, UV-print en schilderwerk[\s\S]*licht verschillen/);
   await geenHorizontaleScroll("verkoopvoorwaarden", klant);
   // Ontwerp je binder: de aanvraag (met toploader, kleur en een afbeelding van het idee), en als extra een eigen
   // zwart-wit SVG proberen op een echte zip-binder.
@@ -1093,6 +1093,11 @@ function fouten(page) {
   await klant.getByRole("button", { name: "Tot aan het stiksel" }).click();
   await klant.getByRole("button", { name: "Verstuur mijn aanvraag" }).isDisabled().then((x) => assert.ok(x, "eerst naam, e-mail en idee"));
   await klant.locator(".wens-chips .chip", { hasText: "Een naam of tekst" }).click();
+  // Hoe we het maken: gravure, UV-print in kleur of geschilderd (standaard: weet ik nog niet).
+  const hoe = klant.locator(".keuze-groep", { hasText: "Hoe maken we het?" });
+  assert.match(await hoe.locator(".veld-hint").innerText(), /we stellen voor wat het best past/);
+  await hoe.getByRole("button", { name: "In kleur met UV-print" }).click();
+  assert.match(await hoe.locator(".veld-hint").innerText(), /in volle kleur op de binder/);
   await klant.getByLabel("Je idee").fill("Mijn logo met mijn naam eronder");
   await klant.getByLabel("Naam", { exact: true }).fill("Lotte Test");
   await klant.getByLabel("E-mail", { exact: true }).fill("lotte@voorbeeld.be");
@@ -1104,7 +1109,7 @@ function fouten(page) {
   assert.equal(aanvraag?.kleur, "Koningsblauw");
   assert.equal(aanvraag?.toploader, true);
   assert.equal(aanvraag?.beelden?.length, 1, "de afbeelding bij het idee gaat mee");
-  assert.match(aanvraag?.idee ?? "", /Wensen: Een naam of tekst[\s\S]*Mijn logo/);
+  assert.match(aanvraag?.idee ?? "", /^Techniek: In kleur met UV-print\n\nWensen: Een naam of tekst[\s\S]*Mijn logo/);
   assert.match(aanvraag?.artwork ?? "", /^data:image\/png;base64,/, "het ontwerp gaat mee");
   assert.match(aanvraag?.voorbeeld ?? "", /^data:image\/jpeg;base64,/, "het voorbeeld op de binder gaat mee");
   await klant.locator(".klant-nav.onder a", { hasText: "Start" }).click();
@@ -1118,6 +1123,7 @@ function fouten(page) {
   await sheet().locator(".aanvraag-rij", { hasText: "Lotte Test" }).click();
   await sheet().locator(".aanvraag-beelden img").nth(1).waitFor();
   assert.match(await sheet().innerText(), /lotte@voorbeeld\.be[\s\S]*9-pocket, voor toploaders[\s\S]*Koningsblauw/);
+  assert.match(await sheet().innerText(), /Techniek: In kleur met UV-print/, "hoe we het maken staat bij het idee");
   await sheet().locator(".aanvraag-beelden img").nth(2).waitFor();
   await foto("14f-aanvraag");
   await sheet().getByRole("button", { name: "Sluiten", exact: true }).last().click();
@@ -1210,12 +1216,12 @@ function fouten(page) {
   assert.equal(await klant2.locator(".waaier-foto").count(), 3, "de binders van vooraan");
   assert.equal(await klant2.locator(".waaier-foto.kaal").count(), 3, "uitgeknipt, zonder kader (en geen voorbeeldbinders erbij)");
   assert.equal(await klant2.locator(".waaier-foto.o0").getAttribute("href"), "https://www.instagram.com/p/test/");
-  // Het thema: de zin bovenaan, de versiering in de achtergrond.
-  assert.match(await klant2.locator(".thema-band").innerText(), /Fijne Halloween/);
+  // Het thema: de eend zegt de zin in een ballon bovenaan, de versiering in de achtergrond.
+  assert.match(await klant2.locator(".held .thema-eend .thema-ballon").innerText(), /Fijne Halloween/);
   assert.equal(await klant2.locator(".klant.thema-halloween").count(), 1);
   assert.match(await klant2.locator(".klant-merk img").getAttribute("src"), /^data:image\//, "ons eigen logo bovenaan");
   assert.match(await klant2.locator(".over-logo").getAttribute("src"), /img\/thema\/halloween-groot\.webp$/, "tekst en logo: meegeleverd");
-  assert.match(await klant2.locator(".thema-band img").getAttribute("src"), /img\/thema\/halloween-eend\.webp$/, "de eend van Halloween bij de zin");
+  assert.match(await klant2.locator(".thema-eend img").getAttribute("src"), /img\/thema\/halloween-eend\.webp$/, "de eend van Halloween zegt de zin");
   assert.ok(await klant2.locator(".sfeer .zweef").count() >= 6, "pompoenen, spookjes en vleermuizen");
   // De Instagram-strook loopt, het nieuwste eerst, en linkt naar het bericht.
   await klant2.locator(".insta").scrollIntoViewIfNeeded();
@@ -1244,7 +1250,7 @@ function fouten(page) {
   // Een thema vooraf bekijken (kerst staat uit): ?thema=kerst.
   await klant2.goto(BASIS + "?demo=1&thema=kerst");
   await klant2.locator(".klant.thema-kerst").waitFor();
-  assert.match(await klant2.locator(".thema-band").innerText(), /Voorbeeld van het thema Kerst/);
+  assert.match(await klant2.locator(".thema-ballon").innerText(), /Voorbeeld van het thema Kerst/);
   await klant2.screenshot({ path: path.join(SHOTS, "14j-klant-thema-kerst.png") });
   assert.deepEqual(fk2, [], "geen fouten op de klantenpagina (etalage)");
   await klant2.close();

@@ -1,6 +1,6 @@
-// "Ontwerp je binder": een klant vraagt een binder op maat aan (zijn idee, afbeeldingen, welke binder, kleur,
-// toploader ja of nee). Heeft hij al een eigen zwart-wit ontwerp, dan kan hij het als extra proberen op een
-// echte zip-binder (foto, omgekleurd). De aanvraag komt in de app van Bind'r (Profiel › Aanvragen) en, als
+// "Ontwerp je binder": een klant vraagt een binder op maat aan (zijn idee, afbeeldingen, hoe we het maken:
+// gravure, UV-print in kleur of geschilderd, welke binder, kleur, toploader ja of nee). Heeft hij al een eigen
+// zwart-wit ontwerp, dan kan hij het als extra proberen als gravure op een echte zip-binder (foto, omgekleurd). De aanvraag komt in de app van Bind'r (Profiel › Aanvragen) en, als
 // de beheerders een sleutel van Web3Forms invulden, ook per mail. Het voorbeeld is een indicatie.
 import { useEffect, useRef, useState, type PointerEvent as WijsEvent, type ReactNode } from "react";
 import { SUPABASE_KEY, SUPABASE_URL } from "../config";
@@ -11,6 +11,13 @@ import {
 } from "./binder";
 
 const GROOTTES = ["4-pocket", "9-pocket", "12-pocket", "Weet ik nog niet"];
+/** Hoe we het ontwerp op de binder zetten (zoals TECHNIEKEN in het beheer), met een korte uitleg. */
+const MANIEREN = [
+  { id: "laser", label: "Gravure met de laser", uitleg: "De laser brandt je ontwerp in de binder: strak en blijvend, in één tint." },
+  { id: "uv", label: "In kleur met UV-print", uitleg: "We drukken je ontwerp in volle kleur op de binder. Een ontwerp in kleur? Voeg het toe bij de afbeeldingen hierboven." },
+  { id: "geschilderd", label: "Met de hand geschilderd", uitleg: "Met de hand geschilderd: geen twee binders zijn hetzelfde." },
+  { id: "", label: "Weet ik nog niet", uitleg: "Geen probleem: we stellen voor wat het best past bij je idee." },
+] as const;
 const WENSEN = ["Mijn eigen tekening", "Een naam of tekst", "Mijn favoriete TCG", "Voor- én achterkant", "Als cadeau"];
 const MAX_BEELDEN = 3;
 
@@ -28,7 +35,7 @@ export function OntwerpPagina({ demo, sleutel, ig, igLink, basis }: Props) {
     <>
       <header className="sectie-kop">
         <h1>Ontwerp je binder</h1>
-        <p>Heb je een idee, een tekening of een logo? Wij maken er een binder van. Vertel ons wat je wilt en we sturen je een vrijblijvend voorstel met prijs.</p>
+        <p>Heb je een idee, een tekening of een logo? Wij maken er een binder van: gegraveerd met de laser, in volle kleur met UV-print of met de hand geschilderd. Vertel ons wat je wilt en we sturen je een vrijblijvend voorstel met prijs.</p>
       </header>
       <Aanvraag demo={demo} sleutel={sleutel} ig={ig} igLink={igLink} kleur={kleur} setKleur={setKleur}
         proefAan={proefAan} setProefAan={setProefAan} heeftOntwerp={heeftOntwerp} proef={proef}>
@@ -141,7 +148,7 @@ function Proef({ kleur, basis, onStand }: { kleur: BinderKleur; basis: string; o
             <span>SVG of PNG, zwart-wit</span>
           </button>
         )}
-        <p className="ontwerp-noot">Een indicatie: de kleur van de binder is benaderd, en een gravure valt nooit exact hetzelfde uit als op het scherm.</p>
+        <p className="ontwerp-noot">Een indicatie van een gravure: de kleur van de binder is benaderd, en een gravure valt nooit exact hetzelfde uit als op het scherm.</p>
       </div>
       <div className="ontwerp-keuzes">
         <div className="ontwerp-bestand">
@@ -182,6 +189,7 @@ function Aanvraag({ demo, sleutel, ig, igLink, kleur, setKleur, proefAan, setPro
 }) {
   const [v, setV] = useState({ naam: "", email: "", telefoon: "", grootte: "9-pocket", idee: "", honing: "" });
   const [toploader, setToploader] = useState<boolean>(false);
+  const [manier, setManier] = useState<string>("");
   const [wensen, setWensen] = useState<Set<string>>(new Set());
   const [beelden, setBeelden] = useState<string[]>([]);
   const [beeldFout, setBeeldFout] = useState<string | null>(null);
@@ -212,7 +220,9 @@ function Aanvraag({ demo, sleutel, ig, igLink, kleur, setKleur, proefAan, setPro
     // Een robot vult het verborgen veld in: doe alsof het lukte.
     if (v.honing) { setStand({ soort: "klaar", mail: false }); return; }
     setStand({ soort: "bezig" });
-    const idee = [wensen.size ? `Wensen: ${[...wensen].join(", ")}` : "", v.idee.trim()].filter(Boolean).join("\n\n").slice(0, 4000) || "(zie de afbeeldingen)";
+    // Hoe we het maken staat bovenaan het idee (de tabel heeft er geen eigen kolom voor).
+    const hoe = MANIEREN.find((m) => m.id === manier && m.id);
+    const idee = [hoe ? `Techniek: ${hoe.label}` : "", wensen.size ? `Wensen: ${[...wensen].join(", ")}` : "", v.idee.trim()].filter(Boolean).join("\n\n").slice(0, 4000) || "(zie de afbeeldingen)";
     const p = proef.current;
     const ontwerpMee = proefAan && metOntwerp && !!p.ontwerp;
     const rij = {
@@ -269,7 +279,7 @@ function Aanvraag({ demo, sleutel, ig, igLink, kleur, setKleur, proefAan, setPro
             subject: `Nieuwe binderaanvraag van ${rij.naam}`,
             from_name: "Bind'r klantenpagina",
             replyto: rij.email,
-            Naam: rij.naam, "E-mail": rij.email, Telefoon: rij.telefoon ?? "", Binder: `${rij.grootte}, ${rij.kleur}, toploaders: ${toploader ? "ja" : "nee"}`, Idee: rij.idee,
+            Naam: rij.naam, "E-mail": rij.email, Telefoon: rij.telefoon ?? "", Binder: `${rij.grootte}, ${rij.kleur}, toploaders: ${toploader ? "ja" : "nee"}`, Techniek: hoe?.label ?? "Weet ik nog niet", Idee: rij.idee,
             Afbeeldingen: beelden.length || rij.artwork ? (bewaard ? "In de app: Profiel › Aanvragen" : "De klant had afbeeldingen, maar ze konden niet bewaard worden: vraag ze per mail.") : "Geen",
           }),
         });
@@ -333,6 +343,15 @@ function Aanvraag({ demo, sleutel, ig, igLink, kleur, setKleur, proefAan, setPro
           {beeldFout && <p className="ontwerp-fout" role="alert">{beeldFout}</p>}
         </fieldset>
         <fieldset className="keuze-groep">
+          <legend>Hoe maken we het?</legend>
+          <div className="wens-chips">
+            {MANIEREN.map((m) => (
+              <button key={m.label} type="button" className={`chip${manier === m.id ? " aan" : ""}`} aria-pressed={manier === m.id} onClick={() => setManier(m.id)}>{m.label}</button>
+            ))}
+          </div>
+          <span className="veld-hint">{MANIEREN.find((m) => m.id === manier)?.uitleg}</span>
+        </fieldset>
+        <fieldset className="keuze-groep">
           <legend>Welke binder?</legend>
           <div className="wens-chips">
             {GROOTTES.map((g) => (
@@ -362,7 +381,7 @@ function Aanvraag({ demo, sleutel, ig, igLink, kleur, setKleur, proefAan, setPro
           <label className="schakel-rij">
             <span>
               <strong>Heb je al een eigen ontwerp?</strong>
-              <span className="veld-hint">Probeer je zwart-wit tekening of logo op de binder (SVG of PNG).</span>
+              <span className="veld-hint">Probeer je zwart-wit tekening of logo als gravure op de binder (SVG of PNG). Een ontwerp in kleur voor UV-print voeg je toe bij de afbeeldingen.</span>
             </span>
             <input type="checkbox" role="switch" checked={proefAan} onChange={(e) => setProefAan(e.target.checked)} />
           </label>
@@ -391,7 +410,7 @@ function Aanvraag({ demo, sleutel, ig, igLink, kleur, setKleur, proefAan, setPro
           <input type="tel" value={v.telefoon} onChange={(e) => zet({ telefoon: e.target.value })} autoComplete="tel" maxLength={40} />
         </label>
         <label className="honing" aria-hidden="true">Laat leeg<input tabIndex={-1} autoComplete="off" value={v.honing} onChange={(e) => zet({ honing: e.target.value })} /></label>
-        <p className="privacy">We gebruiken je gegevens enkel om je aanvraag te beantwoorden en bewaren ze niet langer dan nodig (zie <a href="#privacy">privacy</a>). Een lasergravure is handwerk: kleur en diepte kunnen per binder licht verschillen (zie <a href="#voorwaarden">verkoopvoorwaarden</a>).</p>
+        <p className="privacy">We gebruiken je gegevens enkel om je aanvraag te beantwoorden en bewaren ze niet langer dan nodig (zie <a href="#privacy">privacy</a>). Elke binder is handwerk: bij een gravure, een UV-print of schilderwerk kunnen kleur en details per binder licht verschillen (zie <a href="#voorwaarden">verkoopvoorwaarden</a>).</p>
         {stand.soort === "fout" && <p className="ontwerp-fout" role="alert">{stand.tekst}</p>}
         <button className="knop groot" type="submit" disabled={!ok || stand.soort === "bezig"}>
           {stand.soort === "bezig" ? "Versturen…" : "Verstuur mijn aanvraag"}
