@@ -71,7 +71,7 @@ async function nabootsen(route) {
   }
   const tabel = p.replace("/rest/v1/", "");
   if (tabel === "beheerders") return json(route, 200, [{ naam: "Jadon", user_id: GEBRUIKER }]);
-  if (tabel === "rpc/schema_versie") return json(route, 200, 11); // schema 0.11: de app vraagt het in één keer
+  if (tabel === "rpc/schema_versie") return json(route, 200, 13); // schema 0.13: de app vraagt het in één keer
   if (tabel === "omgevingen") return json(route, 200, server.omgevingen);
   if (tabel === "instellingen" && req.method() === "POST") {
     for (const r of req.postDataJSON()) server.instellingen[r.sleutel] = r.waarde;
@@ -80,7 +80,7 @@ async function nabootsen(route) {
   if (tabel === "instellingen") return json(route, 200, Object.entries(server.instellingen).map(([sleutel, waarde]) => ({ sleutel, waarde })));
   if (tabel === "aanwezig" && req.method() === "POST") { server.aanwezig++; return route.fulfill({ status: 201, body: "" }); }
   if (tabel === "aanwezig") return json(route, 200, [{ user_id: GEBRUIKER, omgeving_id: "o-bindr", scherm: "catalogus", laatst: new Date().toISOString() }]);
-  if (["exemplaren", "artikelen", "beurzen", "transacties", "aanvragen", "etalage"].includes(tabel)) return json(route, 200, []);
+  if (["exemplaren", "artikelen", "beurzen", "transacties", "aanvragen", "etalage", "themas"].includes(tabel)) return json(route, 200, []);
   return json(route, 404, { message: `onbekend: ${tabel}` });
 }
 
@@ -143,7 +143,7 @@ async function nabootsen(route) {
   stap("samen werken: aanwezig gemeld (antwoord zonder inhoud) en instelling bewaard");
   await page.waitForTimeout(500);
   assert.ok(server.aanwezig >= 1, "aanwezig gemeld");
-  assert.equal(await page.evaluate(() => localStorage.getItem("bindr-schema-v1")), "10", "schema 0.11 herkend via schema_versie()");
+  assert.equal(await page.evaluate(() => localStorage.getItem("bindr-schema-v1")), "12", "schema 0.13 herkend via schema_versie()");
   await page.getByRole("button", { name: "Instellingen" }).click();
   await page.locator(".instagram-veld input").fill("bindr.pin");
   await page.locator(".instagram-veld").getByRole("button", { name: "Bewaar" }).click();

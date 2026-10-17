@@ -179,13 +179,22 @@ test("meer foto's per artikel, de etalage en aanvragen: meteen op de gsm, later 
   st.verwijderArtikelfoto(st.artikelfotosVan(id)[0]);
   assert.deepEqual(st.artikelfotosVan(id).map((f) => f.foto), [F1]);
 
-  st.voegEtalagefotoToe(st.nieuweEtalagefoto(F2));
-  st.voegEtalagefotoToe(st.nieuweEtalagefoto(F3));
-  const e = st.etalageLijst()![0];
+  // Vooraan (de waaier): achteraan de rij erbij.
+  st.voegEtalagefotoToe(st.nieuweEtalagefoto(F2, "voorpagina"));
+  st.voegEtalagefotoToe(st.nieuweEtalagefoto(F3, "voorpagina"));
+  const e = st.etalageLijst("voorpagina")![0];
   assert.equal(st.wijzigEtalagefoto(e, { link: "javascript:alert(1)" }), false, "enkel gewone links");
   assert.equal(st.wijzigEtalagefoto(e, { titel: "  Gengar op zwart ", link: "www.instagram.com/p/abc" }), true);
   st.schuifEtalagefoto(e, 1);
-  assert.deepEqual(st.etalageLijst()!.map((x) => x.foto), [F3, F2]);
+  assert.deepEqual(st.etalageLijst("voorpagina")!.map((x) => x.foto), [F3, F2]);
+  // De Instagram-strook: apart, en het nieuwste bericht bovenaan.
+  st.voegEtalagefotoToe(st.nieuweEtalagefoto(F1, "instagram"));
+  st.voegEtalagefotoToe(st.nieuweEtalagefoto(F2, "instagram"));
+  assert.deepEqual(st.etalageLijst("instagram")!.map((x) => x.foto), [F2, F1]);
+  assert.equal(st.etalageLijst("voorpagina")!.length, 2, "niet door elkaar");
+  st.schuifEtalagefoto(st.etalageLijst("instagram")![1], -1);
+  assert.deepEqual(st.etalageLijst("instagram")!.map((x) => x.foto), [F1, F2]);
+  assert.deepEqual(st.etalageLijst("voorpagina")!.map((x) => x.foto), [F3, F2], "schuiven blijft binnen de strook");
 
   await wacht(50);
   assert.ok(st.huidig().wachtrij >= 7, "alles wacht op internet");
@@ -194,12 +203,13 @@ test("meer foto's per artikel, de etalage en aanvragen: meteen op de gsm, later 
   await leeg();
   assert.equal((await server.laadAlles()).artikelen.find((x) => x.id === id)!.foto, F3);
   assert.deepEqual((await server.laadArtikelfotos([id])).map((f) => f.foto), [F1], "de server heeft dezelfde extra foto's");
-  const etalage = await server.laadEtalage();
+  const etalage = (await server.laadEtalage()).filter((x) => x.plek === "voorpagina");
   assert.deepEqual(etalage.map((x) => [x.foto, x.titel, x.link]), [[F3, null, null], [F2, "Gengar op zwart", "https://www.instagram.com/p/abc"]]);
+  assert.deepEqual((await server.laadEtalage()).filter((x) => x.plek === "instagram").map((x) => x.foto), [F1, F2]);
   // Online: een titel aanpassen stuurt de foto niet opnieuw mee.
-  st.wijzigEtalagefoto(st.etalageLijst()![0], { titel: "Pikachu" });
+  st.wijzigEtalagefoto(st.etalageLijst("voorpagina")![0], { titel: "Pikachu" });
   await leeg();
-  assert.equal((await server.laadEtalage())[0].titel, "Pikachu");
+  assert.equal((await server.laadEtalage()).find((x) => x.plek === "voorpagina")!.titel, "Pikachu");
 
   // Een aanvraag van de klantenpagina (in de demo: dezelfde opslag)
   const d = JSON.parse(localStorage.getItem("bindr-demo-v1") || "{}");
@@ -216,4 +226,44 @@ test("meer foto's per artikel, de etalage en aanvragen: meteen op de gsm, later 
   assert.equal(st.huidig().aanvragen?.length, 0);
   await leeg();
   assert.equal((await server.laadAanvragen()).length, 0, "ook weg op de server");
+});
+
+test("thema's: meteen op de gsm, later op de server, en het logo maar één keer", async () => {
+  const { server, proxy, status } = nepServer();
+  const leeg = async () => { for (let i = 0; i < 200 && st.huidig().wachtrij; i++) await wacht(20); await wacht(30); assert.equal(st.huidig().wachtrij, 0, "alles doorgestuurd"); };
+  const verstuurd: { logo?: string | null }[] = [];
+  const echt = server.bewaarThema.bind(server);
+  server.bewaarThema = async (t) => { verstuurd.push(t); return echt(t); };
+  await st.__testGebruik(proxy);
+  assert.equal(st.kanThema(), true);
+  await st.laadThemas();
+  assert.deepEqual(st.themaLijst(), []);
+
+  const LOGO = "data:image/png;base64,AAAA";
+  status.offline = true;
+  st.bewaarThema({ id: "halloween", naam: "Halloween", van: "10-15", tot: "11-01", aan: "periode", kleur: "#e8772e", tekst: "  Boe!  ", logo: LOGO });
+  st.bewaarThema({ id: "halloween", naam: "Halloween", van: "10-20", tot: "11-01", aan: "aan", kleur: "#e8772e", tekst: "Boe!" }); // zonder logo
+  const lokaal = st.themaLijst()!.find((t) => t.id === "halloween")!;
+  assert.deepEqual([lokaal.van, lokaal.aan, lokaal.tekst, lokaal.logo], ["10-20", "aan", "Boe!", LOGO], "meteen op de gsm, het logo blijft");
+
+  await wacht(50);
+  assert.ok(st.huidig().wachtrij >= 1, "wacht op internet");
+  status.offline = false;
+  assert.equal(await st.spoel(), true);
+  await leeg();
+  const t = (await server.laadThemas()).find((x) => x.id === "halloween")!;
+  assert.deepEqual([t.van, t.aan, t.tekst, t.logo], ["10-20", "aan", "Boe!", LOGO]);
+
+  // Online enkel de datum: het logo gaat niet opnieuw mee, maar blijft op de server.
+  const voor = verstuurd.length;
+  st.bewaarThema({ ...t, van: "10-25", logo: undefined });
+  await leeg();
+  assert.equal(verstuurd.length, voor + 1);
+  assert.equal(verstuurd.at(-1)!.logo, undefined);
+  assert.equal((await server.laadThemas())[0].logo, LOGO);
+  assert.equal((await server.laadThemas())[0].van, "10-25");
+  // Het gewone logo terug.
+  st.bewaarThema({ ...t, logo: null });
+  await leeg();
+  assert.equal((await server.laadThemas())[0].logo, null);
 });

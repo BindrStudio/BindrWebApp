@@ -64,6 +64,8 @@ const PADEN: Record<string, ReactNode> = {
   penseel: <><path d="M14.5 4.5 19.5 9.5 10 19H5v-5l9.5-9.5Z" /><path d="m12.5 6.5 5 5" /></>,
   potlood: <><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /><path d="m15 5 4 4" /></>,
   etalage: <><rect x="3.5" y="4" width="11" height="13" rx="2" transform="rotate(-6 9 10.5)" /><rect x="10" y="7" width="10.5" height="13" rx="2" transform="rotate(6 15 13.5)" /></>,
+  thema: <><path d="M11 4c.5 4 2.4 6.5 7 7.5-4.6 1-6.5 3.5-7 7.5-.5-4-2.4-6.5-7-7.5 4.6-1 6.5-3.5 7-7.5Z" /><path d="M19.5 3v3M18 4.5h3M18.5 17v2.6M17.2 18.3h2.6" /></>,
+  uitgeknipt: <><path d="M7.5 3.5h9a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2Z" /><path d="M3 7V4.5A1.5 1.5 0 0 1 4.5 3H6M18 3h1.5A1.5 1.5 0 0 1 21 4.5V7M21 17v2.5a1.5 1.5 0 0 1-1.5 1.5H18M6 21H4.5A1.5 1.5 0 0 1 3 19.5V17" /></>,
 };
 
 export function Icoon({ naam, maat = 22, className }: { naam: keyof typeof PADEN | string; maat?: number; className?: string }) {

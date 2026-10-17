@@ -1,4 +1,4 @@
--- Bind'r Stock & Beurs App — databaseschema (versie 0.11: aanvragen met toploader en afbeeldingen, wettelijke gegevens en Facebook op de klantenpagina)
+-- Bind'r Stock & Beurs App — databaseschema (versie 0.13: binders vooraan zonder achtergrond, een Instagram-strook en thema's per seizoen)
 --
 -- Uitvoeren: Supabase-dashboard › SQL Editor › New query › dit hele bestand plakken › Run.
 -- Het script mag gerust een tweede keer lopen; het overschrijft geen gegevens.
@@ -394,6 +394,38 @@ drop trigger if exists aanvragen_rem on public.aanvragen;
 create trigger aanvragen_rem before insert on public.aanvragen
   for each row execute function public.aanvraag_rem();
 
+-- ── Versie 0.13: binders vooraan, de Instagram-strook en thema's per seizoen ──
+-- De etalage krijgt twee plaatsen: 'voorpagina' (uitgeknipte foto's van onze binders, bovenaan in de waaier)
+-- en 'instagram' (de doorlopende strook met onze laatste berichten). Wat er al stond, komt in de strook.
+alter table public.etalage add column if not exists plek text not null default 'instagram';
+alter table public.etalage drop constraint if exists etalage_plek_check;
+alter table public.etalage add constraint etalage_plek_check check (plek in ('instagram', 'voorpagina'));
+create index if not exists etalage_plek_idx on public.etalage (plek, volgorde);
+
+-- Thema's: een feest of seizoen (Halloween, kerst …) met een eigen logo, kleur, versiering en een korte tekst op
+-- de klantenpagina. Elk jaar opnieuw tussen van en tot (maand-dag, ook over nieuwjaar heen), of met de hand aan of uit.
+create table if not exists public.themas (
+  id            text primary key,                  -- 'halloween', 'kerst' … (de versiering hangt eraan)
+  naam          text not null,
+  van           text,                              -- 'MM-DD'
+  tot           text,                              -- 'MM-DD' (mag vóór van liggen: dan over nieuwjaar)
+  aan           text not null default 'periode',   -- 'periode', 'aan' (nu, met de hand) of 'uit'
+  kleur         text,                              -- '#rrggbb'
+  tekst         text,                              -- een korte zin bovenaan de klantenpagina
+  logo          text,                              -- een eigen logo voor dat feest (data-URL)
+  gewijzigd_op  timestamptz not null default now()
+);
+alter table public.themas drop constraint if exists themas_check;
+alter table public.themas add constraint themas_check check (
+  id ~ '^[a-z0-9-]{1,30}$' and length(trim(naam)) between 1 and 40
+  and (van is null or van ~ '^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+  and (tot is null or tot ~ '^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+  and aan in ('periode', 'aan', 'uit')
+  and (kleur is null or kleur ~ '^#[0-9a-fA-F]{6}$')
+  and (tekst is null or length(tekst) <= 120)
+  and (logo is null or (length(logo) <= 400000 and logo ~ '^data:image/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$'))
+);
+
 -- ── Triggers: gewijzigd_op bijhouden en elke wijziging loggen ────────────────
 -- Ook bij een nieuwe rij zet de server zelf gewijzigd_op: zo ziet de 30-secondensynchronisatie van de
 -- andere gsm's ook kaarten die offline werden toegevoegd (met een oudere tijd van de gsm).
@@ -587,6 +619,11 @@ drop policy if exists "beheerders alles" on public.etalage;
 create policy "beheerders alles" on public.etalage
   for all to authenticated using (public.is_beheerder()) with check (public.is_beheerder());
 
+alter table public.themas enable row level security;
+drop policy if exists "beheerders alles" on public.themas;
+create policy "beheerders alles" on public.themas
+  for all to authenticated using (public.is_beheerder()) with check (public.is_beheerder());
+
 alter table public.artikelfotos enable row level security;
 drop policy if exists "beheerders alles" on public.artikelfotos;
 create policy "beheerders alles" on public.artikelfotos
@@ -607,11 +644,11 @@ create policy "iedereen indienen" on public.aanvragen
 -- (de rijbeveiliging hierboven beslist wat ze echt zien), de publieke sleutel niets.
 grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on public.exemplaren, public.artikelen, public.instellingen, public.beurzen, public.transacties, public.omgevingen, public.aanwezig, public.aankoopfotos,
-  public.etalage, public.artikelfotos, public.aanvragen to authenticated;
+  public.etalage, public.artikelfotos, public.aanvragen, public.themas to authenticated;
 grant select on public.beheerders, public.logboek to authenticated;
 grant execute on function public.is_beheerder(), public.standaard_omgeving() to authenticated;
 revoke all on public.beheerders, public.exemplaren, public.artikelen, public.instellingen, public.logboek, public.beurzen, public.transacties, public.omgevingen, public.aanwezig, public.aankoopfotos,
-  public.etalage, public.artikelfotos from anon;
+  public.etalage, public.artikelfotos, public.themas from anon;
 -- Een aanvraag indienen (Ontwerp je binder): enkel toevoegen, met deze kolommen; de omgeving komt van standaard_omgeving().
 revoke all on public.aanvragen from anon;
 grant insert (naam, email, telefoon, grootte, kleur, idee, artwork, voorbeeld, toploader, beelden) on public.aanvragen to anon;
@@ -971,12 +1008,12 @@ revoke all on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid)
 grant execute on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid),
   public.los_conflict_op(uuid, uuid, uuid), public.aanvaard_conflict(uuid, text), public.markeer_prijzen(uuid, jsonb) to authenticated;
 
--- Welke versie van dit schema draait er? De app vraagt het na het inloggen (0.8 = 8, 0.9 = 9, 0.10 = 10, 0.11 = 11).
+-- Welke versie van dit schema draait er? De app vraagt het na het inloggen (0.8 = 8, 0.9 = 9, 0.10 = 10, 0.11 = 11, 0.13 = 13).
 create or replace function public.schema_versie()
 returns integer
 language sql
 stable
-as $$ select 11 $$;
+as $$ select 13 $$;
 revoke all on function public.schema_versie() from public, anon;
 grant execute on function public.schema_versie() to authenticated;
 
@@ -1021,12 +1058,19 @@ create view public.publieke_artikelfotos as
      and coalesce(a.zichtbaar, a.opslag = 'vitrine' or a.details->>'type' = 'binder')
      and a.omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten);
 
--- De etalage op de startpagina.
+-- De etalage op de startpagina: de binders vooraan (plek 'voorpagina') en de Instagram-strook (plek 'instagram').
 drop view if exists public.publieke_etalage;
 create view public.publieke_etalage as
-  select id, foto, titel, link, volgorde
+  select id, foto, titel, link, volgorde, plek
     from public.etalage
    where omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten);
+
+-- Thema's (Halloween, kerst …): allemaal, zodat je er een vooraf kan bekijken (?thema=halloween); de klantenpagina
+-- rekent zelf uit welk thema vandaag geldt en haalt enkel dat logo op. Niets geheims: een logo, een kleur en een zin.
+drop view if exists public.publieke_themas;
+create view public.publieke_themas as
+  select id, naam, van, tot, aan, kleur, tekst, logo
+    from public.themas;
 
 -- Instellingen die de klantenpagina nodig heeft: Instagram en Facebook, de sleutel om aanvragen te mailen en de
 -- wettelijke gegevens van de onderneming (naam, vestigingsadres, ondernemingsnummer, contact).
@@ -1048,9 +1092,9 @@ create view public.publieke_beurzen as
 -- een eenvoudige weergave is aanpasbaar en loopt met de rechten van de eigenaar (zonder RLS),
 -- dus zonder deze revoke kon elke ingelogde gebruiker via de weergave de voorraad wijzigen.
 revoke all on public.publieke_vitrine, public.publieke_artikelen, public.publieke_instellingen, public.publieke_beurzen,
-  public.publieke_artikelfotos, public.publieke_etalage from public, anon, authenticated;
+  public.publieke_artikelfotos, public.publieke_etalage, public.publieke_themas from public, anon, authenticated;
 grant select on public.publieke_vitrine, public.publieke_artikelen, public.publieke_instellingen, public.publieke_beurzen,
-  public.publieke_artikelfotos, public.publieke_etalage to anon, authenticated;
+  public.publieke_artikelfotos, public.publieke_etalage, public.publieke_themas to anon, authenticated;
 
 -- ── Eenmalig (0.9): de 30th Celebration Classic Collection op het gedrukte nummer ──
 -- TCGdex nummert die 30 kaarten 001–030; gedrukt staat het nummer van de oude set (Charizard 4/102).

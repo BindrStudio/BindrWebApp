@@ -11,6 +11,7 @@ import { BeurzenEnTransacties } from "./ui/Historiek";
 import { AfdrukLaag } from "./ui/Afdruk";
 import { Prive } from "./ui/Prive";
 import { EtalageSheet } from "./ui/Etalage";
+import { ThemaSheet } from "./ui/Thema";
 import { AanvragenSheet } from "./ui/Aanvragen";
 import { Login, PinKiezen, Slot, WachtwoordKiezen } from "./ui/Login";
 import { Bovenbalk } from "./ui/Bovenbalk";
@@ -30,7 +31,17 @@ const TABS: { id: Tab; label: string; icoon: string }[] = [
 ];
 
 export function App() {
-  const { fase, open, toasts, bezig, online, backend, tab, wachtrij, mandje, beurzen, aanvragen } = useApp();
+  const { fase, open, toasts, bezig, online, backend, tab, wachtrij, mandje, beurzen, aanvragen, omgeving, omgevingen } = useApp();
+
+  // Een andere omgeving dan de eerste (Brent …) krijgt een iets andere achtergrond: zo zie je meteen waar je werkt.
+  useEffect(() => {
+    const i = [...omgevingen].sort((a, b) => a.volgorde - b.volgorde).findIndex((o) => o.id === omgeving);
+    const root = document.documentElement;
+    if (i > 0) root.dataset.omgeving = String(((i - 1) % 3) + 1);
+    else delete root.dataset.omgeving;
+    // De balk van de browser (Android) en het statusbalkje mee laten kleuren.
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", getComputedStyle(root).getPropertyValue("--perzik").trim() || "#fcebd7");
+  }, [omgeving, omgevingen]);
 
   useEffect(() => { void start(); }, []);
   // Van welke kant komt het nieuwe scherm? Een tab naar rechts schuift van rechts binnen.
@@ -115,7 +126,8 @@ export function App() {
         {open?.soort === "inzichten" && <Inzichten onSluit={sluit} />}
         {open?.soort === "historiek" && <BeurzenEnTransacties onSluit={sluit} />}
         {open?.soort === "prive" && <Prive onSluit={sluit} />}
-        {open?.soort === "etalage" && <EtalageSheet />}
+        {open?.soort === "etalage" && <EtalageSheet key={open.plek} plek={open.plek} />}
+        {open?.soort === "thema" && <ThemaSheet />}
         {open?.soort === "aanvragen" && <AanvragenSheet id={open.id} />}
       </Vangnet>
       <AfdrukLaag />

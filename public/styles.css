@@ -12,6 +12,8 @@
 
 :root {
   --perzik: #fcebd7;
+  --perzik-rgb: 252 235 215;  /* dezelfde kleur voor matglas (rgb(var(--perzik-rgb) / .86)) */
+  --omgeving: var(--inkt);    /* de pil bovenaan; een andere omgeving kleurt mee (zie onderaan) */
   --room: #fff8ef;
   --wit: #ffffff;
   --inkt: #3b2a12;
@@ -814,14 +816,14 @@ a.knop { text-decoration: none; }
 .cm-links .knop { white-space: normal; text-align: center; line-height: 1.25; padding-top: 8px; padding-bottom: 8px; }
 /* De hoofdknop van een sheet blijft onderaan in duimbereik. */
 .sheet-actie { position: sticky; bottom: 0; z-index: 3; display: grid; gap: 8px; margin: 0 -16px calc(-24px - var(--onder)); padding: 16px 16px calc(14px + var(--onder));
-  background: linear-gradient(rgba(252, 235, 215, 0), var(--perzik) 30%); }
+  background: linear-gradient(rgb(var(--perzik-rgb) / 0), var(--perzik) 30%); }
 /* Beheer: compactere kop; zoeken en filters blijven bovenaan staan tijdens het scrollen. */
 .merkbalk img { height: 30px; }
 .kop > div:first-child { min-width: 0; }
 .kop h1 { font-size: 26px; }
 .kop-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .filterbalk { position: sticky; top: 0; z-index: 12; display: grid; gap: 8px; margin: -4px -16px 0; padding: 8px 16px;
-  background: rgba(252, 235, 215, .86); backdrop-filter: saturate(1.5) blur(12px); -webkit-backdrop-filter: saturate(1.5) blur(12px); }
+  background: rgb(var(--perzik-rgb) / .86); backdrop-filter: saturate(1.5) blur(12px); -webkit-backdrop-filter: saturate(1.5) blur(12px); }
 .app:has(.demo-band) .filterbalk, .app:has(.offline-band) .filterbalk { top: calc(25px + var(--boven)); }
 .chips, .categorieen { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
 .werkbalk .knop.prijsknop { min-height: 40px; font-size: 15px; }
@@ -842,7 +844,7 @@ a.knop { text-decoration: none; }
   box-shadow: 0 0 0 2.5px var(--perzik); animation: plop .4s var(--veer) backwards; }
 .aanwezigen .avatar + .avatar { margin-left: -8px; }
 .avatar.elders { background: var(--room); color: var(--zee-donker); box-shadow: 0 0 0 2.5px var(--perzik), inset 0 0 0 1.5px var(--zee); }
-.omgeving-pil { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 12px; border-radius: 999px; background: var(--inkt); color: var(--room); font-size: 13px; font-weight: 700; max-width: 190px; }
+.omgeving-pil { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 12px; border-radius: 999px; background: var(--omgeving); color: var(--room); font-size: 13px; font-weight: 700; max-width: 190px; }
 .omgeving-pil span:not(.stip) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .omgeving-pil .stip, .stip { width: 8px; height: 8px; border-radius: 50%; background: #7bd88f; flex: none; animation: knipper 1.6s ease-in-out infinite; }
 .stip.groen { display: inline-block; }
@@ -1452,7 +1454,9 @@ a.knop { text-decoration: none; }
 .verwijder-vraag p { margin: 0; font-size: 14px; }
 
 /* ── Etalage en aanvragen (Profiel › Klantenpagina) ────────────────────── */
-.profiel-tegel.etalage svg { color: var(--hart); }
+.profiel-tegel.voorpagina svg { color: var(--zee-donker); }
+.profiel-tegel.instagram svg { color: var(--hart); }
+.profiel-tegel.thema svg { color: #d98a1f; }
 .profiel-tegel.aanvragen svg { color: var(--zee-donker); }
 .tegel-teller { position: absolute; top: 10px; right: 10px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--hart); color: #fff !important; font-size: 12px !important; font-weight: 700; line-height: 22px; text-align: center; animation: plop .45s var(--veer); }
 .etalage-leeg { display: grid; justify-items: center; gap: 6px; padding: 26px 16px; border-radius: var(--rond); border: 2px dashed var(--lijn); color: var(--inkt-2); text-align: center; }
@@ -1508,3 +1512,51 @@ ol.stappen { margin: 6px 0; padding-left: 20px; gap: 6px; }
 .bod-keuze.bewerk { padding: 6px; gap: 2px; }
 .bod-keuze.bewerk .euro-invoer.mini { width: 100%; background: var(--wit); border-color: var(--boter); color: var(--inkt); }
 .bod-keuze.bewerk .euro-invoer.mini input { width: 100%; min-width: 0; font-family: var(--titel); font-size: 18px; text-align: center; }
+
+/* ── 0.13: elke omgeving na de eerste (Brent …) een iets andere achtergrond, zodat je meteen ziet waar je werkt ── */
+:root[data-omgeving="1"] { --perzik: #ece5f3; --perzik-rgb: 236 229 243; --omgeving: #5b4a78; }
+:root[data-omgeving="2"] { --perzik: #e2efe4; --perzik-rgb: 226 239 228; --omgeving: #3f6b4c; }
+:root[data-omgeving="3"] { --perzik: #e1ecf3; --perzik-rgb: 225 236 243; --omgeving: #355d74; }
+body { transition: background-color .4s ease; }
+
+/* ── Binders vooraan: uitgeknipt op een dambord (zo zie je wat doorzichtig is) ── */
+.etalage-beeld.uitgeknipt { background: repeating-conic-gradient(#efe4d4 0 25%, #fffaf3 0 50%) 0 0 / 14px 14px; }
+.etalage-beeld.uitgeknipt img { width: 96px; height: 96px; object-fit: contain; padding: 4px; }
+
+/* ── Profiel › Thema ── */
+.thema-nu { margin: 4px 0 10px; padding: 10px 14px; border-radius: 14px; background: rgba(59, 42, 18, .06); font-size: 14.5px; color: var(--inkt-2); }
+.thema-nu.aan { background: #e6f1e6; color: var(--inkt); }
+.thema-lijst { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.thema-rij { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; background: var(--room); box-shadow: var(--schaduw); text-align: left; }
+.thema-vormpje { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; flex: none;
+  background: color-mix(in srgb, var(--thema) 18%, var(--room)); }
+@supports not (background: color-mix(in srgb, red 10%, white)) { .thema-vormpje { background: var(--boter-licht); } }
+.thema-vormpje svg { width: 30px; height: 30px; }
+.thema-rij-tekst { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.thema-rij-tekst strong { font-family: var(--titel); font-weight: 600; font-size: 17px; }
+.thema-rij-tekst span { font-size: 13px; color: var(--inkt-2); }
+.thema-live { padding: 3px 9px; border-radius: 999px; background: var(--groen); color: #fff; font-size: 12px; font-weight: 700; }
+.thema-pijl { transform: rotate(-90deg); color: var(--inkt-3); flex: none; }
+.terug-knop { margin: -4px 0 4px -4px; }
+.terug-knop svg { transform: rotate(90deg); }
+.thema-proef { position: relative; overflow: hidden; margin: 6px 0 14px; padding: 14px 14px 64px; border-radius: 18px; background: var(--perzik);
+  box-shadow: inset 0 0 0 1px var(--lijn); }
+.thema-proef::before { content: ""; position: absolute; right: -30px; bottom: -40px; width: 180px; height: 180px; border-radius: 50%; background: var(--thema); opacity: .22; filter: blur(30px); }
+.thema-proef-balk { position: relative; display: flex; align-items: center; height: 44px; }
+.thema-proef-balk img { height: 40px; width: auto; max-width: 70%; object-fit: contain; }
+.thema-proef-zin { position: relative; margin: 10px 0 0; padding: 7px 12px; border-radius: 12px; color: var(--inkt); font-size: 13.5px; font-weight: 700; width: fit-content; max-width: 100%;
+  background: var(--boter-licht); background: color-mix(in srgb, var(--thema) 18%, var(--room)); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--thema) 40%, transparent); }
+.thema-proef-vormen svg { position: absolute; width: 30px; height: 30px; }
+.thema-proef-vormen .v0 { right: 18px; top: 12px; width: 36px; height: 36px; }
+.thema-proef-vormen .v1 { right: 70px; bottom: 14px; }
+.thema-proef-vormen .v2 { left: 20px; bottom: 12px; width: 26px; height: 26px; }
+.thema-proef-vormen .v3 { left: 46%; bottom: 22px; width: 18px; height: 18px; }
+.thema-proef-vormen .v4 { right: 34%; top: 18px; width: 16px; height: 16px; }
+.thema-periode { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.thema-periode p { grid-column: 1 / -1; margin: 0; }
+.datum-kies { display: grid; gap: 6px; min-width: 0; }
+.datum-kies > div { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; }
+.datum-kies select { padding-right: 34px; }
+.datum-kies select { min-width: 0; }
+.thema-kleur { display: flex; align-items: center; gap: 12px; }
+.thema-kleur input[type="color"] { width: 54px; height: 40px; padding: 2px; border-radius: 10px; border: 1.5px solid var(--lijn); background: var(--wit); }

@@ -6,8 +6,8 @@
 import { useSyncExternalStore } from "react";
 import { Fout, isNetwerkFout, type Alles, type Backend, type PrijsMarkering } from "./store/backend";
 import { DemoBackend } from "./store/demo";
-import { BOEKHOUDING_VANAF, ETALAGE_VANAF, SupabaseBackend } from "./store/supabase";
-import type { Aankoopfoto, Aanvraag, AanvraagStatus, Aanwezig, Artikel, Artikelfoto, Etalagefoto, ArtikelType, Bedrijf, BedrijfPubliek, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Tegenpartij, Transactie } from "./types";
+import { BOEKHOUDING_VANAF, ETALAGE_VANAF, SupabaseBackend, THEMA_VANAF } from "./store/supabase";
+import type { Aankoopfoto, Aanvraag, AanvraagStatus, Aanwezig, Artikel, Artikelfoto, Etalagefoto, EtalagePlek, Thema, ArtikelType, Bedrijf, BedrijfPubliek, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Tegenpartij, Transactie } from "./types";
 import { bewaarPin, controleerPin, isOudePin, isVergrendeld, leesPin, maakPinVanToestel, markeerActief, pinFout, teVeelPogingen, wachtwoordFout, wisPin, wisPogingen, VERGRENDEL_NA_MS } from "./lib/pin";
 import { laadPrijsgids, type Prijsgids } from "./lib/prices";
 import { prijscheck, STANDAARD_INSTELLINGEN, type Instellingen, type TeWijzigen } from "./lib/pricing";
@@ -50,7 +50,8 @@ export type Open =
   | { soort: "inzichten" }
   | { soort: "historiek" }
   | { soort: "prive" }
-  | { soort: "etalage" }
+  | { soort: "etalage"; plek: EtalagePlek }
+  | { soort: "thema" }
   | { soort: "aanvragen"; id?: string }
   | { soort: "inkoopThuis" }      // naar de kassa, meteen "Kaart van klant" (inkoop buiten een beurs)
   | null;
@@ -287,7 +288,8 @@ export function openBoekhouding() { zet({ open: { soort: "boekhouding" } }); }
 export function openInzichten() { zet({ open: { soort: "inzichten" } }); }
 export function openHistoriek() { zet({ open: { soort: "historiek" } }); }
 export function openPrive() { zet({ open: { soort: "prive" } }); }
-export function openEtalage() { zet({ open: { soort: "etalage" } }); }
+export function openEtalage(plek: EtalagePlek) { zet({ open: { soort: "etalage", plek } }); }
+export function openThema() { zet({ open: { soort: "thema" } }); }
 export function openAanvragen(id?: string) { zet({ open: { soort: "aanvragen", id } }); }
 /** Kaarten gekocht buiten een beurs (Facebook, rommelmarkt): via de kassa, Van de klant. */
 /** Kopen buiten een beurs (Facebook, rommelmarkt): enkel als er geen beurs loopt, anders klopt de kas niet. */
@@ -377,6 +379,7 @@ type Op =
   | { soort: "etalage"; f: Etalagefoto }
   | { soort: "etalageWijzig"; id: string; w: Partial<Pick<Etalagefoto, "titel" | "link" | "volgorde">> }
   | { soort: "etalageWeg"; id: string }
+  | { soort: "thema"; t: Thema }
   | { soort: "aanvraagStatus"; id: string; status: AanvraagStatus }
   | { soort: "aanvraagWeg"; id: string }
   | { soort: "instelling"; sleutel: string; waarde: unknown }
@@ -448,6 +451,7 @@ async function voerUit(op: Op) {
     case "etalage": await b.bewaarEtalage(op.f); break;
     case "etalageWijzig": await b.wijzigEtalage(op.id, op.w); break;
     case "etalageWeg": await b.verwijderEtalage(op.id); break;
+    case "thema": await b.bewaarThema(op.t); break;
     case "aanvraagStatus": await b.zetAanvraagStatus(op.id, op.status); break;
     case "aanvraagWeg": await b.verwijderAanvraag(op.id); break;
   }
@@ -1003,6 +1007,7 @@ async function afmelden() {
   });
   artikelfotoCache.clear();
   etalageCache = null;
+  themaCache = null;
   await weg?.catch(() => undefined);
 }
 
@@ -1692,6 +1697,14 @@ export function kanEtalage(s: State = state): boolean {
   return v == null || v >= ETALAGE_VANAF;
 }
 export const SCHEMA_010 = "Dit kan pas na de update van de database naar 0.10: voer supabase/schema.sql opnieuw uit in Supabase (zie de README).";
+/** Kan de database al binders vooraan, de Instagram-strook en thema's aan (schema 0.13)? */
+export function kanThema(s: State = state): boolean {
+  const b = s.backend;
+  if (!b || b.soort !== "supabase") return true;
+  const v = (b as SupabaseBackend).versie;
+  return v == null || v >= THEMA_VANAF;
+}
+export const SCHEMA_013 = "Dit kan pas na de update van de database naar 0.13: voer supabase/schema.sql opnieuw uit in Supabase (zie de README).";
 export const SCHEMA_09 = "Wordt pas bewaard na de update van de database: voer supabase/schema.sql opnieuw uit in Supabase (zie de README).";
 export const OUD_SCHEMA = "Dit kan pas na de update van de database: voer supabase/schema.sql opnieuw uit in Supabase (zie de README).";
 
@@ -1847,8 +1860,15 @@ let etalageLaden = false;
 
 type EtalageMeta = Partial<Pick<Etalagefoto, "titel" | "link" | "volgorde">>;
 
-/** De foto's in de etalage, met wat nog in de wachtrij staat (null = nog niet geladen). */
-export function etalageLijst(): Etalagefoto[] | null {
+const plekVan = (f: Etalagefoto): EtalagePlek => f.plek ?? "instagram";
+
+/** De foto's op een plek (vooraan of in de Instagram-strook), met wat nog in de wachtrij staat (null = nog niet geladen). */
+export function etalageLijst(plek: EtalagePlek): Etalagefoto[] | null {
+  const alles = etalageAlles();
+  return alles && alles.filter((f) => plekVan(f) === plek);
+}
+
+function etalageAlles(): Etalagefoto[] | null {
   if (!etalageCache && !wachtendeOps("etalage").length) return etalageCache;
   const weg = new Set(wachtendeOps("etalageWeg").map((op) => op.id));
   const lijst = new Map((etalageCache ?? []).map((f) => [f.id, f]));
@@ -1909,9 +1929,11 @@ export function wijzigEtalagefoto(f: Etalagefoto, w: EtalageMeta): boolean {
   return true;
 }
 
-export function nieuweEtalagefoto(foto: string): Etalagefoto {
-  const lijst = etalageLijst() ?? [];
-  return { id: uuid(), foto, titel: null, link: null, volgorde: (lijst[lijst.length - 1]?.volgorde ?? 0) + 1, omgeving_id: state.omgeving, aangemaakt_op: new Date().toISOString() };
+/** Een nieuwe foto: vooraan achteraan de rij, in de Instagram-strook bovenaan (het nieuwste bericht eerst). */
+export function nieuweEtalagefoto(foto: string, plek: EtalagePlek): Etalagefoto {
+  const lijst = etalageLijst(plek) ?? [];
+  const volgorde = plek === "instagram" ? (lijst[0]?.volgorde ?? 1) - 1 : (lijst[lijst.length - 1]?.volgorde ?? 0) + 1;
+  return { id: uuid(), foto, titel: null, link: null, volgorde, plek, omgeving_id: state.omgeving, aangemaakt_op: new Date().toISOString() };
 }
 
 export function verwijderEtalagefoto(f: Etalagefoto) {
@@ -1923,13 +1945,62 @@ export function verwijderEtalagefoto(f: Etalagefoto) {
 
 /** Een foto een plaats naar voren (−1) of naar achteren (+1) schuiven. */
 export function schuifEtalagefoto(f: Etalagefoto, richting: -1 | 1) {
-  const lijst = etalageLijst() ?? [];
+  const lijst = etalageLijst(plekVan(f)) ?? [];
   const i = lijst.findIndex((x) => x.id === f.id);
   const j = i + richting;
   if (i < 0 || j < 0 || j >= lijst.length) return;
   const nieuw = [...lijst];
   [nieuw[i], nieuw[j]] = [nieuw[j], nieuw[i]];
   nieuw.forEach((x, k) => { if (x.volgorde !== k + 1) wijzigEtalagefoto(x, { volgorde: k + 1 }); });
+}
+
+// ── Thema's op de klantenpagina (schema 0.13) ──
+let themaCache: Thema[] | null = null;
+let themasLaden = false;
+
+/** De thema's die al bewaard zijn, met wat nog in de wachtrij staat (null = nog niet geladen). */
+export function themaLijst(): Thema[] | null {
+  const wacht = wachtendeOps("thema");
+  if (!themaCache && !wacht.length) return themaCache;
+  const lijst = new Map((themaCache ?? []).map((t) => [t.id, t]));
+  for (const op of wacht) { const oud = lijst.get(op.t.id); lijst.set(op.t.id, { ...oud, ...op.t, logo: op.t.logo !== undefined ? op.t.logo : oud?.logo ?? null }); }
+  return [...lijst.values()];
+}
+
+export async function laadThemas(): Promise<void> {
+  const b = state.backend;
+  if (!b || themasLaden || !kanThema()) return;
+  themasLaden = true;
+  try {
+    themaCache = await b.laadThemas();
+    zet({ fotoVersie: state.fotoVersie + 1 });
+  } catch (e) {
+    if (!isNetwerkFout(e)) fout(e);
+  } finally {
+    themasLaden = false;
+  }
+}
+
+/**
+ * Een thema bewaren. Zonder `logo` (undefined) blijft het logo zoals het was, zodat een andere datum of kleur het
+ * logo niet opnieuw verstuurt. Staat het thema nog in de wachtrij (niet vooraan), dan passen we dat aan.
+ */
+export function bewaarThema(t: Thema) {
+  const schoon: Thema = {
+    id: t.id, naam: t.naam.trim().slice(0, 40) || t.id, van: t.van, tot: t.tot, aan: t.aan,
+    kleur: t.kleur ?? null, tekst: t.tekst?.trim().slice(0, 120) || null, ...(t.logo !== undefined ? { logo: t.logo } : {}),
+  };
+  const i = rij.findIndex((x, j) => j > 0 && x.op.soort === "thema" && x.op.t.id === t.id);
+  if (i > 0) {
+    const op = rij[i].op as Extract<Op, { soort: "thema" }>;
+    rij[i] = { ...rij[i], op: { soort: "thema", t: { ...op.t, ...schoon } } };
+    bewaarRij();
+  } else {
+    inRij({ soort: "thema", t: schoon });
+  }
+  const oud = themaCache?.find((x) => x.id === t.id);
+  themaCache = [...(themaCache ?? []).filter((x) => x.id !== t.id), { ...oud, ...schoon, logo: schoon.logo !== undefined ? schoon.logo : oud?.logo ?? null }];
+  zet({ fotoVersie: state.fotoVersie + 1 });
 }
 
 // ── Aanvragen voor een eigen binder (van de klantenpagina) ──

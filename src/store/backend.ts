@@ -1,4 +1,4 @@
-import type { Aankoopfoto, Aanvraag, AanvraagStatus, Aanwezig, Artikel, Artikelfoto, Etalagefoto, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
+import type { Aankoopfoto, Aanvraag, AanvraagStatus, Aanwezig, Artikel, Artikelfoto, Etalagefoto, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Thema, Transactie } from "../types";
 
 export interface Beheerder {
   user_id: string;
@@ -61,6 +61,9 @@ export interface Backend {
   bewaarEtalage(f: Etalagefoto): Promise<void>;
   wijzigEtalage(id: string, w: Partial<Pick<Etalagefoto, "titel" | "link" | "volgorde">>): Promise<void>;
   verwijderEtalage(id: string): Promise<void>;
+  /** Thema's van de klantenpagina (schema 0.13). Zonder `logo` in het thema blijft het logo op de server staan. */
+  laadThemas(): Promise<Thema[]>;
+  bewaarThema(t: Thema): Promise<void>;
   /** Aanvragen voor een eigen binder: de lijst zonder afbeeldingen, de afbeeldingen apart. */
   laadAanvragen(): Promise<Aanvraag[]>;
   laadAanvraagBeelden(id: string): Promise<Pick<Aanvraag, "artwork" | "voorbeeld" | "beelden">>;

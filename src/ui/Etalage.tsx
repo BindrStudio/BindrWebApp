@@ -1,35 +1,65 @@
-// Profiel › Etalage: de foto's van ons werk die vooraan op de startpagina van de klanten in een waaier wisselen.
-// Instagram laat geen foto's ophalen zonder een app bij Meta; daarom zet je ze hier zelf (bewaar de foto
-// van Instagram op je gsm en kies ze hier, met de link naar het bericht erbij).
+// Profiel › Binders vooraan en Profiel › Instagram: de foto's op de startpagina van de klanten.
+// - Vooraan: uitgeknipte foto's van onze binders (zonder achtergrond), in de waaier bovenaan.
+// - Instagram: onze laatste berichten, in een strook die doorloopt net boven de beurzen. Instagram laat geen foto's
+//   ophalen zonder een app bij Meta; daarom zet je ze hier zelf (bewaar de foto op je gsm en plak de link erbij).
 import { useEffect, useRef, useState } from "react";
 import {
-  etalageLijst, kanEtalage, laadEtalage, meld, nieuweEtalagefoto, SCHEMA_010, schuifEtalagefoto, sluit, useApp, verwijderEtalagefoto, voegEtalagefotoToe, wijzigEtalagefoto,
+  etalageLijst, kanEtalage, kanThema, laadEtalage, meld, nieuweEtalagefoto, SCHEMA_010, SCHEMA_013, schuifEtalagefoto, sluit, useApp, verwijderEtalagefoto, voegEtalagefotoToe, wijzigEtalagefoto,
 } from "../state";
-import type { Etalagefoto } from "../types";
-import { veiligeFoto, verkleinFoto } from "../lib/eigenfoto";
+import type { Etalagefoto, EtalagePlek } from "../types";
+import { veiligeFoto, verkleinFoto, verkleinUitgeknipt } from "../lib/eigenfoto";
 import { klantUrl } from "../config";
 import { Icoon, Sheet } from "./common";
 
-const MAX = 24;
+const TEKST: Record<EtalagePlek, { titel: string; max: number; uitleg: string; leeg: string; tip: string; link: string; titelVeld: string; toegevoegd: (n: number) => string }> = {
+  voorpagina: {
+    titel: "Binders vooraan",
+    max: 12,
+    uitleg: "De binders bovenaan de startpagina, in de waaier die om de paar seconden draait. Gebruik foto's zonder achtergrond: dan zweven ze echt over de pagina.",
+    leeg: "Nog geen binders. Zolang hier niets staat, tonen we voorbeeldbinders.",
+    tip: "Zonder achtergrond op een iPhone: open de foto, hou de binder ingedrukt tot hij loskomt en kies Deel › Bewaar afbeelding. Die nieuwe foto kies je hier. Recht van voren staat het mooist.",
+    link: "Link (optioneel)",
+    titelVeld: "Naam (niet zichtbaar)",
+    toegevoegd: (n) => (n === 1 ? "Binder vooraan gezet" : `${n} binders vooraan gezet`),
+  },
+  instagram: {
+    titel: "Instagram",
+    max: 30,
+    uitleg: "Onze laatste berichten lopen onderaan de startpagina voorbij, net boven de beurzen. Bewaar de foto van je bericht op je gsm, kies ze hier en plak de link naar het bericht erbij.",
+    leeg: "Nog geen berichten. Zolang hier niets staat, is er geen strook.",
+    tip: "De bovenste staat eerst; een nieuwe foto komt bovenaan. De strook toont er hoogstens 16.",
+    link: "Link naar het bericht op Instagram",
+    titelVeld: "Titel (optioneel)",
+    toegevoegd: (n) => (n === 1 ? "Foto in de Instagram-strook" : `${n} foto's in de Instagram-strook`),
+  },
+};
 
-export function EtalageSheet() {
+export function EtalageSheet({ plek }: { plek: EtalagePlek }) {
   const app = useApp();
-  const kan = kanEtalage(app);
+  const t = TEKST[plek];
+  const kan = kanEtalage(app) && (plek === "instagram" || kanThema(app));
   const invoer = useRef<HTMLInputElement>(null);
   const [bezig, setBezig] = useState(false);
   useEffect(() => { if (kan) void laadEtalage(); }, [kan]);
-  const lijst = etalageLijst();
+  const lijst = etalageLijst(plek);
 
   const voegToe = async (bestanden: FileList | null) => {
     if (!bestanden?.length) return;
     setBezig(true);
     try {
-      let n = 0;
-      for (const f of Array.from(bestanden).slice(0, MAX - (lijst?.length ?? 0))) {
-        voegEtalagefotoToe(nieuweEtalagefoto(await verkleinFoto(f, 1000)));
+      let n = 0, metAchtergrond = 0;
+      for (const f of Array.from(bestanden).slice(0, t.max - (lijst?.length ?? 0))) {
+        if (plek === "voorpagina") {
+          const { url, doorzichtig } = await verkleinUitgeknipt(f);
+          if (!doorzichtig) metAchtergrond++;
+          voegEtalagefotoToe(nieuweEtalagefoto(url, plek));
+        } else {
+          voegEtalagefotoToe(nieuweEtalagefoto(await verkleinFoto(f, 720), plek));
+        }
         n++;
       }
-      if (n) meld(n === 1 ? "Foto in de etalage" : `${n} foto's in de etalage`);
+      if (metAchtergrond) meld(`${metAchtergrond === 1 ? "Die foto heeft" : `${metAchtergrond} foto's hebben`} nog een achtergrond. Ze staan vooraan, maar zonder achtergrond is het mooier.`, "info", undefined, 7000);
+      else if (n) meld(t.toegevoegd(n));
     } catch (e) {
       meld(e instanceof Error ? e.message : String(e), "fout");
     } finally {
@@ -37,40 +67,39 @@ export function EtalageSheet() {
     }
   };
 
+  const demo = app.backend?.soort === "demo";
   return (
-    <Sheet titel="Etalage" onSluit={sluit} vol>
-      <p className="zacht">
-        Foto's van jullie binders draaien vooraan op de startpagina van de klanten, als een waaier die om de paar seconden
-        wisselt. Neem een foto van Instagram (bewaar ze op je gsm) of een nieuwe, en zet de link naar het bericht erbij. Een
-        binder recht van voren, op een rustige achtergrond, staat het mooist.
-      </p>
-      {!kan ? <p className="nakijken">{SCHEMA_010}</p> : (
+    <Sheet titel={t.titel} onSluit={sluit} vol>
+      <p className="zacht">{t.uitleg}</p>
+      {!kan ? <p className="nakijken">{plek === "voorpagina" ? SCHEMA_013 : SCHEMA_010}</p> : (
         <>
           <div className="knoppenrij">
-            <button className="knop" disabled={bezig || (lijst?.length ?? 0) >= MAX} onClick={() => invoer.current?.click()}>
-              <Icoon naam="camera" maat={18} /> {bezig ? "Bezig…" : "Foto's toevoegen"}
+            <button className="knop" disabled={bezig || (lijst?.length ?? 0) >= t.max} onClick={() => invoer.current?.click()}>
+              <Icoon naam={plek === "voorpagina" ? "uitgeknipt" : "camera"} maat={18} /> {bezig ? "Bezig…" : "Foto's toevoegen"}
             </button>
-            <a className="knop zacht" href={klantUrl(app.backend?.soort === "demo")} target="_blank" rel="noreferrer"><Icoon naam="oog" maat={18} /> Bekijk als klant</a>
+            <a className="knop zacht" href={klantUrl(demo)} target="_blank" rel="noreferrer"><Icoon naam="oog" maat={18} /> Bekijk als klant</a>
           </div>
-          <input ref={invoer} type="file" accept="image/*" multiple hidden onChange={(e) => { void voegToe(e.target.files); e.target.value = ""; }} />
+          <input ref={invoer} type="file" accept={plek === "voorpagina" ? "image/png,image/webp,image/*" : "image/*"} multiple hidden
+            onChange={(e) => { void voegToe(e.target.files); e.target.value = ""; }} />
           {lijst == null ? <p className="zacht">Laden…</p> : !lijst.length ? (
             <div className="etalage-leeg">
-              <Icoon naam="etalage" maat={40} />
-              <p>Nog geen foto's. Samen met de foto's van jullie binders (Profiel › Artikels) zijn er minstens drie nodig; tot dan tonen we voorbeeldbinders.</p>
+              <Icoon naam={plek === "voorpagina" ? "binder" : "instagram"} maat={40} />
+              <p>{t.leeg}</p>
             </div>
           ) : (
-            <ul className="etalage-lijst">
-              {lijst.map((f, i) => <EtalageRij key={f.id} f={f} eerste={i === 0} laatste={i === lijst.length - 1} />)}
+            <ul className={`etalage-lijst ${plek}`}>
+              {lijst.map((f, i) => <EtalageRij key={f.id} f={f} plek={plek} eerste={i === 0} laatste={i === lijst.length - 1} />)}
             </ul>
           )}
-          <p className="zacht klein">Tip: vierkante foto's of staande foto's van één binder werken het best. Klanten zien enkel de foto's, de titel en de link.</p>
+          <p className="zacht klein">{t.tip} Klanten zien enkel de foto's{plek === "instagram" ? ", de titel" : ""} en de link.</p>
         </>
       )}
     </Sheet>
   );
 }
 
-function EtalageRij({ f, eerste, laatste }: { f: Etalagefoto; eerste: boolean; laatste: boolean }) {
+function EtalageRij({ f, plek, eerste, laatste }: { f: Etalagefoto; plek: EtalagePlek; eerste: boolean; laatste: boolean }) {
+  const t = TEKST[plek];
   const [titel, setTitel] = useState(f.titel ?? "");
   const [link, setLink] = useState(f.link ?? "");
   const [zeker, setZeker] = useState(false);
@@ -82,10 +111,10 @@ function EtalageRij({ f, eerste, laatste }: { f: Etalagefoto; eerste: boolean; l
   const beeld = veiligeFoto(f.foto);
   return (
     <li className="etalage-rij">
-      <span className="etalage-beeld">{beeld ? <img src={beeld} alt="" /> : <Icoon naam="foto" />}</span>
+      <span className={`etalage-beeld${plek === "voorpagina" ? " uitgeknipt" : ""}`}>{beeld ? <img src={beeld} alt="" /> : <Icoon naam="foto" />}</span>
       <div className="etalage-velden">
-        <input value={titel} onChange={(e) => setTitel(e.target.value)} onBlur={bewaar} placeholder="Titel (bv. Gengar op zwart)" maxLength={120} aria-label="Titel" />
-        <input value={link} onChange={(e) => setLink(e.target.value)} onBlur={bewaar} placeholder="Link naar Instagram (optioneel)" inputMode="url" aria-label="Link" />
+        <input value={titel} onChange={(e) => setTitel(e.target.value)} onBlur={bewaar} placeholder={t.titelVeld} maxLength={120} aria-label="Titel" />
+        <input value={link} onChange={(e) => setLink(e.target.value)} onBlur={bewaar} placeholder={t.link} inputMode="url" aria-label="Link" />
         <div className="etalage-knoppen">
           <button className="rond-knop" disabled={eerste} onClick={() => schuifEtalagefoto(f, -1)} aria-label="Naar voren"><Icoon naam="op" maat={16} /></button>
           <button className="rond-knop" disabled={laatste} onClick={() => schuifEtalagefoto(f, 1)} aria-label="Naar achteren"><Icoon naam="neer" maat={16} /></button>

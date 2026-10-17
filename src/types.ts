@@ -232,14 +232,33 @@ export interface Artikelfoto {
 }
 
 /** Een foto van ons werk die op de startpagina van de klanten zweeft. */
+/** Waar een foto van de etalage staat: bovenaan in de waaier (uitgeknipte binders) of in de Instagram-strook. */
+export type EtalagePlek = "voorpagina" | "instagram";
+
 export interface Etalagefoto {
   id: string;
-  foto: string;          // data-URL (verkleind)
+  foto: string;          // data-URL (verkleind; vooraan een PNG/WebP zonder achtergrond)
   titel?: string | null;
   link?: string | null;  // bv. het bericht op Instagram
   volgorde: number;
+  plek?: EtalagePlek;    // leeg = instagram (zo stond alles van vóór 0.13)
   omgeving_id?: string | null;
   aangemaakt_op?: string;
+}
+
+/** Wanneer een thema geldt: elk jaar in de periode, nu (met de hand) of niet. */
+export type ThemaAan = "periode" | "aan" | "uit";
+
+/** Een feest of seizoen op de klantenpagina (Halloween, kerst …): eigen logo, kleur, versiering en een zin. */
+export interface Thema {
+  id: string;            // 'halloween', 'kerst' … (de versiering hangt eraan, zie lib/thema.ts)
+  naam: string;
+  van: string | null;    // 'MM-DD'
+  tot: string | null;    // 'MM-DD' (vóór van = over nieuwjaar heen)
+  aan: ThemaAan;
+  kleur?: string | null; // '#rrggbb'
+  tekst?: string | null;
+  logo?: string | null;  // data-URL; ontbreekt = niet geladen of geen eigen logo
 }
 
 export type AanvraagStatus = "nieuw" | "bekeken" | "beantwoord" | "gesloten";

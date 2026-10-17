@@ -3,7 +3,7 @@
 // achter het tandwiel rechtsboven.
 import { useMemo, useState } from "react";
 import {
-  actieveBeurs, actieveOmgeving, boekhoudingAan, inkoopThuis, logUit, openAanvragen, openArtikelen, openBoekhouding, openEtalage, openHistoriek, openInzichten, openOverzicht, openPrive,
+  actieveBeurs, actieveOmgeving, boekhoudingAan, inkoopThuis, logUit, openAanvragen, openArtikelen, openBoekhouding, openEtalage, openHistoriek, openInzichten, openOverzicht, openPrive, openThema,
   synchroniseer, useApp,
 } from "../state";
 import { PinKiezen, WachtwoordWijzigen } from "./Login";
@@ -98,10 +98,20 @@ export function Profiel() {
       <section className="groep">
         <h2 className="groep-titel">Klantenpagina</h2>
         <div className="profiel-tegels">
-          <button className="profiel-tegel etalage" onClick={openEtalage}>
-            <Icoon naam="etalage" maat={26} />
-            <strong>Etalage</strong>
-            <span>Foto's van jullie werk vooraan op de startpagina</span>
+          <button className="profiel-tegel voorpagina" onClick={() => openEtalage("voorpagina")}>
+            <Icoon naam="uitgeknipt" maat={26} />
+            <strong>Binders vooraan</strong>
+            <span>Foto's zonder achtergrond, bovenaan de startpagina</span>
+          </button>
+          <button className="profiel-tegel instagram" onClick={() => openEtalage("instagram")}>
+            <Icoon naam="instagram" maat={26} />
+            <strong>Instagram</strong>
+            <span>Onze laatste berichten, in de strook boven de beurzen</span>
+          </button>
+          <button className="profiel-tegel thema" onClick={openThema}>
+            <Icoon naam="thema" maat={26} />
+            <strong>Thema</strong>
+            <span>Halloween, kerst …: logo, kleur en versiering</span>
           </button>
           <button className="profiel-tegel aanvragen" onClick={() => openAanvragen()}>
             <Icoon naam="brief" maat={26} />

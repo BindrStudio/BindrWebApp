@@ -1,6 +1,6 @@
 // Service worker: de app start ook zonder (goed) internet op de beurs.
 // VERSIE wordt bij elke build aangepast door scripts/build.mjs.
-const VERSIE = "68794bb944";
+const VERSIE = "d7674bce07";
 const APP = `bindr-app-${VERSIE}`;
 const DATA = "bindr-data-v1";
 const FOTOS = "bindr-fotos-v2"; // v1 kon ontbrekende foto's (404) bewaren

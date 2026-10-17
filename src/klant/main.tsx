@@ -12,7 +12,9 @@ import { BEHEER_PAD, FACEBOOK, INSTAGRAM, SUPABASE_KEY, SUPABASE_URL } from "../
 // De pagina staat op de hoofdlink (index.html) en, voor oude links, op /catalogus/.
 // Afbeeldingen en gegevens zoeken we relatief aan dit script (catalogus/app.js).
 const BASIS = new URL("../", import.meta.url).href;
-import { TALEN, type BedrijfPubliek } from "../types";
+import { TALEN, type BedrijfPubliek, type Thema } from "../types";
+import { actiefThema, GEWOON, maandDag, soortVan, veiligeKleur, VORMEN, type ThemaSoort } from "../lib/thema";
+import { VormSvg } from "../gedeeld/Vorm";
 import { euro, vandaag as vandaagLokaal } from "../lib/format";
 import { kantel, kantelVrij } from "../lib/kantel";
 import { veiligeFoto } from "../lib/eigenfoto";
@@ -75,8 +77,8 @@ interface Stuk extends Toonbaar {
 }
 
 interface KomendeBeurs { naam: string; datum: string; locatie: string | null; uren?: string | null; link?: string | null }
-/** Een foto van ons werk op de startpagina (de etalage, beheerd in Profiel › Etalage). */
-interface EtalageRij { id: string; foto?: string | null; titel?: string | null; link?: string | null; volgorde?: number }
+/** Een foto op de startpagina: een binder vooraan (Profiel › Binders vooraan) of een bericht in de Instagram-strook. */
+interface EtalageRij { id: string; foto?: string | null; titel?: string | null; link?: string | null; volgorde?: number; plek?: string | null }
 interface EtalageFoto { id: string; src: string; titel: string | null; link: string | null; kaal?: boolean }
 
 const CONDITIE: Record<string, string> = { M: "Mint", NM: "Near Mint", EX: "Excellent", GD: "Good", LP: "Light Played", PL: "Played", PO: "Poor" };
@@ -119,14 +121,23 @@ async function haal<T>(pad: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-interface Data { stukken: Stuk[]; instagram: string; facebook: string; bedrijf: BedrijfPubliek | null; beurzen: KomendeBeurs[]; etalage: EtalageRij[]; sleutel: string | null }
+interface Data {
+  stukken: Stuk[]; instagram: string; facebook: string; bedrijf: BedrijfPubliek | null; beurzen: KomendeBeurs[]; sleutel: string | null;
+  voorpagina: EtalageRij[]; insta: EtalageRij[]; themas: Thema[];
+}
+
+/** De etalage verdelen: vooraan (hoogstens 12) en de Instagram-strook (de 16 bovenste). Zonder plek = Instagram (van vóór 0.13). */
+function verdeel(rijen: EtalageRij[]): Pick<Data, "voorpagina" | "insta"> {
+  const op = [...rijen].sort((a, b) => (a.volgorde ?? 0) - (b.volgorde ?? 0));
+  return { voorpagina: op.filter((r) => r.plek === "voorpagina").slice(0, 12), insta: op.filter((r) => r.plek !== "voorpagina").slice(0, 16) };
+}
 
 /** Met ?demo=1 toont de pagina de demo van dit toestel (om te kijken hoe klanten het zien). */
 function laadDemo(): Data | null {
   if (!new URLSearchParams(location.search).has("demo")) return null;
   try {
     const d = JSON.parse(localStorage.getItem("bindr-demo-v1") || "null");
-    if (!d) return { stukken: [], instagram: INSTAGRAM, facebook: FACEBOOK, bedrijf: null, beurzen: [], etalage: [], sleutel: null };
+    if (!d) return { stukken: [], instagram: INSTAGRAM, facebook: FACEBOOK, bedrijf: null, beurzen: [], sleutel: null, voorpagina: [], insta: [], themas: [] };
     // Zoals de publieke weergaven: enkel aangevinkte omgevingen, geen kaarten waarvan het hartje moet wisselen of het label nog niet hangt.
     const zichtbaar = new Set(((d.omgevingen ?? []) as { id: string; zichtbaar_voor_klanten: boolean }[]).filter((o) => o.zichtbaar_voor_klanten).map((o) => o.id));
     const toon = (r: { omgeving_id?: string | null }) => !zichtbaar.size || !r.omgeving_id || zichtbaar.has(r.omgeving_id);
@@ -144,12 +155,12 @@ function laadDemo(): Data | null {
       .filter((b) => (b.status === "gepland" || b.status === "actief") && b.datum >= vandaag && toon(b))
       .map((b) => ({ naam: b.naam, datum: b.datum, locatie: b.locatie ?? null, uren: b.uren ?? null, link: b.link ?? null }))
       .sort((a, b) => a.datum.localeCompare(b.datum));
-    const etalage = ((d.etalage ?? []) as (EtalageRij & { omgeving_id?: string | null })[]).filter(toon)
-      .sort((a, b) => (a.volgorde ?? 0) - (b.volgorde ?? 0));
+    const etalage = verdeel(((d.etalage ?? []) as (EtalageRij & { omgeving_id?: string | null })[]).filter(toon));
+    const themas = Array.isArray(d.themas) ? d.themas as Thema[] : [];
     const sleutel = typeof d.instellingen?.aanvraag_sleutel === "string" && d.instellingen.aanvraag_sleutel ? d.instellingen.aanvraag_sleutel : null;
     const fb = d.instellingen?.facebook;
     const bedrijf = d.instellingen?.bedrijf_publiek && typeof d.instellingen.bedrijf_publiek === "object" ? d.instellingen.bedrijf_publiek as BedrijfPubliek : null;
-    return { stukken: [...kaarten, ...artikelen], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, facebook: typeof fb === "string" ? fb : FACEBOOK, bedrijf, beurzen, etalage, sleutel };
+    return { stukken: [...kaarten, ...artikelen], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, facebook: typeof fb === "string" ? fb : FACEBOOK, bedrijf, beurzen, sleutel, ...etalage, themas };
   } catch {
     return null;
   }
@@ -223,6 +234,35 @@ function KlantPagina() {
     return () => window.removeEventListener("scroll", scroll);
   }, []);
 
+  // De foto's van de etalage komen apart (ze zijn groot): per id één keer, in de waaier of de Instagram-strook.
+  const gevraagd = useRef(new Set<string>());
+  const vulEtalage = async (ids: string[]) => {
+    const nieuw = ids.filter((id) => !gevraagd.current.has(id));
+    if (!nieuw.length || demo) return;
+    nieuw.forEach((id) => gevraagd.current.add(id));
+    const f = await haal<{ id: string; foto: string | null }[]>(`publieke_etalage?select=id,foto&id=in.(${nieuw.join(",")})`).catch(() => []);
+    const per = new Map(f.map((x) => [x.id, x.foto]));
+    const vul = (l: EtalageRij[]) => l.map((e) => (per.has(e.id) ? { ...e, foto: per.get(e.id) } : e));
+    if (per.size) setData((d) => d && { ...d, voorpagina: vul(d.voorpagina), insta: vul(d.insta) });
+  };
+
+  // Het thema van vandaag (Halloween, kerst …), of met ?thema=halloween een thema vooraf bekijken.
+  const proefThema = useMemo(() => new URLSearchParams(location.search).get("thema"), []);
+  const thema = useMemo<Thema | null>(() => {
+    const lijst = data?.themas ?? [];
+    return (proefThema ? lijst.find((t) => t.id === proefThema) : actiefThema(lijst, maandDag(vandaagLokaal()))) ?? null;
+  }, [data?.themas, proefThema]);
+  const [themaLogo, setThemaLogo] = useState<string | null>(null);
+  useEffect(() => {
+    setThemaLogo(null);
+    if (!thema) return;
+    if (demo) { setThemaLogo(veiligeFoto(thema.logo)); return; }
+    haal<{ logo: string | null }[]>(`publieke_themas?select=logo&id=eq.${encodeURIComponent(thema.id)}`)
+      .then((r) => setThemaLogo(veiligeFoto(r[0]?.logo))).catch(() => undefined);
+  }, [thema?.id, demo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const soort: ThemaSoort | null = thema ? soortVan(thema.id) ?? null : null;
+  const themaKleur = thema ? veiligeKleur(thema.kleur) ?? soort?.kleur ?? null : null;
+
   useEffect(() => {
     fetch(`${BASIS}data/sets.json`).then((r) => (r.ok ? r.json() : null)).then(setSets).catch(() => setSets(null));
     if (demo) { setData(demo); return; }
@@ -234,30 +274,27 @@ function KlantPagina() {
       haal<ArtikelRij[]>(`publieke_artikelen?select=${artikelKolommen}`).catch(() => haal<ArtikelRij[]>("publieke_artikelen?select=*")).catch(() => []),
       haal<{ sleutel: string; waarde: unknown }[]>("publieke_instellingen?select=*").catch(() => []),
       haal<KomendeBeurs[]>("publieke_beurzen?select=*").catch(() => []),
-      haal<EtalageRij[]>("publieke_etalage?select=id,titel,link,volgorde&order=volgorde.asc&limit=16").catch(() => [] as EtalageRij[]),
-    ]).then(([kaarten, artikelen, inst, beurzen, etalage]) => {
+      // Met plek (vanaf 0.13); een ouder schema kent die kolom niet: dan staat alles in de Instagram-strook.
+      haal<EtalageRij[]>("publieke_etalage?select=id,titel,link,volgorde,plek&order=volgorde.asc&limit=60")
+        .catch(() => haal<EtalageRij[]>("publieke_etalage?select=id,titel,link,volgorde&order=volgorde.asc&limit=16")).catch(() => [] as EtalageRij[]),
+      haal<Thema[]>("publieke_themas?select=id,naam,van,tot,aan,kleur,tekst").catch(() => [] as Thema[]),
+    ]).then(([kaarten, artikelen, inst, beurzen, etalage, themas]) => {
       const ig = inst.find((x) => x.sleutel === "instagram")?.waarde;
       const sleutel = inst.find((x) => x.sleutel === "aanvraag_sleutel")?.waarde;
       const fb = inst.find((x) => x.sleutel === "facebook")?.waarde;
       const bedrijf = inst.find((x) => x.sleutel === "bedrijf_publiek")?.waarde;
+      const verdeeld = verdeel(etalage);
       setData({
-        stukken: [...kaarten.map(vanKaart), ...artikelen.map(vanArtikel)], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, beurzen, etalage,
+        stukken: [...kaarten.map(vanKaart), ...artikelen.map(vanArtikel)], instagram: typeof ig === "string" && ig ? ig : INSTAGRAM, beurzen,
         facebook: typeof fb === "string" ? fb : FACEBOOK, bedrijf: bedrijf && typeof bedrijf === "object" ? bedrijf as BedrijfPubliek : null,
-        sleutel: typeof sleutel === "string" && sleutel ? sleutel : null,
+        sleutel: typeof sleutel === "string" && sleutel ? sleutel : null, ...verdeeld, themas,
       });
-      // De foto's van de etalage: eerst de vijf die meteen in de waaier staan, de rest rustig daarna (om de 7 seconden drie,
-      // ongeveer zo snel als de waaier draait), en niet zolang de pagina in de achtergrond staat.
+      // De binders vooraan: eerst de vijf die meteen in de waaier staan, de rest na een paar seconden (de Instagram-strook
+      // laadt pas als je ernaartoe scrolt, zie InstaStrook).
       void (async () => {
-        for (let i = 0; i < etalage.length; i += i ? 3 : 5) {
-          if (i) {
-            await new Promise((r) => setTimeout(r, 7000));
-            while (document.hidden) await new Promise((r) => setTimeout(r, 2000));
-          }
-          const ids = etalage.slice(i, i + (i ? 3 : 5)).map((e) => e.id);
-          const f = await haal<{ id: string; foto: string | null }[]>(`publieke_etalage?select=id,foto&id=in.(${ids.join(",")})`).catch(() => []);
-          const per = new Map(f.map((x) => [x.id, x.foto]));
-          setData((d) => d && { ...d, etalage: d.etalage.map((e) => (per.has(e.id) ? { ...e, foto: per.get(e.id) } : e)) });
-        }
+        const ids = verdeeld.voorpagina.map((e) => e.id);
+        await vulEtalage(ids.slice(0, 5));
+        if (ids.length > 5) { await new Promise((r) => setTimeout(r, 4000)); await vulEtalage(ids.slice(5)); }
       })();
       const vulFotos = (bron: Stuk["bron"], fotos: { id: string; foto: string | null }[]) => {
         const per = new Map(fotos.map((f) => [f.id, veiligeFoto(f.foto)]));
@@ -287,11 +324,12 @@ function KlantPagina() {
   const routes = ROUTES.filter((r) => r.id === "start" || r.id === "kaarten" || r.id === "binders" || r.id === "ontwerp" || !data || telling[r.id as Plek] > 0);
 
   return (
-    <div className={`klant route-${route}${balkWeg ? " balk-weg" : ""}`}>
-      <Sfeer />
+    <div className={`klant route-${route}${balkWeg ? " balk-weg" : ""}${thema ? ` thema thema-${thema.id}` : ""}`}
+      style={themaKleur ? ({ "--thema": themaKleur } as React.CSSProperties) : undefined}>
+      <Sfeer soort={soort} />
       <header className="klant-balk">
         <a href="#" className="klant-merk" aria-label="Bind'r, naar de start">
-          <img src={`${BASIS}img/logo-woord.png`} alt="Bind'r" width={150} height={66} />
+          <img src={themaLogo ?? `${BASIS}img/logo-woord.png`} alt="Bind'r" width={150} height={66} />
         </a>
         <nav className="klant-nav boven" aria-label="Catalogi">
           {routes.map((r) => (
@@ -313,7 +351,8 @@ function KlantPagina() {
       <main className="klant-inhoud">
         {fout && <p className="klant-fout">{fout}</p>}
         {route === "start" ? (
-          <Start data={data} stukken={stukken} telling={telling} beurzen={beurzen} ig={ig} demo={!!demo} />
+          <Start data={data} stukken={stukken} telling={telling} beurzen={beurzen} ig={ig} demo={!!demo} thema={thema} soort={soort}
+            proef={!!proefThema} onInsta={(ids) => void vulEtalage(ids)} />
         ) : route === "ontwerp" ? (
           <OntwerpPagina demo={!!demo} sleutel={data?.sleutel ?? null} ig={ig} igLink={igProfiel(ig)} basis={BASIS} />
         ) : route === "privacy" ? (
@@ -327,7 +366,7 @@ function KlantPagina() {
         )}
       </main>
 
-      <Voet ig={ig} fb={fb} b={bedrijf} />
+      <Voet ig={ig} fb={fb} b={bedrijf} logo={themaLogo} />
 
       <nav className="klant-nav onder" aria-label="Catalogi">
         {routes.map((r) => (
@@ -347,40 +386,62 @@ function KlantPagina() {
 const VOORBEELDEN = ["oceaanblauw", "geel", "rood", "roze", "paars"];
 const voorbeelden = (): EtalageFoto[] => VOORBEELDEN.map((k) => ({ id: `vb-${k}`, src: `${BASIS}img/voorbeeld/${k}.webp`, titel: null, link: "#binders", kaal: true }));
 
-function Start({ data, stukken, telling, beurzen, ig, demo }: { data: Data | null; stukken: Stuk[]; telling: Record<Plek, number>; beurzen: KomendeBeurs[]; ig: string; demo: boolean }) {
-  // Vooraan: de foto's uit de etalage en van onze binders, zonder namen erbij. Nooit door elkaar met de
-  // voorbeelden: vanaf drie eigen foto's enkel die, anders enkel de voorbeeldbinders.
+function Start({ data, stukken, telling, beurzen, ig, demo, thema, soort, proef, onInsta }: {
+  data: Data | null; stukken: Stuk[]; telling: Record<Plek, number>; beurzen: KomendeBeurs[]; ig: string; demo: boolean;
+  thema: Thema | null; soort: ThemaSoort | null; proef: boolean; onInsta: (ids: string[]) => void;
+}) {
+  // Vooraan: uitgeknipte foto's van onze binders (Profiel › Binders vooraan). Zolang die er niet zijn: de voorbeeldbinders.
+  // Nooit door elkaar; en zolang de foto's nog laden, een lege waaier (geen voorbeelden die dan plots verspringen).
+  const vooraan = data?.voorpagina ?? [];
   const fotos = useMemo<EtalageFoto[]>(() => {
     const uit: EtalageFoto[] = [];
-    for (const e of data?.etalage ?? []) { const src = veiligeFoto(e.foto); if (src) uit.push({ id: e.id, src, titel: e.titel ?? null, link: veiligeLink(e.link) }); }
-    for (const b of stukken) if (b.plek === "binders" && b.foto) uit.push({ id: `b-${b.id}`, src: b.foto, titel: b.binder?.artwork || b.naam, link: "#binders" });
-    return uit.length >= 3 ? uit : voorbeelden();
-  }, [data?.etalage, stukken]);
+    for (const e of vooraan) { const src = veiligeFoto(e.foto); if (src) uit.push({ id: e.id, src, titel: e.titel ?? null, link: veiligeLink(e.link), kaal: true }); }
+    return uit;
+  }, [vooraan]);
+  const laden = !data || (vooraan.length > 0 && !fotos.length);
   // Per soort een paar beelden: de duurste met een foto eerst.
   const beelden = (p: Plek): Stuk[] => stukken.filter((s) => s.plek === p && (p === "kaarten" ? s.afbeelding : s.foto)).sort((a, b) => b.prijs - a.prijs).slice(0, 3);
+  const zin = thema?.tekst?.trim() || (proef && thema ? `Voorbeeld van het thema ${thema.naam}` : "");
   return (
     <>
+      {thema && zin && (
+        <p className="thema-band">
+          {soort && <VormSvg vorm={VORMEN[soort.zweef[0] ?? "ster"]} />}
+          <span>{zin}</span>
+        </p>
+      )}
       <section className="held" aria-labelledby="held-titel">
         <div className="held-tekst">
           <h1 id="held-titel">Binders die even uniek zijn als je collectie</h1>
           <p>Custom binders voor Pokémon-verzamelaars, met de laser gegraveerd.{demo ? " (Voorbeeld met de demo.)" : ""}</p>
           <div className="held-knoppen">
             <a className="knop" href="#binders">Bekijk de binders</a>
-            <a className="knop zacht" href="#ontwerp">Ontwerp je binder</a>
           </div>
         </div>
-        <Waaier fotos={fotos} />
+        <Waaier fotos={laden ? [] : fotos.length ? fotos : voorbeelden()} laden={laden} />
       </section>
 
       <section className="aanbod" aria-labelledby="aanbod-titel">
         <h2 id="aanbod-titel">Wat je bij ons vindt</h2>
         <div className="vakken">
           <Vak plek="kaarten" titel="Kaarten" tekst={data ? `${telling.kaarten} singles en slabs` : "…"} beelden={beelden("kaarten")} />
-          <Vak plek="binders" titel="Binders" tekst={data ? (telling.binders ? `${telling.binders} ontwerpen van ons` : "Ons eigen werk") : "…"} beelden={beelden("binders")} />
+          <Vak plek="binders" titel="Binders" tekst={data ? (telling.binders ? `${telling.binders} ontwerpen van ons` : "Ons eigen werk") : "…"} beelden={beelden("binders")}
+            reserve={laden ? [] : (fotos.length ? fotos : voorbeelden()).slice(0, 3)} />
           <Vak plek="3d" titel="3D-prints" tekst={data ? (telling["3d"] ? `${telling["3d"]} stuks` : "Aan onze stand") : "…"} beelden={beelden("3d")} />
           <Vak plek="sealed" titel="Sealed" tekst={data ? (telling.sealed ? `${telling.sealed} stuks` : "Aan onze stand") : "…"} beelden={beelden("sealed")} />
         </div>
       </section>
+
+      {/* Ontwerp je binder: één keer op de pagina, als een uitnodiging in het midden. */}
+      <a className="ontwerp-banner" href="#ontwerp">
+        <span className="ontwerp-banner-tekst">
+          <strong>Je eigen ontwerp op een binder?</strong>
+          <span>Probeer je tekening of logo op een zip-binder en vraag hem aan.</span>
+        </span>
+        <span className="ontwerp-banner-pijl" aria-hidden="true"><OntwerpIcoon maat={24} /></span>
+      </a>
+
+      {(data?.insta.length ?? 0) > 0 && <InstaStrook rijen={data!.insta} ig={ig} onNodig={onInsta} />}
 
       {/* Geen beurs gepland: dan geen lege sectie (onderaan staat al waar je ons volgt). */}
       {beurzen.length > 0 && <Beurzen beurzen={beurzen} ig={ig} geladen={!!data} />}
@@ -388,7 +449,7 @@ function Start({ data, stukken, telling, beurzen, ig, demo }: { data: Data | nul
       <section className="over" aria-labelledby="over-titel">
         <div className="over-tekst">
           <h2 id="over-titel">Over Bind'r</h2>
-          <p>Een gewone kaartmap wordt bij ons een stuk van je collectie. Een naam of je eigen tekening op je binder? Dat vraag je bij Ontwerp, hierboven in het menu.</p>
+          <p>Een gewone kaartmap wordt bij ons een stuk van je collectie.</p>
           <ul className="over-lijst">
             <li><OntwerpIcoon /><span><strong>Eigen ontwerp.</strong> Elk artwork maken we zelf, geïnspireerd op Pokémon, sets en card art.</span></li>
             <li><LaserIcoon /><span><strong>Lasergravure.</strong> Het ontwerp gaat er met de laser in, op de voorkant of op voor- én achterkant.</span></li>
@@ -397,6 +458,58 @@ function Start({ data, stukken, telling, beurzen, ig, demo }: { data: Data | nul
         </div>
       </section>
     </>
+  );
+}
+
+/**
+ * Onze laatste berichten op Instagram, in een strook die rustig van links naar rechts doorloopt (twee keer dezelfde rij
+ * achter elkaar, zodat ze naadloos rondgaat). Stil met de muis erop, met het toetsenbord erin of buiten beeld; bij
+ * "minder beweging" staat ze stil en veeg je zelf. De foto's laden pas als je ernaartoe scrolt.
+ */
+function InstaStrook({ rijen, ig, onNodig }: { rijen: EtalageRij[]; ig: string; onNodig: (ids: string[]) => void }) {
+  const ref = useRef<HTMLElement>(null);
+  const [inBeeld, setInBeeld] = useState(false);
+  const nodig = useRef(onNodig);
+  nodig.current = onNodig;
+  const ids = rijen.map((r) => r.id).join(",");
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") { nodig.current(ids.split(",")); setInBeeld(true); return; }
+    let geladen = false;
+    const io = new IntersectionObserver(([x]) => {
+      setInBeeld(x.isIntersecting);
+      if (x.isIntersecting && !geladen) { geladen = true; nodig.current(ids.split(",")); }
+    }, { rootMargin: "500px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [ids]);
+  // Eén ronde is minstens 8 tegels breed (anders is ze op een groot scherm korter dan het scherm).
+  const ronde = Array.from({ length: Math.max(1, Math.ceil(8 / rijen.length)) }, () => rijen).flat();
+  return (
+    <section ref={ref} className="insta" aria-labelledby="insta-titel">
+      <div className="insta-kop">
+        <h2 id="insta-titel">Nieuw op Instagram</h2>
+        <a className="insta-volg" href={igProfiel(ig)} target="_blank" rel="noreferrer"><IgIcoon maat={18} /> @{ig}</a>
+      </div>
+      <div className={`insta-strook${inBeeld ? " loopt" : ""}`} style={{ "--duur": `${ronde.length * 3.4}s` } as React.CSSProperties}>
+        <ul className="insta-baan">
+          {[0, 1].map((kopie) => ronde.map((r, i) => {
+            const extra = kopie > 0 || i >= rijen.length; // herhalingen: niet voor schermlezers en het toetsenbord
+            const src = veiligeFoto(r.foto);
+            return (
+              <li key={`${kopie}-${i}`} className={`insta-tegel t${i % 4}${extra ? " extra" : ""}`} aria-hidden={extra || undefined}>
+                <a href={veiligeLink(r.link) ?? igProfiel(ig)} target="_blank" rel="noreferrer" tabIndex={extra ? -1 : undefined}
+                  aria-label={r.titel ? `${r.titel}, op Instagram` : "Bekijk dit bericht op Instagram"} draggable={false}>
+                  {src ? <img src={src} alt="" loading="lazy" decoding="async" draggable={false} /> : <span className="insta-wacht" />}
+                  <span className="insta-ig" aria-hidden="true"><IgIcoon maat={15} /></span>
+                </a>
+              </li>
+            );
+          }))}
+        </ul>
+      </div>
+    </section>
   );
 }
 
@@ -418,7 +531,7 @@ function useBreed(px: number): boolean {
  * neemt het over (dan draait hij niet meer vanzelf); stil zolang hij niet in beeld is, de muis erop staat of bij
  * "minder beweging". De bolletjes eronder tonen waar je bent en zijn ook knoppen.
  */
-function Waaier({ fotos }: { fotos: EtalageFoto[] }) {
+function Waaier({ fotos, laden = false }: { fotos: EtalageFoto[]; laden?: boolean }) {
   const breed = useBreed(1000);
   const half = breed ? 2 : 1; // zoveel links en rechts van de voorste
   const [voor, setVoor] = useState(0);
@@ -438,13 +551,14 @@ function Waaier({ fotos }: { fotos: EtalageFoto[] }) {
     const io = new IntersectionObserver(([x]) => setInBeeld(x.isIntersecting), { threshold: 0.3 });
     io.observe(el);
     return () => io.disconnect();
-  }, []);
+  }, [aantal > 0]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (aantal < 2 || stil || zelf || !inBeeld || minderBeweging()) return;
     const t = setInterval(() => { if (!document.hidden) volgende(1); }, 5500);
     return () => clearInterval(t);
   }, [aantal > 1, stil, zelf, inBeeld]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!aantal) return null;
+  // Nog aan het laden: wel de plaats, zodat de pagina niet verspringt als de binders er zijn.
+  if (!aantal) return laden ? <div className="waaier-blok" aria-hidden="true"><div className="waaier laden" /></div> : null;
   const neer = (e: WijsEvent<HTMLDivElement>) => { ref.current.x = e.clientX; ref.current.id = e.pointerId; };
   const los = (e: WijsEvent<HTMLDivElement>) => {
     if (ref.current.id !== e.pointerId) return;
@@ -500,9 +614,9 @@ function Waaier({ fotos }: { fotos: EtalageFoto[] }) {
 }
 
 /** Een soort uit ons aanbod: een paar beelden als een klein waaiertje, met de naam en hoeveel er zijn. */
-function Vak({ plek, titel, tekst, beelden }: { plek: Plek; titel: string; tekst: string; beelden: Stuk[] }) {
-  // Nog geen foto's van onze binders: de voorbeeldbinders.
-  const voorbeeld = plek === "binders" && !beelden.length ? voorbeelden().slice(0, 3) : [];
+function Vak({ plek, titel, tekst, beelden, reserve = [] }: { plek: Plek; titel: string; tekst: string; beelden: Stuk[]; reserve?: EtalageFoto[] }) {
+  // Nog geen foto's bij onze binders: de binders van vooraan (uitgeknipt), anders de voorbeeldbinders.
+  const voorbeeld = !beelden.length ? reserve : [];
   const n = beelden.length || voorbeeld.length;
   return (
     <a className={`vak ${plek}`} href={`#${plek}`}>
@@ -521,13 +635,21 @@ function Vak({ plek, titel, tekst, beelden }: { plek: Plek; titel: string; tekst
   );
 }
 
-/** De sfeer van ons logo: een paar belletjes die zacht zweven en sterretjes die om beurten even oplichten, achter alles. */
-function Sfeer() {
+/**
+ * De sfeer van ons logo achter alles: belletjes die zacht zweven, sterretjes die om beurten oplichten (twee tegelijk)
+ * en belletjes die verschijnen, wat opstijgen en ploppen. Met een thema (Halloween, kerst …) zweeft de versiering van
+ * dat thema. Bij "minder beweging" staat alles stil (en ploppen er geen).
+ */
+function Sfeer({ soort }: { soort: ThemaSoort | null }) {
+  const deco = soort ?? GEWOON;
   return (
     <div className="sfeer" aria-hidden="true">
-      {Array.from({ length: 5 }, (_, i) => <span key={`b${i}`} className={`belletje b${i}`} />)}
-      {Array.from({ length: 5 }, (_, i) => (
-        <svg key={`s${i}`} className={`sterretje s${i}`} viewBox="0 0 24 24"><path d="M12 1c.7 5.6 3.4 9.3 11 11-7.6 1.7-10.3 5.4-11 11-.7-5.6-3.4-9.3-11-11 7.6-1.7 10.3-5.4 11-11Z" /></svg>
+      {deco.zweef.length
+        ? Array.from({ length: 6 }, (_, i) => <VormSvg key={`z${i}`} vorm={VORMEN[deco.zweef[i % deco.zweef.length]]} className={`zweef b${i}`} />)
+        : Array.from({ length: 6 }, (_, i) => <span key={`b${i}`} className={`belletje b${i}`} />)}
+      {Array.from({ length: 10 }, (_, i) => <VormSvg key={`s${i}`} vorm={VORMEN[deco.fonkel[i % deco.fonkel.length]]} className={`sterretje s${i}`} />)}
+      {deco.bellen && Array.from({ length: 6 }, (_, i) => (
+        <span key={`p${i}`} className={`plop p${i}`}><span className="plop-bel" /><span className="plop-ring" /></span>
       ))}
     </div>
   );
@@ -1012,7 +1134,7 @@ function Prijs({ p, groot = false }: { p: number; groot?: boolean }) {
 
 // ── Onderaan: Instagram en het logo ──────────────────────────────────────────
 
-function Voet({ ig, fb, b }: { ig: string; fb: string | null; b: BedrijfPubliek | null }) {
+function Voet({ ig, fb, b, logo }: { ig: string; fb: string | null; b: BedrijfPubliek | null; logo: string | null }) {
   const kbo = kboMooi(b?.kbo);
   return (
     <footer className="klant-voet">
@@ -1021,7 +1143,7 @@ function Voet({ ig, fb, b }: { ig: string; fb: string | null; b: BedrijfPubliek 
         {fb && <a className="sociaal-knop" href={fb} target="_blank" rel="noreferrer"><FbIcoon /> <span>Facebook<em>Bind'r</em></span></a>}
       </div>
       <p className="sociaal-tekst">Onze nieuwste binders, lasergravures en kaarten, en waar we binnenkort staan.</p>
-      <img src={`${BASIS}img/logo-woord.png`} alt="Bind'r" className="voet-logo" width={120} height={53} />
+      <img src={logo ?? `${BASIS}img/logo-woord.png`} alt="Bind'r" className="voet-logo" width={120} height={53} />
       <p>Collectibles, crafts en 3D-prints</p>
       <div className="voet-wettelijk">
         <p>

@@ -3,7 +3,7 @@
 export const SUPABASE_URL = "https://thnrmrvpkcrujxtwwqhy.supabase.co";
 export const SUPABASE_KEY = "sb_publishable_rFo0QZlgdsQTMOU7buKHJg_hMBrCSPV";
 
-export const APP_VERSIE = "0.12.0";
+export const APP_VERSIE = "0.13.0";
 
 // Ons Instagram-account en onze Facebook-pagina (de beheerders kunnen ze wijzigen in Instellingen).
 export const INSTAGRAM = "bindrstudio";

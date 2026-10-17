@@ -181,16 +181,32 @@ async function doorloop(ctx, page, motor, naam, opties) {
   assert.equal(await page.getByText(/liep iets mis|Er ging iets mis/i).count(), 0, "Instellingen opent zonder fout");
   await page.keyboard.press("Escape");
 
-  // De klantenpagina.
+  // De klantenpagina, met binders vooraan, de Instagram-strook en een thema (Halloween), zoals ze in de demo staan.
   await page.waitForLoadState("networkidle").catch(() => undefined);
+  const beeld = (p) => `data:image/${p.endsWith(".png") ? "png" : "webp"};base64,${fs.readFileSync(path.resolve(__dirname, "../../public/img", p)).toString("base64")}`;
+  const vooraan = ["rood", "geel", "oceaanblauw", "paars"].map((k, i) => ({ id: `v${i}`, foto: beeld(`voorbeeld/${k}.webp`), titel: null, link: null, volgorde: i + 1, plek: "voorpagina" }));
+  const insta = ["eend.png", "voorbeeld/roze.webp", "voorbeeld/geel.webp"].map((k, i) => ({ id: `i${i}`, foto: beeld(k), titel: null, link: `https://www.instagram.com/p/${i}/`, volgorde: i + 1, plek: "instagram" }));
+  await page.evaluate(([etalage]) => {
+    const d = JSON.parse(localStorage.getItem("bindr-demo-v1"));
+    d.etalage = etalage;
+    d.themas = [{ id: "halloween", naam: "Halloween", van: "10-15", tot: "11-01", aan: "aan", kleur: "#e8772e", tekst: "Fijne Halloween! Kom griezelen aan onze stand." }];
+    localStorage.setItem("bindr-demo-v1", JSON.stringify(d));
+  }, [[...vooraan, ...insta]]);
   await page.goto(BASIS + "?demo=1");
   await page.locator(".waaier").waitFor();
   await page.locator(".waaier-foto.o0").waitFor();
   // De waaier: met de bolletjes naar een andere binder.
   await page.locator(".waaier-bolletjes button").nth(2).click();
   assert.equal(await page.locator(".waaier-bolletjes button").nth(2).getAttribute("aria-current"), "true", "bolletje 3 zet binder 3 vooraan");
-  await nooitTeBreed("start", 6); // de etalage zweeft: een paar keer kijken
+  await nooitTeBreed("start", 6); // de waaier en de achtergrond bewegen: een paar keer kijken
+  assert.ok(await page.locator(".klant.thema-halloween .thema-band").isVisible(), "het thema met zijn zin");
   await foto("klant-start");
+  // De Instagram-strook loopt over de hele breedte, maar de pagina mag nooit zijwaarts scrollen.
+  await page.locator(".insta").scrollIntoViewIfNeeded();
+  await page.locator(".insta-tegel img").first().waitFor();
+  await nooitTeBreed("instagram", 4);
+  await foto("klant-instagram");
+  await page.evaluate(() => window.scrollTo(0, 0));
   await nav("Kaarten");
   await page.locator(".klant .tegel").first().waitFor();
   await nooitTeBreed("kaarten");

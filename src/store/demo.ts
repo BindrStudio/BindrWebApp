@@ -1,7 +1,7 @@
 // Demomodus: alles blijft op dit toestel (localStorage). Handig om de app uit te
 // proberen met de testset, zonder account en zonder de echte voorraad te raken.
 // De kassa gebruikt dezelfde rekenkern als de offline wachtrij (src/lib/kassa.ts).
-import type { Aankoopfoto, Aanvraag, AanvraagStatus, Artikel, Artikelfoto, Etalagefoto, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Transactie } from "../types";
+import type { Aankoopfoto, Aanvraag, AanvraagStatus, Artikel, Artikelfoto, Etalagefoto, Beurs, Exemplaar, Gebruiker, NieuwArtikel, NieuwExemplaar, Omgeving, Tegenpartij, Thema, Transactie } from "../types";
 import { Fout, type Alles, type Backend, type PrijsMarkering } from "./backend";
 import { metVitrineSinds, schoonArtikel, schoonExemplaar, standaardArtikel, standaardExemplaar } from "../lib/exemplaar";
 import { aanvaardConflict, losConflictOp, maakOngedaan, pasToe } from "../lib/kassa";
@@ -14,6 +14,7 @@ interface Opslag extends Alles {
   aankoopfotos?: Aankoopfoto[];
   artikelfotos?: Artikelfoto[];
   etalage?: Etalagefoto[];
+  themas?: Thema[];
   aanvragen?: Aanvraag[]; // ook wat de klantenpagina in de demo instuurt
 }
 
@@ -249,6 +250,17 @@ export class DemoBackend implements Backend {
 
   async verwijderEtalage(id: string) {
     this.data.etalage = (this.data.etalage ?? []).filter((x) => x.id !== id);
+    this.bewaar();
+  }
+
+  async laadThemas() {
+    return [...(this.data.themas ?? [])];
+  }
+
+  async bewaarThema(t: Thema) {
+    const oud = (this.data.themas ?? []).find((x) => x.id === t.id);
+    const nieuw: Thema = { ...oud, ...t, logo: t.logo !== undefined ? t.logo : oud?.logo ?? null };
+    this.data.themas = [...(this.data.themas ?? []).filter((x) => x.id !== t.id), nieuw];
     this.bewaar();
   }
 
