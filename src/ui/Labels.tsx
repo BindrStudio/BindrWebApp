@@ -72,7 +72,7 @@ export function Labels({ inSheet = false }: { inSheet?: boolean }) {
           <div className={`onderbalk${inSheet ? " in-sheet" : ""}`}>
             {per === 2 && selectie.length % 2 === 1 && (
               <p className="zacht klein center strook-tip">
-                {selectie.length} {selectie.length === 1 ? "label" : "labels"} = {Math.ceil(selectie.length / 2)} {selectie.length === 1 ? "strook" : "strookjes"}: één helft blijft leeg.{toon.length > selectie.length ? " Kies er nog één bij om niets te verspillen." : ""}
+                {selectie.length} {selectie.length === 1 ? "label" : "labels"} = {Math.ceil(selectie.length / 2)} {selectie.length === 1 ? "strook: het onderste label blijft leeg." : "strookjes: het onderste label van de laatste strook blijft leeg."}{toon.length > selectie.length ? " Kies er nog één bij om niets te verspillen." : ""}
               </p>
             )}
             {lijst === "te printen" ? (
@@ -110,8 +110,7 @@ export function printerDelen(printer: string | null, i: ReturnType<typeof useApp
   const r = labelRol(i.labelMaat);
   const rol = soort === "fichero" ? `${FICHERO_MAAT.mmBreed} × ${FICHERO_MAAT.mmHoog} mm` : r.kort ?? r.label;
   const donker = soort === "fichero" ? ["licht", "normaal", "donker"][ficheroDonkerte(a.donkerte)] : `donkerte ${a.donkerte}`;
-  const opzij = soort === "niimbot" && r.per === 2 && a.zijwaarts ? verschuivingTekst(a.zijwaarts, true) : null;
-  return [wie, printer ? "verbonden" : null, rol, donker, a.verschuiving ? verschuivingTekst(a.verschuiving, soort === "fichero") : null, opzij, a.trager ? "trager" : null].filter((x): x is string => !!x);
+  return [wie, printer ? "verbonden" : null, rol, donker, a.verschuiving ? verschuivingTekst(a.verschuiving, soort === "fichero") : null, a.trager ? "trager" : null].filter((x): x is string => !!x);
 }
 
 /**
@@ -167,8 +166,8 @@ export function PrinterBlok() {
           </div>
           {r.per === 2 && (
             <p className="zacht klein">
-              Twee labels naast elkaar op één strook. De printer schuift altijd een hele strook door: print je één label,
-              dan komt het links en blijft de rechterhelft leeg. Bij <em>Te printen</em> komen ze per twee op een strook.
+              Twee labels onder elkaar op één strook van 30 mm. De printer schuift altijd een hele strook door: print je één label,
+              dan komt het bovenaan en blijft het onderste leeg. Bij <em>Te printen</em> komen ze per twee op een strook.
             </p>
           )}
         </div>
@@ -205,9 +204,10 @@ export function Afstellen() {
   const a = afstelling(instellingen);
   const fichero = a.printer === "fichero";
   const duo = perStrook(instellingen) === 2;
-  const stap = (nu: number | undefined, d: number) => Math.min(VERSCHUIVING_MAX, Math.max(-VERSCHUIVING_MAX, Math.round(((nu ?? 0) + d) * 2) / 2));
-  const schuif = (d: number) => zetAfstelling({ verschuiving: stap(a.verschuiving, d) });
-  const opzij = (d: number) => zetAfstelling({ zijwaarts: stap(a.zijwaarts, d) });
+  const schuif = (d: number) => {
+    const n = Math.min(VERSCHUIVING_MAX, Math.max(-VERSCHUIVING_MAX, Math.round(((a.verschuiving ?? 0) + d) * 2) / 2));
+    zetAfstelling({ verschuiving: n });
+  };
   return (
     <details className="afstellen">
       <summary>Proeflabel en afstellen ({fichero ? "Fichero" : "Niimbot"})</summary>
@@ -217,9 +217,9 @@ export function Afstellen() {
       </div>
       <p className="zacht klein">
         {duo
-          ? "Randtest: een kader op elk label (1 streepje = 1 mm). Zie je op allebei de vier randen? Dan valt er niets weg. Valt links of rechts een rand weg of loopt een kader over de ruimte tussen de labels: schuif naar links of rechts."
+          ? "Randtest: een kader op elk label (1 streepje = 1 mm). Loopt de snede tussen de twee labels precies tussen de kaders en zie je bij allebei de vier randen? Dan staat het goed. Loopt een kader over de snede: schuif hoger of lager."
           : "Randtest: zie je de vier randen met streepjes (1 streepje = 1 mm)? Dan valt er niets weg."}
-        {fichero ? " Boven en onder een smal wit randje is normaal: de printkop is 12 mm breed." : duo ? "" : " Links en rechts een smal wit randje is normaal."}
+        {fichero ? " Boven en onder een smal wit randje is normaal: de printkop is 12 mm breed." : " Links en rechts een smal wit randje is normaal."}
       </p>
       <div className="afstel-rij">
         <span>Donkerte</span>
@@ -242,16 +242,6 @@ export function Afstellen() {
           <button className="knop zacht klein" onClick={() => schuif(0.5)} disabled={(a.verschuiving ?? 0) >= VERSCHUIVING_MAX}>{fichero ? "Naar rechts" : "Lager"}</button>
         </div>
       </div>
-      {duo && (
-        <div className="afstel-rij">
-          <span>Staat de print te ver naar links of rechts?</span>
-          <div className="afstel-schuif zijwaarts">
-            <button className="knop zacht klein" onClick={() => opzij(-0.5)} disabled={(a.zijwaarts ?? 0) <= -VERSCHUIVING_MAX}>Naar links</button>
-            <strong aria-live="polite">{verschuivingTekst(a.zijwaarts ?? 0, true)}</strong>
-            <button className="knop zacht klein" onClick={() => opzij(0.5)} disabled={(a.zijwaarts ?? 0) >= VERSCHUIVING_MAX}>Naar rechts</button>
-          </div>
-        </div>
-      )}
       <label className="schakel rij">
         <input type="checkbox" checked={!!a.trager} onChange={(e) => zetAfstelling({ trager: e.target.checked })} />
         <span>Trager printen <span className="zacht klein">(als een label leeg of half uit de printer komt)</span></span>

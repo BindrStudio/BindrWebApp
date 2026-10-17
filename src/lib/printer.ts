@@ -43,7 +43,6 @@ export const PRINTERS: { id: PrinterSoort; label: string; rol: string }[] = [
 export interface Afstelling {
   donkerte?: number;     // 1–5, standaard 3 (Fichero: 1–2 licht, 3 normaal, 4–5 donker)
   verschuiving?: number; // mm: + = lager op het label, − = hoger (Fichero: + = naar rechts)
-  zijwaarts?: number;    // mm: + = naar rechts (Niimbot, twee labels per strook: de ruimte ertussen is smal)
   trager?: boolean;      // gepaced versturen met een langere pauze
   printer?: PrinterSoort; // standaard de Niimbot
 }
@@ -68,12 +67,6 @@ function printMaat(sleutel: string, labelId: string): { size: Size; maat: Return
   const size: Size = { w_px: maat.breedte, h_px: maat.hoogte, dpi: m.dpi, margin: sleutel === "b1" ? 8 : 10 };
   if (sleutel === "b1") size.offset_y_px = 4;
   return { size, maat };
-}
-
-/** Hoeveel pixels de strook opzij schuift (Niimbot, twee per strook): + = naar rechts, hoogstens 3 mm. */
-export function zijwaartsPx(dpi: number, a: Afstelling = {}): number {
-  const mm = Math.min(VERSCHUIVING_MAX, Math.max(-VERSCHUIVING_MAX, a.zijwaarts ?? 0));
-  return Math.round((mm * dpi) / 25.4);
 }
 
 /** Donkerte en verschuiving zoals de driver ze wil: een geheel getal 1–5 en pixels langs de doorvoer. */
@@ -155,9 +148,9 @@ async function zorgVoor(soort: PrinterSoort) {
 }
 
 /**
- * Print één of meerdere labels in één opdracht. Twee labels per strook (Niimbot): per twee naast
- * elkaar; bij een oneven aantal blijft de rechterhelft van de laatste strook leeg (de printer schuift
- * altijd een hele strook door). `beideHelften`: één label op allebei de helften (het proeflabel).
+ * Print één of meerdere labels in één opdracht. Twee labels per strook (Niimbot, 2 onder elkaar):
+ * per twee onder elkaar; bij een oneven aantal blijft het onderste label van de laatste strook leeg
+ * (de printer schuift altijd een hele strook door). `beideHelften`: één label op allebei (het proeflabel).
  */
 export async function printLabels(exemplaren: Exemplaar[], labelId: string, voortgang?: (s: string) => void, a: Afstelling = {}, beideHelften = false): Promise<void> {
   if (!exemplaren.length) return;
@@ -167,7 +160,7 @@ export async function printLabels(exemplaren: Exemplaar[], labelId: string, voor
   await stuur((maat) => {
     if (!maat.vakken) return exemplaren.map((ex) => labelDataUrl(ex, maat));
     const lijst = beideHelften && exemplaren.length === 1 ? [exemplaren[0], exemplaren[0]] : exemplaren;
-    return strookUrls(lijst, maat, zijwaartsPx(maat.dpi, a));
+    return strookUrls(lijst, maat);
   }, labelId, a, voortgang);
 }
 
@@ -180,7 +173,7 @@ export async function printRandtest(labelId: string, voortgang?: (s: string) => 
 
 /**
  * De maat van één label in pixels voor de gekozen printer (Niimbot: het verbonden model, anders de
- * B1 Pro), om te tonen: bij twee per strook één helft.
+ * B1 Pro), om te tonen: bij twee per strook één label.
  */
 export function huidigeMaat(labelId: string, soort: PrinterSoort = "niimbot"): LabelMaat {
   if (soort === "fichero") return FICHERO_MAAT;

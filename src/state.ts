@@ -1315,25 +1315,21 @@ export function afstelling(i = state.instellingen): Afstelling {
     const f = i.labelFichero ?? {};
     return { donkerte: f.donkerte ?? 3, verschuiving: f.verschuiving ?? 0, trager: !!f.trager, printer: "fichero" };
   }
-  return { donkerte: i.labelDonkerte ?? 3, verschuiving: i.labelVerschuiving ?? 0, zijwaarts: i.labelZijwaarts ?? 0, trager: !!i.labelTrager, printer: "niimbot" };
+  return { donkerte: i.labelDonkerte ?? 3, verschuiving: i.labelVerschuiving ?? 0, trager: !!i.labelTrager, printer: "niimbot" };
 }
 
 /** De afstelling van de gekozen printer aanpassen (enkel die printer). */
-export function zetAfstelling(w: { donkerte?: number; verschuiving?: number; zijwaarts?: number; trager?: boolean }) {
+export function zetAfstelling(w: { donkerte?: number; verschuiving?: number; trager?: boolean }) {
   const i = state.instellingen;
-  if (i.labelPrinter === "fichero") {
-    const { zijwaarts: _, ...f } = w; // opzij schuiven is de verschuiving zelf bij de Fichero
-    return zetInstellingen({ labelFichero: { ...i.labelFichero, ...f } });
-  }
+  if (i.labelPrinter === "fichero") return zetInstellingen({ labelFichero: { ...i.labelFichero, ...w } });
   zetInstellingen({
     ...(w.donkerte !== undefined ? { labelDonkerte: w.donkerte } : {}),
     ...(w.verschuiving !== undefined ? { labelVerschuiving: w.verschuiving } : {}),
-    ...(w.zijwaarts !== undefined ? { labelZijwaarts: w.zijwaarts } : {}),
     ...(w.trager !== undefined ? { labelTrager: w.trager } : {}),
   });
 }
 
-/** Twee labels per strook (Niimbot met zo'n rol): print per twee; één label komt op de linkerhelft. */
+/** Twee labels per strook (Niimbot, rol met 2 onder elkaar): print per twee; één label komt bovenaan. */
 export function perStrook(i = state.instellingen): 1 | 2 {
   return (i.labelPrinter ?? "niimbot") === "niimbot" && labelRol(i.labelMaat).per === 2 ? 2 : 1;
 }
@@ -1347,7 +1343,7 @@ export async function print(ids: string[]) {
     await printLabels(ex, state.instellingen.labelMaat, voortgang, afstelling());
     zet({ printer: printerNaam() });
     wijzigVeel(ex.filter((e) => e.label_status === "te printen").map((e) => e.id), { label_status: "geprint" });
-    if (perStrook() === 2) meld(ex.length === 1 ? "Label geprint, op de linkerhelft van de strook. Scan het na het plakken." : `${ex.length} labels geprint op ${ex.length === 2 ? "één strook" : `${Math.ceil(ex.length / 2)} strookjes`}. Scan ze na het plakken.`);
+    if (perStrook() === 2) meld(ex.length === 1 ? "Label geprint, bovenaan de strook (het onderste blijft leeg). Scan het na het plakken." : `${ex.length} labels geprint op ${ex.length === 2 ? "één strook" : `${Math.ceil(ex.length / 2)} strookjes`}. Scan ze na het plakken.`);
     else meld(ex.length === 1 ? "Label geprint. Scan het na het plakken." : `${ex.length} labels geprint. Scan ze na het plakken.`);
   } catch (e) {
     printFout(e);

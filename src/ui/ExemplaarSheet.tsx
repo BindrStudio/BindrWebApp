@@ -391,7 +391,7 @@ function HartjeBlok({ ex, voorstelPrijs }: { ex: Exemplaar; voorstelPrijs: numbe
 
 function LabelBlok({ ex, printer }: { ex: Exemplaar; printer: string | null }) {
   const { instellingen, exemplaren } = useApp();
-  // Twee labels per strook: een kaart die ook op een label wacht, kan mee op de rechterhelft.
+  // Twee labels per strook: een kaart die ook op een label wacht, kan mee op het onderste label.
   const duo = perStrook(instellingen) === 2;
   const ander = useMemo(() => (duo ? wachtOpLabel(exemplaren).find((e) => e.id !== ex.id) : undefined), [duo, exemplaren, ex.id]);
   const voorbeeld = useMemo(() => {
@@ -411,7 +411,7 @@ function LabelBlok({ ex, printer }: { ex: Exemplaar; printer: string | null }) {
       </div>
       {duo && (
         <p className="zacht klein strook-tip">
-          Twee labels per strook: dit label komt links, de rechterhelft blijft leeg.
+          Twee labels per strook: dit label komt bovenaan, het onderste blijft leeg.
           {ander && <> <button className="tekstknop klein" onClick={() => void print([ex.id, ander.id])}>Samen met {ander.naam} ({toonCode(ander.code)}) op één strook</button></>}
         </p>
       )}
