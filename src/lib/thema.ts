@@ -61,7 +61,15 @@ export const VORMEN = {
 } satisfies Record<string, Vorm>;
 export type VormNaam = keyof typeof VORMEN;
 
-/** Wat elk thema meebrengt: de standaardperiode en -kleur, en de versiering (wat zweeft, wat oplicht, belletjes of niet). */
+/** De drie logo's van een thema, zoals ons gewone logo: met tekst, tekst en logo, en enkel het logo (de eend). */
+export type LogoSoort = "logo" | "logo_groot" | "logo_eend";
+export const LOGO_SOORTEN: { id: LogoSoort; label: string; waar: string; gewoon: string }[] = [
+  { id: "logo", label: "Met tekst", waar: "Bovenaan en onderaan de pagina.", gewoon: "img/logo-woord.png" },
+  { id: "logo_groot", label: "Tekst en logo", waar: "Bij Over Bind'r.", gewoon: "img/logo.png" },
+  { id: "logo_eend", label: "Enkel logo", waar: "De eend: in de hoek, bij de zin bovenaan en als we live op een beurs staan.", gewoon: "img/eend.png" },
+];
+
+/** Wat elk thema meebrengt: de standaardperiode en -kleur, de versiering (wat zweeft, wat oplicht, belletjes of niet) en eventueel meegeleverde logo's. */
 export interface ThemaSoort {
   id: string;
   naam: string;
@@ -73,19 +81,33 @@ export interface ThemaSoort {
   bellen: boolean;
   /** Een voorbeeld voor de zin bovenaan (enkel als hint in het beheer). */
   hint: string;
+  /** Wat er bij "Nu live op …" staat, in de sfeer van het thema. */
+  live: string;
+  /** Logo's die met de app meekomen (pad onder public/): gelden zolang er geen eigen logo is. */
+  logos?: Partial<Record<LogoSoort, string>>;
   uitleg?: string;
 }
 
 export const THEMA_SOORTEN: ThemaSoort[] = [
-  { id: "halloween", naam: "Halloween", van: "10-15", tot: "11-01", kleur: "#e8772e", zweef: ["pompoen", "spookje", "vleermuis"], fonkel: ["ster", "vleermuis"], bellen: false, hint: "Fijne Halloween! Kom griezelen aan onze stand." },
-  { id: "kerst", naam: "Kerst en winter", van: "12-01", tot: "01-06", kleur: "#c8423b", zweef: ["sneeuwvlok", "kerstbal", "sneeuwvlok"], fonkel: ["ster", "sneeuwvlok"], bellen: false, hint: "Een binder als cadeau? Bestel op tijd voor kerst." },
-  { id: "valentijn", naam: "Valentijn", van: "02-07", tot: "02-14", kleur: "#e0607e", zweef: ["hartje"], fonkel: ["ster", "hartje"], bellen: true, hint: "Een binder met jullie naam, voor je lief." },
-  { id: "pasen", naam: "Pasen", van: "03-20", tot: "04-06", kleur: "#6fb08c", zweef: ["ei", "ei2"], fonkel: ["ster"], bellen: true, hint: "Vrolijk Pasen!", uitleg: "Pasen valt elk jaar anders: kijk de data na." },
-  { id: "zomer", naam: "Zomer", van: "07-01", tot: "08-31", kleur: "#f2a33a", zweef: ["zon"], fonkel: ["ster"], bellen: true, hint: "Zomerbeurzen: kom langs!" },
+  {
+    id: "halloween", naam: "Halloween", van: "10-15", tot: "11-01", kleur: "#e8772e", zweef: ["pompoen", "spookje", "vleermuis"], fonkel: ["ster", "vleermuis"], bellen: false,
+    hint: "Fijne Halloween! Kom griezelen aan onze stand.", live: "Kom griezelen aan onze stand!",
+    logos: { logo: "img/thema/halloween-tekst.webp", logo_groot: "img/thema/halloween-groot.webp", logo_eend: "img/thema/halloween-eend.webp" },
+  },
+  { id: "kerst", naam: "Kerst en winter", van: "12-01", tot: "01-06", kleur: "#c8423b", zweef: ["sneeuwvlok", "kerstbal", "sneeuwvlok"], fonkel: ["ster", "sneeuwvlok"], bellen: false, hint: "Een binder als cadeau? Bestel op tijd voor kerst.", live: "Kom gezellig langs aan onze stand!" },
+  { id: "valentijn", naam: "Valentijn", van: "02-07", tot: "02-14", kleur: "#e0607e", zweef: ["hartje"], fonkel: ["ster", "hartje"], bellen: true, hint: "Een binder met jullie naam, voor je lief.", live: "Kom langs, met of zonder lief!" },
+  { id: "pasen", naam: "Pasen", van: "03-20", tot: "04-06", kleur: "#6fb08c", zweef: ["ei", "ei2"], fonkel: ["ster"], bellen: true, hint: "Vrolijk Pasen!", live: "Kom eitjes zoeken aan onze stand!", uitleg: "Pasen valt elk jaar anders: kijk de data na." },
+  { id: "zomer", naam: "Zomer", van: "07-01", tot: "08-31", kleur: "#f2a33a", zweef: ["zon"], fonkel: ["ster"], bellen: true, hint: "Zomerbeurzen: kom langs!", live: "Kom langs, we staan in de zon!" },
 ];
 
 /** Zonder thema: belletjes en sterretjes zoals in ons logo. */
-export const GEWOON: Pick<ThemaSoort, "zweef" | "fonkel" | "bellen"> = { zweef: [], fonkel: ["ster"], bellen: true };
+export const GEWOON: Pick<ThemaSoort, "zweef" | "fonkel" | "bellen" | "live"> = { zweef: [], fonkel: ["ster"], bellen: true, live: "Kom ons bezoeken!" };
+
+/** Welk logo er staat: een eigen logo, anders een meegeleverd logo van de soort, anders null (ons gewone logo). */
+export function themaLogo(t: Thema | null, soort: ThemaSoort | undefined | null, welk: LogoSoort, eigen?: string | null): string | null {
+  if (!t) return null;
+  return eigen ?? soort?.logos?.[welk] ?? null;
+}
 
 export const soortVan = (id: string): ThemaSoort | undefined => THEMA_SOORTEN.find((s) => s.id === id);
 

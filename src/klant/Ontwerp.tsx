@@ -11,7 +11,7 @@ import {
 } from "./binder";
 
 const GROOTTES = ["4-pocket", "9-pocket", "12-pocket", "Weet ik nog niet"];
-const WENSEN = ["Mijn eigen tekening", "Een naam of tekst", "Mijn favoriete Pokémon", "Voor- én achterkant", "Als cadeau"];
+const WENSEN = ["Mijn eigen tekening", "Een naam of tekst", "Mijn favoriete TCG", "Voor- én achterkant", "Als cadeau"];
 const MAX_BEELDEN = 3;
 
 interface Props { demo: boolean; sleutel: string | null; ig: string; igLink: string; basis: string }

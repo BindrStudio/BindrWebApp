@@ -20,8 +20,15 @@ const ETALAGE = [
   ...["eend.png", "voorbeeld/roze.webp"].map((k, i) => ({ id: `bbbbbbbb-0000-4000-8000-00000000000${i}`, titel: null, link: `https://www.instagram.com/p/${i}/`, volgorde: -i, plek: "instagram", foto: beeld(k) })),
 ];
 
-/** Een nagebootste Supabase: `oud` = schema vóór 0.13; `fotoFout` = zoveel keer faalt een foto-aanvraag eerst (Infinity = altijd). */
-function server({ oud = false, fotoFout = 0 } = {}) {
+/** Vandaag en het uur in Brussel. */
+const brussel = () => {
+  const d = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Brussels" }).format(new Date());
+  const u = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Brussels", hour: "2-digit", hour12: false }).format(new Date())) % 24;
+  return { vandaag: d, uur: u };
+};
+
+/** Een nagebootste Supabase: `oud` = schema vóór 0.13; `fotoFout` = zoveel keer faalt een foto-aanvraag eerst (Infinity = altijd); `beurzen` = publieke_beurzen. */
+function server({ oud = false, schema013 = false, fotoFout = 0, beurzen = [] } = {}) {
   const log = [];
   let fouten = fotoFout;
   const json = (route, status, body) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
@@ -42,11 +49,16 @@ function server({ oud = false, fotoFout = 0 } = {}) {
     if (tabel === "publieke_themas") {
       if (oud) return json(r, 404, { message: "relation does not exist" });
       const thema = { id: "halloween", naam: "Halloween", van: "10-15", tot: "11-01", aan: "aan", kleur: "#e8772e", tekst: "Fijne Halloween!" };
+      if (select === "logo,logo_groot,logo_eend") {
+        if (schema013) return json(r, 400, { code: "42703", message: "column publieke_themas.logo_groot does not exist" });
+        return json(r, 200, [{ logo: LOGO, logo_groot: null, logo_eend: null }]);
+      }
       if (select === "logo") return json(r, 200, [{ logo: LOGO }]);
       assert.ok(!select.includes("logo"), "de lijst van de thema's zonder logo's");
       return json(r, 200, [thema]);
     }
     if (tabel === "publieke_instellingen") return json(r, 200, [{ sleutel: "instagram", waarde: "bindr.test" }]);
+    if (tabel === "publieke_beurzen") return json(r, 200, beurzen);
     return json(r, 200, []); // vitrine, artikelen, beurzen: leeg
   };
   return { log, route };
@@ -77,7 +89,8 @@ function server({ oud = false, fotoFout = 0 } = {}) {
     assert.ok(fotoAanvragen.length >= 3, "na de fout opnieuw, dan de rest");
     assert.match(await page.locator(".thema-band").innerText(), /Fijne Halloween/);
     await page.waitForFunction(() => document.querySelector(".klant-merk img")?.getAttribute("src")?.startsWith("data:image/png"));
-    assert.ok(log.some((l) => /publieke_themas\?select=logo&id=eq\.halloween/.test(decodeURIComponent(l))), "het logo apart, enkel van het thema van vandaag");
+    assert.ok(log.some((l) => /publieke_themas\?select=logo,logo_groot,logo_eend&id=eq\.halloween/.test(decodeURIComponent(l))), "de logo's apart, enkel van het thema van vandaag");
+    assert.match(await page.locator(".over-logo").getAttribute("src"), /img\/thema\/halloween-groot\.webp$/, "geen eigen 'tekst en logo': het meegeleverde");
     // De Instagram-strook: de foto's pas als ze in de buurt komt.
     assert.ok(!log.some((l) => decodeURIComponent(l).includes("bbbbbbbb")), "nog geen Instagram-foto's");
     await page.locator(".insta").scrollIntoViewIfNeeded();
@@ -111,7 +124,40 @@ function server({ oud = false, fotoFout = 0 } = {}) {
     await ctx.close();
   }
 
-  // 4. Een thema vooraf bekijken dat niet bestaat: gewoon de site.
+  // 4. Nu live op een beurs (gestart in de kassa): bovenaan de start, met de route; na het einduur niet meer.
+  globalThis.laatsteStap = "nu live";
+  console.log("· nu live op een beurs");
+  {
+    const { vandaag, uur } = brussel();
+    const { ctx, page } = await open({ beurzen: [{ naam: "Beurs Gent", datum: vandaag, locatie: "ICC Gent", uren: "00:00–23:59", link: null, bezig: true }] });
+    await page.locator(".live").waitFor();
+    assert.match(await page.locator(".live").innerText(), /Nu live op Beurs Gent[\s\S]*ICC Gent · tot 23:59[\s\S]*Kom griezelen/);
+    assert.match(await page.locator(".live a.live-route").getAttribute("href"), /google\.com\/maps.*ICC/);
+    assert.ok(await page.locator(".live-beeld.eend img").isVisible(), "de eend van het thema");
+    assert.match(await page.locator(".ticket-nog").innerText(), /Nu live/);
+    await page.screenshot({ path: path.join(SHOTS, "k4-live.png") });
+    await ctx.close();
+    if (uur >= 1) {
+      const voorbij = await open({ beurzen: [{ naam: "Beurs Gent", datum: vandaag, locatie: "ICC Gent", uren: "00:00–00:01", link: null, bezig: true }] });
+      await voorbij.page.locator(".ticket").waitFor();
+      assert.equal(await voorbij.page.locator(".live").count(), 0, "na het einduur (en een half uur) niet meer live");
+      await voorbij.ctx.close();
+    }
+    const gepland = await open({ beurzen: [{ naam: "Beurs Gent", datum: vandaag, locatie: "ICC Gent", uren: null, link: null, bezig: false }] });
+    await gepland.page.locator(".ticket").waitFor();
+    assert.equal(await gepland.page.locator(".live").count(), 0, "gepland maar nog niet gestart: niet live");
+    await gepland.ctx.close();
+  }
+
+  // 5. Schema 0.13 (nog geen drie logo's): opnieuw met enkel het logo.
+  globalThis.laatsteStap = "schema 0.13";
+  {
+    const { ctx, page } = await open({ schema013: true });
+    await page.waitForFunction(() => document.querySelector(".klant-merk img")?.getAttribute("src")?.startsWith("data:image/png"));
+    await ctx.close();
+  }
+
+  // 6. Een thema vooraf bekijken dat niet bestaat: gewoon de site.
   globalThis.laatsteStap = "onbekend thema";
   {
     const { ctx, page } = await open({}, "?thema=bestaatniet");

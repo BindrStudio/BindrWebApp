@@ -190,6 +190,9 @@ async function doorloop(ctx, page, motor, naam, opties) {
     const d = JSON.parse(localStorage.getItem("bindr-demo-v1"));
     d.etalage = etalage;
     d.themas = [{ id: "halloween", naam: "Halloween", van: "10-15", tot: "11-01", aan: "aan", kleur: "#e8772e", tekst: "Fijne Halloween! Kom griezelen aan onze stand." }];
+    // En we staan nu op een beurs (gestart in de kassa): "Nu live" bovenaan, het pilletje in de balk op de andere pagina's.
+    const vandaag = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Brussels" }).format(new Date());
+    d.beurzen = [...(d.beurzen || []), { id: "b-live", naam: "Pokémon & TCG-beurs Sint-Niklaas", datum: vandaag, locatie: "Stadsfeestzaal, Sint-Niklaas", uren: "00:00–23:59", status: "actief", omgeving_id: null }];
     localStorage.setItem("bindr-demo-v1", JSON.stringify(d));
   }, [[...vooraan, ...insta]]);
   await page.goto(BASIS + "?demo=1");
@@ -199,7 +202,7 @@ async function doorloop(ctx, page, motor, naam, opties) {
   await page.locator(".waaier-bolletjes button").nth(2).click();
   assert.equal(await page.locator(".waaier-bolletjes button").nth(2).getAttribute("aria-current"), "true", "bolletje 3 zet binder 3 vooraan");
   await nooitTeBreed("start", 6); // de waaier en de achtergrond bewegen: een paar keer kijken
-  assert.ok(await page.locator(".klant.thema-halloween .thema-band").isVisible(), "het thema met zijn zin");
+  assert.ok(await page.locator(".klant.thema-halloween .live").isVisible(), "nu live, in het thema");
   await foto("klant-start");
   // De Instagram-strook loopt over de hele breedte, maar de pagina mag nooit zijwaarts scrollen.
   await page.locator(".insta").scrollIntoViewIfNeeded();
@@ -209,6 +212,7 @@ async function doorloop(ctx, page, motor, naam, opties) {
   await page.evaluate(() => window.scrollTo(0, 0));
   await nav("Kaarten");
   await page.locator(".klant .tegel").first().waitFor();
+  assert.ok(await page.locator(".live-pil").isVisible(), "nu live: het pilletje in de balk");
   await nooitTeBreed("kaarten");
   await page.locator(".klant .tegel").first().click();
   await page.locator(".sheet").waitFor();

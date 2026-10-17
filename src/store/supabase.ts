@@ -6,14 +6,16 @@ import { schoonArtikel, schoonExemplaar } from "../lib/exemplaar";
 
 const SESSIE_SLEUTEL = "bindr-sessie-v1";
 const VERSIE_SLEUTEL = "bindr-schema-v1";
-/** De versie van het schema die alles van de app kan (supabase/schema.sql van 0.13). */
-export const NIEUWSTE = 12;
+/** De versie van het schema die alles van de app kan (supabase/schema.sql van 0.14). */
+export const NIEUWSTE = 13;
 /** Vanaf deze versie (schema 0.10): meer foto's per artikel, de etalage en aanvragen voor een eigen binder. */
 export const ETALAGE_VANAF = 9;
 /** Vanaf deze versie (schema 0.11): aanvragen met toploader ja/nee en afbeeldingen van het idee. */
 export const AANVRAAG_BEELDEN_VANAF = 10;
 /** Vanaf deze versie (schema 0.13): binders vooraan (plek in de etalage) en thema's. */
 export const THEMA_VANAF = 12;
+/** Vanaf deze versie (schema 0.14): drie logo's per thema. */
+export const LOGOS_VANAF = 13;
 /** Vanaf deze versie kan de boekhouding van 0.8 (kas, overschrijving, privé, aankoopfoto's …) naar de server. */
 export const BOEKHOUDING_VANAF = 7;
 const PAGINA = 1000;
@@ -196,7 +198,7 @@ export class SupabaseBackend implements Backend {
   /** True als de database nog het schema van fase 1 heeft (geen beurzen en transacties). */
   schemaOud = false;
 
-  /** 12 = binders vooraan, Instagram-strook en thema's (0.13), 10 = aanvragen met toploader en afbeeldingen, wettelijke gegevens (0.11), 9 = etalage, meer foto's per artikel en aanvragen (0.10), 8 = beurzen met uren en link, artikels zichtbaar per stuk (0.9), 7 = inbreng van kaarten die al in de app staan (0.8), 6 = aankoopfoto's en privé (0.7), 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
+  /** 13 = drie logo's per thema, "nu live" (0.14), 12 = binders vooraan, Instagram-strook en thema's (0.13), 10 = aanvragen met toploader en afbeeldingen, wettelijke gegevens (0.11), 9 = etalage, meer foto's per artikel en aanvragen (0.10), 8 = beurzen met uren en link, artikels zichtbaar per stuk (0.9), 7 = inbreng van kaarten die al in de app staan (0.8), 6 = aankoopfoto's en privé (0.7), 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
   versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v >= 2 && v <= NIEUWSTE ? v : null; })();
 
   private async zekerVersie() {
@@ -230,7 +232,7 @@ export class SupabaseBackend implements Backend {
         if (e instanceof Fout && (e.status === 400 || e.status === 404)) return false; // onbekende kolom of tabel
         throw e;
       });
-      // Vanaf 0.8 zegt de database zelf welke versie ze heeft (schema_versie: 8 = 0.8, 9 = 0.9, 10 = 0.10, 11 = 0.11, 13 = 0.13).
+      // Vanaf 0.8 zegt de database zelf welke versie ze heeft (schema_versie: 8 = 0.8, 9 = 0.9, 10 = 0.10, 11 = 0.11, 13 = 0.13, 14 = 0.14).
       const schema = await this.vraag<number>("GET", "rpc/schema_versie").then((n) => Number(n) || 0, (e) => {
         if (e instanceof Fout && (e.status === 400 || e.status === 404)) return 0;
         throw e;
@@ -626,14 +628,17 @@ export class SupabaseBackend implements Backend {
   async laadThemas(): Promise<Thema[]> {
     await this.zekerVersie();
     if ((this.versie ?? 0) < THEMA_VANAF) return [];
-    return this.vraag<Thema[]>("GET", "themas?select=id,naam,van,tot,aan,kleur,tekst,logo&order=id.asc");
+    const meer = (this.versie ?? 0) >= LOGOS_VANAF ? ",logo_groot,logo_eend" : "";
+    return this.vraag<Thema[]>("GET", `themas?select=id,naam,van,tot,aan,kleur,tekst,logo${meer}&order=id.asc`);
   }
 
   async bewaarThema(t: Thema) {
     await this.vraagNieuw("Een thema", THEMA_VANAF);
-    const { id, naam, van, tot, aan, kleur, tekst, logo } = t;
-    // Upsert: enkel de velden die meegaan worden aangepast; zonder logo blijft het logo op de server staan.
-    await this.vraag("POST", "themas?on_conflict=id", [{ id, naam, van, tot, aan, kleur: kleur ?? null, tekst: tekst ?? null, ...(logo !== undefined ? { logo } : {}), gewijzigd_op: new Date().toISOString() }],
+    if (t.logo_groot !== undefined || t.logo_eend !== undefined) await this.vraagNieuw("Meer logo's bij een thema", LOGOS_VANAF);
+    const { id, naam, van, tot, aan, kleur, tekst } = t;
+    // Upsert: enkel de velden die meegaan worden aangepast; een logo dat niet meegaat (undefined) blijft op de server staan.
+    const logos = Object.fromEntries((["logo", "logo_groot", "logo_eend"] as const).filter((k) => t[k] !== undefined).map((k) => [k, t[k]]));
+    await this.vraag("POST", "themas?on_conflict=id", [{ id, naam, van, tot, aan, kleur: kleur ?? null, tekst: tekst ?? null, ...logos, gewijzigd_op: new Date().toISOString() }],
       { Prefer: "resolution=merge-duplicates,return=minimal" });
   }
 

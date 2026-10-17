@@ -2,7 +2,7 @@
 // logo, een kleur, versiering in de achtergrond en een korte zin, elk jaar in dezelfde periode (of met de hand aan).
 import { useEffect, useRef, useState } from "react";
 import { bewaarThema, kanThema, laadThemas, meld, SCHEMA_013, sluit, themaLijst, useApp } from "../state";
-import { actiefThema, maandDag, maandDagMooi, nieuwThema, THEMA_SOORTEN, veiligeKleur, VORMEN, type ThemaSoort } from "../lib/thema";
+import { actiefThema, LOGO_SOORTEN, maandDag, maandDagMooi, nieuwThema, THEMA_SOORTEN, veiligeKleur, VORMEN, type LogoSoort, type ThemaSoort } from "../lib/thema";
 import type { Thema, ThemaAan } from "../types";
 import { vandaag } from "../lib/format";
 import { veiligeFoto, verkleinUitgeknipt } from "../lib/eigenfoto";
@@ -45,15 +45,16 @@ export function ThemaSheet() {
           <ul className="thema-lijst">
             {THEMA_SOORTEN.map((s) => {
               const t = lijst.find((x) => x.id === s.id);
-              const logo = veiligeFoto(t?.logo);
+              const eigen = !!t && LOGO_SOORTEN.some((l) => veiligeFoto(t[l.id]));
+              const eend = veiligeFoto(t?.logo_eend) ?? s.logos?.logo_eend;
               const status = !t ? "Nog niet klaargezet" : t.aan === "uit" ? "Uit" : t.aan === "aan" ? "Staat aan" : `Elk jaar ${maandDagMooi(t.van)} – ${maandDagMooi(t.tot)}`;
               return (
                 <li key={s.id}>
                   <button className="thema-rij" onClick={() => setBewerk(s.id)} style={{ ["--thema" as string]: veiligeKleur(t?.kleur) ?? s.kleur }}>
-                    <span className="thema-vormpje"><VormSvg vorm={VORMEN[s.zweef[0] ?? "ster"]} /></span>
+                    <span className="thema-vormpje">{eend ? <img src={eend} alt="" /> : <VormSvg vorm={VORMEN[s.zweef[0] ?? "ster"]} />}</span>
                     <span className="thema-rij-tekst">
                       <strong>{s.naam}</strong>
-                      <span>{status}{t && logo ? " · eigen logo" : ""}</span>
+                      <span>{status}{eigen ? " · eigen logo's" : s.logos ? " · logo's klaar" : ""}</span>
                     </span>
                     {t && nu?.id === t.id && <span className="thema-live">Nu</span>}
                     <Icoon naam="chevron" maat={18} className="thema-pijl" />
@@ -70,30 +71,42 @@ export function ThemaSheet() {
 
 function ThemaBewerk({ soort, bewaard, demo, onTerug }: { soort: ThemaSoort; bewaard: Thema | null; demo: boolean; onTerug: () => void }) {
   const [v, setV] = useState<Thema>(() => ({ ...nieuwThema(soort), ...bewaard }));
-  const [logoNieuw, setLogoNieuw] = useState(false); // enkel een nieuw of gewist logo gaat (opnieuw) naar de server
-  const [bezig, setBezig] = useState(false);
+  // Enkel een nieuw of gewist logo gaat (opnieuw) naar de server; de rest blijft daar staan.
+  const [logoNieuw, setLogoNieuw] = useState<Set<LogoSoort>>(new Set());
+  const [bezig, setBezig] = useState<LogoSoort | null>(null);
+  const [kies, setKies] = useState<LogoSoort>("logo");
   const invoer = useRef<HTMLInputElement>(null);
   const kleur = veiligeKleur(v.kleur) ?? soort.kleur;
-  const logo = veiligeFoto(v.logo);
-  const gewijzigd = logoNieuw || !bewaard || (["van", "tot", "aan", "kleur", "tekst"] as const).some((k) => (v[k] ?? null) !== (bewaard[k] ?? null));
+  const gewijzigd = logoNieuw.size > 0 || !bewaard || (["van", "tot", "aan", "kleur", "tekst"] as const).some((k) => (v[k] ?? null) !== (bewaard[k] ?? null));
+  /** Welk beeld er voor dit logo op de site staat, en van waar het komt. */
+  const bron = (k: LogoSoort): { src: string; van: "eigen" | "mee" | "gewoon" } => {
+    const eigen = veiligeFoto(v[k]);
+    if (eigen) return { src: eigen, van: "eigen" };
+    const mee = soort.logos?.[k];
+    return mee ? { src: mee, van: "mee" } : { src: LOGO_SOORTEN.find((l) => l.id === k)!.gewoon, van: "gewoon" };
+  };
 
   const kiesLogo = async (f: File | undefined) => {
     if (!f) return;
-    setBezig(true);
+    const k = kies;
+    setBezig(k);
     try {
-      const { url, doorzichtig } = await verkleinUitgeknipt(f, 600, 390_000);
-      setV((x) => ({ ...x, logo: url }));
-      setLogoNieuw(true);
-      if (!doorzichtig) meld("Dit logo heeft een achtergrond. Een PNG zonder achtergrond staat mooier bovenaan.", "info", undefined, 6000);
+      // Een logo staat hoogstens zo'n 300 px breed op de site (bij Over Bind'r): 800 px is scherp genoeg.
+      const { url, doorzichtig, weggehaald } = await verkleinUitgeknipt(f, 800, 390_000);
+      setV((x) => ({ ...x, [k]: url }));
+      setLogoNieuw((n) => new Set(n).add(k));
+      if (weggehaald) meld("De achtergrond is weggehaald en de lege rand eraf.", "info", undefined, 4000);
+      else if (!doorzichtig) meld("Dit logo heeft een achtergrond die we niet konden weghalen. Een PNG zonder achtergrond staat mooier.", "info", undefined, 6000);
     } catch (e) {
       meld(e instanceof Error ? e.message : String(e), "fout");
     } finally {
-      setBezig(false);
+      setBezig(null);
     }
   };
   const bewaar = () => {
-    bewaarThema({ ...v, kleur: veiligeKleur(v.kleur), logo: logoNieuw ? v.logo ?? null : undefined });
-    setLogoNieuw(false);
+    const logos = Object.fromEntries(LOGO_SOORTEN.map(({ id }) => [id, logoNieuw.has(id) ? v[id] ?? null : undefined]));
+    bewaarThema({ ...v, kleur: veiligeKleur(v.kleur), ...logos });
+    setLogoNieuw(new Set());
     meld(v.aan === "uit" ? `${soort.naam} staat klaar (uit)` : v.aan === "aan" ? `${soort.naam} staat nu op de site` : `${soort.naam} komt elk jaar van ${maandDagMooi(v.van)} tot ${maandDagMooi(v.tot)}`);
     onTerug();
   };
@@ -104,9 +117,12 @@ function ThemaBewerk({ soort, bewaard, demo, onTerug }: { soort: ThemaSoort; bew
 
       <div className="thema-proef" style={{ ["--thema" as string]: kleur }} aria-label="Zo ziet het eruit">
         <div className="thema-proef-balk">
-          <img src={logo ?? "img/logo-woord.png"} alt="" />
+          <img src={bron("logo").src} alt="" />
         </div>
-        {v.tekst?.trim() && <p className="thema-proef-zin">{v.tekst}</p>}
+        <p className="thema-proef-zin">
+          <img src={bron("logo_eend").src} alt="" />
+          <span>{v.tekst?.trim() || soort.hint}</span>
+        </p>
         <div className="thema-proef-vormen">
           {[...soort.zweef, ...soort.fonkel].slice(0, 5).map((n, i) => <VormSvg key={i} vorm={VORMEN[n]} className={`v${i}`} />)}
         </div>
@@ -128,14 +144,35 @@ function ThemaBewerk({ soort, bewaard, demo, onTerug }: { soort: ThemaSoort; bew
             </p>
           </div>
         )}
-        <Veld label="Logo" hint="Een PNG zonder achtergrond, zoals ons gewone logo (bv. met een pompoen of een kerstmuts erbij).">
-          <div className="knoppenrij">
-            <button className="knop zacht" disabled={bezig} onClick={() => invoer.current?.click()}><Icoon naam="foto" maat={18} /> {bezig ? "Bezig…" : logo ? "Ander logo" : "Eigen logo kiezen"}</button>
-            {logo && <button className="tekstknop" onClick={() => { setV({ ...v, logo: null }); setLogoNieuw(true); }}>Gewone logo</button>}
-          </div>
-        </Veld>
+        <div className="veld">
+          <span className="veld-label">Logo's</span>
+          <span className="veld-hint">Drie versies, zoals ons gewone logo. Heeft het een vlakke achtergrond (zoals crème), dan halen we die zelf weg.</span>
+          <ul className="thema-logos">
+            {LOGO_SOORTEN.map((l) => {
+              const b = bron(l.id);
+              return (
+                <li key={l.id} className="thema-logo-item">
+                  <span className={`thema-logo-beeld ${l.id}`}><img src={b.src} alt="" /></span>
+                  <span className="thema-logo-tekst">
+                    <strong>{l.label}</strong>
+                    <span>{l.waar}</span>
+                    <em>{b.van === "eigen" ? "Eigen logo" : b.van === "mee" ? "Meegeleverd met de app" : "Nu ons gewone logo"}</em>
+                  </span>
+                  <span className="thema-logo-knoppen">
+                    <button className="knop klein zacht" disabled={!!bezig} onClick={() => { setKies(l.id); invoer.current?.click(); }}>
+                      {bezig === l.id ? "Bezig…" : b.van === "eigen" ? "Ander" : "Kiezen"}
+                    </button>
+                    {b.van === "eigen" && (
+                      <button className="tekstknop klein" onClick={() => { setV({ ...v, [l.id]: null }); setLogoNieuw((n) => new Set(n).add(l.id)); }}>Weg</button>
+                    )}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
         <input ref={invoer} type="file" accept="image/png,image/webp,image/*" hidden onChange={(e) => { void kiesLogo(e.target.files?.[0]); e.target.value = ""; }} />
-        <Veld label="Kleur" hint="Voor de gloed achter de binders en de zin bovenaan.">
+        <Veld label="Kleur" hint="Voor de gloed achter de binders, de zin bovenaan en Nu live op de beurs.">
           <div className="thema-kleur">
             <input type="color" value={kleur} onChange={(e) => setV({ ...v, kleur: e.target.value })} aria-label="Kleur" />
             {kleur !== soort.kleur && <button className="tekstknop" onClick={() => setV({ ...v, kleur: soort.kleur })}>Standaardkleur</button>}
@@ -147,7 +184,7 @@ function ThemaBewerk({ soort, bewaard, demo, onTerug }: { soort: ThemaSoort; bew
         <a className="knop zacht" href={proefUrl(soort.id, demo)} target="_blank" rel="noreferrer"><Icoon naam="oog" maat={18} /> Bekijk op de site{gewijzigd ? " (na bewaren)" : ""}</a>
       </div>
       <div className="sheet-actie">
-        <button className="knop groot" disabled={!gewijzigd || bezig} onClick={bewaar}>Bewaar</button>
+        <button className="knop groot" disabled={!gewijzigd || !!bezig} onClick={bewaar}>Bewaar</button>
       </div>
     </Sheet>
   );

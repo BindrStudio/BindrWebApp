@@ -597,6 +597,18 @@ function fouten(page) {
   await sheet().getByLabel(/Startbedrag in de cashkoffer/).fill("100");
   await sheet().getByRole("button", { name: "Beurs starten" }).click();
   await wacht(200);
+  {
+    // Klanten zien dat we nu op een beurs staan: bovenaan de start, en een pilletje op de andere pagina's.
+    const k = await ctx.newPage();
+    await k.goto(BASIS + "?demo=1");
+    await k.locator(".live").waitFor();
+    assert.match(await k.locator(".live").innerText(), /Nu live op Avondmarkt[\s\S]*Kom ons bezoeken/);
+    assert.equal(await k.locator(".live-pil").count(), 0, "op de start enkel de grote melding");
+    await k.screenshot({ path: path.join(SHOTS, "17b-klant-live.png") });
+    await k.locator(".klant-nav.onder a", { hasText: "Kaarten" }).click();
+    await k.locator(".live-pil").waitFor();
+    await k.close();
+  }
   await page.getByRole("button", { name: "Kas", exact: true }).click();
   await sheet().getByRole("button", { name: "Wissel via SumUp" }).click();
   await sheet().getByLabel("Bedrag").fill("50");
@@ -966,6 +978,21 @@ function fouten(page) {
   await page.locator(".profiel-tegel", { hasText: "Thema" }).click();
   await sheet().locator(".thema-rij", { hasText: "Halloween" }).click();
   await sheet().getByRole("button", { name: "Nu aan", exact: true }).click();
+  assert.equal(await sheet().locator(".thema-logo-item", { hasText: "Meegeleverd met de app" }).count(), 3, "de drie Halloween-logo's komen mee");
+  // Een eigen logo op een crème achtergrond (een JPEG): de achtergrond gaat eraf, de lege rand ook.
+  await sheet().locator(".thema-logo-item", { hasText: "Met tekst" }).getByRole("button", { name: "Kiezen" }).click();
+  await sheet().locator('input[type="file"]').setInputFiles(path.resolve(__dirname, "../data/logo-op-creme.jpg"));
+  await page.getByText("De achtergrond is weggehaald").waitFor();
+  const eigenLogo = sheet().locator(".thema-logo-item", { hasText: "Met tekst" }).locator("img");
+  assert.match(await eigenLogo.getAttribute("src"), /^data:image\/(webp|png);/);
+  const hoek = await eigenLogo.evaluate(async (img) => {
+    await img.decode();
+    const c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const x = c.getContext("2d"); x.drawImage(img, 0, 0);
+    return { alfa: x.getImageData(1, 1, 1, 1).data[3], w: img.naturalWidth, h: img.naturalHeight };
+  });
+  assert.equal(hoek.alfa, 0, "de hoek is doorzichtig");
+  assert.ok(hoek.w / hoek.h > 1.5, `bijgeknipt tot het logo (${hoek.w}×${hoek.h}, het origineel is vierkant)`);
   await sheet().getByLabel("Zin bovenaan (optioneel)").fill("Fijne Halloween! Kom griezelen aan onze stand.");
   await foto("14h-thema");
   await sheet().getByRole("button", { name: "Bewaar" }).click();
@@ -985,6 +1012,9 @@ function fouten(page) {
   // Het thema: de zin bovenaan, de versiering in de achtergrond.
   assert.match(await klant2.locator(".thema-band").innerText(), /Fijne Halloween/);
   assert.equal(await klant2.locator(".klant.thema-halloween").count(), 1);
+  assert.match(await klant2.locator(".klant-merk img").getAttribute("src"), /^data:image\//, "ons eigen logo bovenaan");
+  assert.match(await klant2.locator(".over-logo").getAttribute("src"), /img\/thema\/halloween-groot\.webp$/, "tekst en logo: meegeleverd");
+  assert.match(await klant2.locator(".thema-band img").getAttribute("src"), /img\/thema\/halloween-eend\.webp$/, "de eend van Halloween bij de zin");
   assert.ok(await klant2.locator(".sfeer .zweef").count() >= 6, "pompoenen, spookjes en vleermuizen");
   // De Instagram-strook loopt, het nieuwste eerst, en linkt naar het bericht.
   await klant2.locator(".insta").scrollIntoViewIfNeeded();

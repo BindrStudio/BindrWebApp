@@ -259,7 +259,8 @@ export class DemoBackend implements Backend {
 
   async bewaarThema(t: Thema) {
     const oud = (this.data.themas ?? []).find((x) => x.id === t.id);
-    const nieuw: Thema = { ...oud, ...t, logo: t.logo !== undefined ? t.logo : oud?.logo ?? null };
+    const nieuw: Thema = { ...oud, ...t };
+    for (const k of ["logo", "logo_groot", "logo_eend"] as const) nieuw[k] = t[k] !== undefined ? t[k] : oud?.[k] ?? null;
     this.data.themas = [...(this.data.themas ?? []).filter((x) => x.id !== t.id), nieuw];
     this.bewaar();
   }

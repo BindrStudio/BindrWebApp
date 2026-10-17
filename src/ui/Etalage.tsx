@@ -17,7 +17,7 @@ const TEKST: Record<EtalagePlek, { titel: string; max: number; uitleg: string; l
     max: 12,
     uitleg: "De binders bovenaan de startpagina, in de waaier die om de paar seconden draait. Gebruik foto's zonder achtergrond: dan zweven ze echt over de pagina.",
     leeg: "Nog geen binders. Zolang hier niets staat, tonen we voorbeeldbinders.",
-    tip: "Zonder achtergrond op een iPhone: open de foto, hou de binder ingedrukt tot hij loskomt en kies Deel › Bewaar afbeelding. Die nieuwe foto kies je hier. Recht van voren staat het mooist.",
+    tip: "Zonder achtergrond op een iPhone: open de foto, hou de binder ingedrukt tot hij loskomt en kies Deel › Bewaar afbeelding. Die nieuwe foto kies je hier. Een foto op een vlakke achtergrond (een wit blad) knipt de app zelf uit. Recht van voren staat het mooist.",
     link: "Link (optioneel)",
     titelVeld: "Naam (niet zichtbaar)",
     toegevoegd: (n) => (n === 1 ? "Binder vooraan gezet" : `${n} binders vooraan gezet`),
@@ -47,11 +47,13 @@ export function EtalageSheet({ plek }: { plek: EtalagePlek }) {
     if (!bestanden?.length) return;
     setBezig(true);
     try {
-      let n = 0, metAchtergrond = 0;
+      let n = 0, metAchtergrond = 0, weggehaald = 0;
       for (const f of Array.from(bestanden).slice(0, t.max - (lijst?.length ?? 0))) {
         if (plek === "voorpagina") {
-          const { url, doorzichtig } = await verkleinUitgeknipt(f);
-          if (!doorzichtig) metAchtergrond++;
+          const r = await verkleinUitgeknipt(f);
+          if (!r.doorzichtig) metAchtergrond++;
+          if (r.weggehaald) weggehaald++;
+          const url = r.url;
           voegEtalagefotoToe(nieuweEtalagefoto(url, plek));
         } else {
           voegEtalagefotoToe(nieuweEtalagefoto(await verkleinFoto(f, 480), plek)); // de tegels zijn hoogstens 188 px breed
@@ -59,6 +61,7 @@ export function EtalageSheet({ plek }: { plek: EtalagePlek }) {
         n++;
       }
       if (metAchtergrond) meld(`${metAchtergrond === 1 ? "Die foto heeft" : `${metAchtergrond} foto's hebben`} nog een achtergrond. Ze staan vooraan, maar zonder achtergrond is het mooier.`, "info", undefined, 7000);
+      else if (weggehaald) meld(`${t.toegevoegd(n)}. ${weggehaald === 1 ? "Een vlakke achtergrond is" : "Vlakke achtergronden zijn"} weggehaald.`, "info", undefined, 5000);
       else if (n) meld(t.toegevoegd(n));
     } catch (e) {
       meld(e instanceof Error ? e.message : String(e), "fout");

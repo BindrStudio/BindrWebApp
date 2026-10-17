@@ -258,7 +258,9 @@ export interface Thema {
   aan: ThemaAan;
   kleur?: string | null; // '#rrggbb'
   tekst?: string | null;
-  logo?: string | null;  // data-URL; ontbreekt = niet geladen of geen eigen logo
+  logo?: string | null;        // "met tekst": bovenaan en onderaan de pagina (data-URL; ontbreekt = niet geladen, null = geen eigen)
+  logo_groot?: string | null;  // "tekst en logo": bij Over Bind'r (schema 0.14)
+  logo_eend?: string | null;   // "enkel logo": de eend (in de hoek, bij de zin bovenaan, als we live op een beurs staan) (schema 0.14)
 }
 
 export type AanvraagStatus = "nieuw" | "bekeken" | "beantwoord" | "gesloten";

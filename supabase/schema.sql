@@ -1,4 +1,4 @@
--- Bind'r Stock & Beurs App — databaseschema (versie 0.13: binders vooraan zonder achtergrond, een Instagram-strook en thema's per seizoen)
+-- Bind'r Stock & Beurs App — databaseschema (versie 0.14: drie logo's per thema, "nu live" op de klantenpagina)
 --
 -- Uitvoeren: Supabase-dashboard › SQL Editor › New query › dit hele bestand plakken › Run.
 -- Het script mag gerust een tweede keer lopen; het overschrijft geen gegevens.
@@ -424,6 +424,15 @@ alter table public.themas add constraint themas_check check (
   and (kleur is null or kleur ~ '^#[0-9a-fA-F]{6}$')
   and (tekst is null or length(tekst) <= 120)
   and (logo is null or (length(logo) <= 400000 and logo ~ '^data:image/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$'))
+);
+
+-- 0.14: drie logo's per thema, zoals ons gewone logo: met tekst (logo), tekst en logo (logo_groot) en enkel het logo (logo_eend).
+alter table public.themas add column if not exists logo_groot text;
+alter table public.themas add column if not exists logo_eend text;
+alter table public.themas drop constraint if exists themas_logos_check;
+alter table public.themas add constraint themas_logos_check check (
+  (logo_groot is null or (length(logo_groot) <= 400000 and logo_groot ~ '^data:image/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$'))
+  and (logo_eend is null or (length(logo_eend) <= 400000 and logo_eend ~ '^data:image/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$'))
 );
 
 -- ── Triggers: gewijzigd_op bijhouden en elke wijziging loggen ────────────────
@@ -1008,12 +1017,12 @@ revoke all on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid)
 grant execute on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid),
   public.los_conflict_op(uuid, uuid, uuid), public.aanvaard_conflict(uuid, text), public.markeer_prijzen(uuid, jsonb) to authenticated;
 
--- Welke versie van dit schema draait er? De app vraagt het na het inloggen (0.8 = 8, 0.9 = 9, 0.10 = 10, 0.11 = 11, 0.13 = 13).
+-- Welke versie van dit schema draait er? De app vraagt het na het inloggen (0.8 = 8, 0.9 = 9, 0.10 = 10, 0.11 = 11, 0.13 = 13, 0.14 = 14).
 create or replace function public.schema_versie()
 returns integer
 language sql
 stable
-as $$ select 13 $$;
+as $$ select 14 $$;
 revoke all on function public.schema_versie() from public, anon;
 grant execute on function public.schema_versie() to authenticated;
 
@@ -1069,7 +1078,7 @@ create view public.publieke_etalage as
 -- rekent zelf uit welk thema vandaag geldt en haalt enkel dat logo op. Niets geheims: een logo, een kleur en een zin.
 drop view if exists public.publieke_themas;
 create view public.publieke_themas as
-  select id, naam, van, tot, aan, kleur, tekst, logo
+  select id, naam, van, tot, aan, kleur, tekst, logo, logo_groot, logo_eend
     from public.themas;
 
 -- Instellingen die de klantenpagina nodig heeft: Instagram en Facebook, de sleutel om aanvragen te mailen en de
@@ -1079,14 +1088,15 @@ create or replace view public.publieke_instellingen as
     from public.instellingen
    where sleutel in ('instagram', 'catalogus_tekst', 'aanvraag_sleutel', 'facebook', 'bedrijf_publiek');
 
--- Komende beurzen ("kom langs op onze stand"), met uren en de website van de beurs.
+-- Komende beurzen ("kom langs op onze stand"), met uren en de website van de beurs. bezig = we staan er nu (de beurs
+-- is gestart in de kassa): de klantenpagina toont dan "nu live". Staan twee omgevingen op dezelfde beurs, dan telt bezig.
 drop view if exists public.publieke_beurzen;
 create view public.publieke_beurzen as
-  select distinct on (datum, lower(naam)) naam, datum, locatie, uren, link
+  select distinct on (datum, lower(naam)) naam, datum, locatie, uren, link, status = 'actief' as bezig
     from public.beurzen
    where status in ('gepland', 'actief') and datum >= current_date
      and omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten)
-   order by datum, lower(naam);
+   order by datum, lower(naam), (status = 'actief') desc;
 
 -- Enkel lezen. Supabase geeft nieuwe weergaven standaard alle rechten aan anon én authenticated;
 -- een eenvoudige weergave is aanpasbaar en loopt met de rechten van de eigenaar (zonder RLS),

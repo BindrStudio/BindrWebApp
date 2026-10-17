@@ -5,7 +5,7 @@
 // Onderaan op de gsm een balk met icoontjes om ertussen te wisselen; op een groot scherm staan ze bovenaan.
 // Ze toont enkel de publieke weergaven in Supabase. Niets uit de beheer-app wordt hier geladen,
 // enkel config, types en kleine hulpfuncties.
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ToetsEvent, type PointerEvent as WijsEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent as ToetsEvent, type PointerEvent as WijsEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { BEHEER_PAD, FACEBOOK, INSTAGRAM, SUPABASE_KEY, SUPABASE_URL } from "../config";
 
@@ -13,7 +13,7 @@ import { BEHEER_PAD, FACEBOOK, INSTAGRAM, SUPABASE_KEY, SUPABASE_URL } from "../
 // Afbeeldingen en gegevens zoeken we relatief aan dit script (catalogus/app.js).
 const BASIS = new URL("../", import.meta.url).href;
 import { TALEN, type BedrijfPubliek, type Thema } from "../types";
-import { actiefThema, GEWOON, maandDag, soortVan, veiligeKleur, VORMEN, type ThemaSoort } from "../lib/thema";
+import { actiefThema, GEWOON, LOGO_SOORTEN, maandDag, soortVan, veiligeKleur, VORMEN, type LogoSoort, type ThemaSoort } from "../lib/thema";
 import { VormSvg } from "../gedeeld/Vorm";
 import { euro, vandaag as vandaagLokaal } from "../lib/format";
 import { kantel, kantelVrij } from "../lib/kantel";
@@ -76,7 +76,7 @@ interface Stuk extends Toonbaar {
   type?: string;                        // artikel: binder, sealed, 3d-print of andere
 }
 
-interface KomendeBeurs { naam: string; datum: string; locatie: string | null; uren?: string | null; link?: string | null }
+interface KomendeBeurs { naam: string; datum: string; locatie: string | null; uren?: string | null; link?: string | null; bezig?: boolean | null }
 /** Een foto op de startpagina: een binder vooraan (Profiel › Binders vooraan) of een bericht in de Instagram-strook. */
 interface EtalageRij { id: string; foto?: string | null; titel?: string | null; link?: string | null; volgorde?: number; plek?: string | null }
 interface EtalageFoto { id: string; src: string; titel: string | null; link: string | null; kaal?: boolean }
@@ -164,7 +164,7 @@ function laadDemo(): (Data & { etalage: Etalage }) | null {
     const vandaag = vandaagLokaal();
     const beurzen = ((d.beurzen ?? []) as (KomendeBeurs & { status: string; omgeving_id?: string | null })[])
       .filter((b) => (b.status === "gepland" || b.status === "actief") && b.datum >= vandaag && toon(b))
-      .map((b) => ({ naam: b.naam, datum: b.datum, locatie: b.locatie ?? null, uren: b.uren ?? null, link: b.link ?? null }))
+      .map((b) => ({ naam: b.naam, datum: b.datum, locatie: b.locatie ?? null, uren: b.uren ?? null, link: b.link ?? null, bezig: b.status === "actief" }))
       .sort((a, b) => a.datum.localeCompare(b.datum));
     const etalage = verdeel(((d.etalage ?? []) as (EtalageRij & { omgeving_id?: string | null })[]).filter(toon));
     const themas = Array.isArray(d.themas) ? d.themas as Thema[] : [];
@@ -303,16 +303,42 @@ function KlantPagina() {
     const lijst = data?.themas ?? [];
     return (proefThema ? lijst.find((t) => t.id === proefThema) : actiefThema(lijst, maandDag(vandaagLokaal()))) ?? null;
   }, [data?.themas, proefThema]);
-  const [themaLogo, setThemaLogo] = useState<string | null>(null);
+  // De eigen logo's van het thema (met tekst, tekst en logo, de eend) komen apart, enkel van het thema van vandaag.
+  // Een ouder schema (vóór 0.14) kent enkel het eerste: dan opnieuw met enkel dat.
+  const [eigenLogos, setEigenLogos] = useState<Partial<Record<LogoSoort, string | null>>>({});
   useEffect(() => {
-    setThemaLogo(null);
+    setEigenLogos({});
     if (!thema) return;
-    if (demo) { setThemaLogo(veiligeFoto(thema.logo)); return; }
-    haal<{ logo: string | null }[]>(`publieke_themas?select=logo&id=eq.${encodeURIComponent(thema.id)}`)
-      .then((r) => setThemaLogo(veiligeFoto(r[0]?.logo))).catch(() => undefined);
+    if (demo) { setEigenLogos({ logo: thema.logo, logo_groot: thema.logo_groot, logo_eend: thema.logo_eend }); return; }
+    const id = encodeURIComponent(thema.id);
+    haal<Partial<Record<LogoSoort, string | null>>[]>(`publieke_themas?select=logo,logo_groot,logo_eend&id=eq.${id}`)
+      .catch((e) => (e instanceof Error && e.message === "400" ? haal<Partial<Record<LogoSoort, string | null>>[]>(`publieke_themas?select=logo&id=eq.${id}`) : Promise.reject(e)))
+      .then((r) => setEigenLogos(r[0] ?? {})).catch(() => undefined);
   }, [thema?.id, demo]); // eslint-disable-line react-hooks/exhaustive-deps
   const soort: ThemaSoort | null = thema ? soortVan(thema.id) ?? null : null;
   const themaKleur = thema ? veiligeKleur(thema.kleur) ?? soort?.kleur ?? null : null;
+  // Welk logo waar staat: een eigen logo van het thema, anders een meegeleverd (Halloween), anders ons gewone logo.
+  const logos = useMemo(() => {
+    const uit = {} as Record<LogoSoort, { src: string; thema: boolean }>;
+    for (const l of LOGO_SOORTEN) {
+      const eigen = thema ? veiligeFoto(eigenLogos[l.id]) : null;
+      const mee = thema ? soort?.logos?.[l.id] : undefined;
+      uit[l.id] = eigen ? { src: eigen, thema: true } : mee ? { src: BASIS + mee, thema: true } : { src: BASIS + l.gewoon, thema: false };
+    }
+    return uit;
+  }, [thema, soort, eigenLogos]);
+
+  // Staan we nu op een beurs (gestart in de kassa, vandaag, nog niet voorbij het einduur)? Om de minuut opnieuw kijken.
+  const [minuut, setMinuut] = useState(0);
+  const live = useMemo(() => {
+    const vandaag = vandaagLokaal();
+    return (data?.beurzen ?? []).find((b) => b.bezig && b.datum === vandaag && !voorbij(b.uren)) ?? null;
+  }, [data?.beurzen, minuut]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!data?.beurzen.some((b) => b.bezig)) return;
+    const t = setInterval(() => setMinuut((m) => m + 1), 60000);
+    return () => clearInterval(t);
+  }, [data?.beurzen]);
 
   useEffect(() => {
     fetch(`${BASIS}data/sets.json`).then((r) => (r.ok ? r.json() : null)).then(setSets).catch(() => setSets(null));
@@ -364,12 +390,13 @@ function KlantPagina() {
   const routes = ROUTES.filter((r) => r.id === "start" || r.id === "kaarten" || r.id === "binders" || r.id === "ontwerp" || !data || telling[r.id as Plek] > 0);
 
   return (
+    <EendBeeld.Provider value={logos.logo_eend.src}>
     <div className={`klant route-${route}${balkWeg ? " balk-weg" : ""}${thema ? ` thema thema-${thema.id}` : ""}`}
       style={themaKleur ? ({ "--thema": themaKleur } as React.CSSProperties) : undefined}>
       <Sfeer soort={soort} />
-      <header className="klant-balk">
-        <a href="#" className="klant-merk" aria-label="Bind'r, naar de start">
-          <img src={themaLogo ?? `${BASIS}img/logo-woord.png`} alt="Bind'r" width={150} height={66} />
+      <header className={`klant-balk${live && route !== "start" ? " met-live" : ""}`}>
+        <a href="#" className={`klant-merk${logos.logo.thema ? " thema-logo" : ""}`} aria-label="Bind'r, naar de start">
+          <img src={logos.logo.src} alt="Bind'r" width={150} height={66} />
         </a>
         <nav className="klant-nav boven" aria-label="Catalogi">
           {routes.map((r) => (
@@ -377,6 +404,7 @@ function KlantPagina() {
           ))}
         </nav>
         <div className="klant-balk-rechts">
+          {live && route !== "start" && <a className="live-pil" href="#" aria-label={`Nu live op ${live.naam}`}><span className="live-stip" aria-hidden="true" /><span className="lang">Nu live</span><span className="kort">Live</span></a>}
           <a className="klant-ig-knop" href={igProfiel(ig)} target="_blank" rel="noreferrer" aria-label={`Instagram @${ig}`} title={`Instagram @${ig}`}>
             <IgIcoon />
           </a>
@@ -390,9 +418,10 @@ function KlantPagina() {
 
       <main className="klant-inhoud">
         {fout && <p className="klant-fout">{fout}</p>}
+        {live && route === "start" && <LiveBeurs beurs={live} soort={soort} eend={logos.logo_eend.thema ? logos.logo_eend.src : null} />}
         {route === "start" ? (
           <Start data={data} etalage={etalage} stukken={stukken} telling={telling} beurzen={beurzen} ig={ig} demo={!!demo} thema={thema} soort={soort}
-            proef={!!proefThema} onInsta={(ids) => void vulInsta(ids)} />
+            proef={!!proefThema} onInsta={(ids) => void vulInsta(ids)} logoGroot={logos.logo_groot.src} eend={logos.logo_eend.thema ? logos.logo_eend.src : null} live={!!live} />
         ) : route === "ontwerp" ? (
           <OntwerpPagina demo={!!demo} sleutel={data?.sleutel ?? null} ig={ig} igLink={igProfiel(ig)} basis={BASIS} />
         ) : route === "privacy" ? (
@@ -406,7 +435,7 @@ function KlantPagina() {
         )}
       </main>
 
-      <Voet ig={ig} fb={fb} b={bedrijf} logo={themaLogo} />
+      <Voet ig={ig} fb={fb} b={bedrijf} logo={logos.logo.src} />
 
       <nav className="klant-nav onder" aria-label="Catalogi">
         {routes.map((r) => (
@@ -417,6 +446,41 @@ function KlantPagina() {
       {open && <Detail g={open} beurzen={beurzen} sets={sets} demo={!!demo} onSluit={() => setOpen(null)} />}
       {data && route !== "ontwerp" && route !== "privacy" && route !== "voorwaarden" && <Eend ig={ig} verborgen={!!open || zoekFocus} />}
     </div>
+    </EendBeeld.Provider>
+  );
+}
+
+/** De eend (Enkel logo): ons gewone, of die van het thema. Overal waar de eend opduikt (de hoek, een lege catalogus). */
+const EendBeeld = createContext(`${BASIS}img/eend.png`);
+
+/** Het einduur van een beurs uit wat de beheerder schreef ("10:00–17:00", "10u-17u"); null als we het niet weten. */
+function einduur(uren: string | null | undefined): number | null {
+  const tijden = [...(uren ?? "").matchAll(/(\d{1,2})(?:\s*[:.hu]\s*(\d{2}))?/g)]
+    .map((m) => Number(m[1]) * 60 + Number(m[2] ?? 0)).filter((t) => t >= 0 && t <= 24 * 60);
+  return tijden.length >= 2 && tijden[tijden.length - 1] > tijden[0] ? tijden[tijden.length - 1] : null;
+}
+const uurMooi = (t: number) => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+/** Is het einduur (plus een half uur om op te ruimen) al voorbij, in Brussel? */
+function voorbij(uren: string | null | undefined): boolean {
+  const eind = einduur(uren);
+  if (eind == null) return false;
+  const [u, m] = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Brussels", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date()).split(":").map(Number);
+  return (u % 24) * 60 + m > eind + 30;
+}
+
+/** Nu live: we staan op een beurs (gestart in de kassa). Bovenaan de start, in de sfeer van het thema. */
+function LiveBeurs({ beurs, soort, eend }: { beurs: KomendeBeurs; soort: ThemaSoort | null; eend: string | null }) {
+  const eind = einduur(beurs.uren);
+  const waar = [beurs.locatie, eind != null ? `tot ${uurMooi(eind)}` : beurs.uren].filter(Boolean).join(" · ");
+  return (
+    <aside className="live" aria-label={`Nu live op ${beurs.naam}`}>
+      <span className={`live-beeld${eend ? " eend" : ""}`} aria-hidden="true">{eend ? <img src={eend} alt="" /> : <StandIcoon />}</span>
+      <span className="live-tekst">
+        <strong><span className="live-stip" aria-hidden="true" />Nu live op {beurs.naam}</strong>
+        <span>{waar ? `${waar}. ` : ""}{(soort ?? GEWOON).live}</span>
+      </span>
+      {beurs.locatie && <a className="knop klein live-route" href={routeLink(beurs.locatie)} target="_blank" rel="noreferrer">Route</a>}
+    </aside>
   );
 }
 
@@ -426,9 +490,9 @@ function KlantPagina() {
 const VOORBEELDEN = ["oceaanblauw", "geel", "rood", "roze", "paars"];
 const voorbeelden = (): EtalageFoto[] => VOORBEELDEN.map((k) => ({ id: `vb-${k}`, src: `${BASIS}img/voorbeeld/${k}.webp`, titel: null, link: "#binders", kaal: true }));
 
-function Start({ data, etalage, stukken, telling, beurzen, ig, demo, thema, soort, proef, onInsta }: {
+function Start({ data, etalage, stukken, telling, beurzen, ig, demo, thema, soort, proef, onInsta, logoGroot, eend, live }: {
   data: Data | null; etalage: Etalage | null; stukken: Stuk[]; telling: Record<Plek, number>; beurzen: KomendeBeurs[]; ig: string; demo: boolean;
-  thema: Thema | null; soort: ThemaSoort | null; proef: boolean; onInsta: (ids: string[]) => void;
+  thema: Thema | null; soort: ThemaSoort | null; proef: boolean; onInsta: (ids: string[]) => void; logoGroot: string; eend: string | null; live: boolean;
 }) {
   // Vooraan: uitgeknipte foto's van onze binders (Profiel › Binders vooraan). Zolang die er niet zijn: de voorbeeldbinders.
   // Nooit door elkaar; en zolang de foto's nog laden, een lege waaier (geen voorbeelden die dan plots verspringen).
@@ -444,16 +508,17 @@ function Start({ data, etalage, stukken, telling, beurzen, ig, demo, thema, soor
   const zin = thema?.tekst?.trim() || (proef && thema ? `Voorbeeld van het thema ${thema.naam}` : "");
   return (
     <>
-      {thema && zin && (
-        <p className="thema-band">
-          {soort && <VormSvg vorm={VORMEN[soort.zweef[0] ?? "ster"]} />}
+      {/* Staan we live op een beurs, dan zegt die melding (in de stijl van het thema) het al: geen tweede band. */}
+      {thema && zin && !live && (
+        <p className={`thema-band${eend ? " met-eend" : ""}`}>
+          {eend ? <img src={eend} alt="" /> : soort && <VormSvg vorm={VORMEN[soort.zweef[0] ?? "ster"]} />}
           <span>{zin}</span>
         </p>
       )}
       <section className="held" aria-labelledby="held-titel">
         <div className="held-tekst">
           <h1 id="held-titel">Binders die even uniek zijn als je collectie</h1>
-          <p>Custom binders voor Pokémon-verzamelaars, met de laser gegraveerd.{demo ? " (Voorbeeld met de demo.)" : ""}</p>
+          <p>Custom binders voor elke TCG: Pokémon, Lorcana, One Piece, Riftbound … of gewoon wat jij wilt. Met de laser gegraveerd.{demo ? " (Voorbeeld met de demo.)" : ""}</p>
           <div className="held-knoppen">
             <a className="knop" href="#binders">Bekijk de binders</a>
           </div>
@@ -487,11 +552,12 @@ function Start({ data, etalage, stukken, telling, beurzen, ig, demo, thema, soor
       {beurzen.length > 0 && <Beurzen beurzen={beurzen} ig={ig} geladen={!!data} />}
 
       <section className="over" aria-labelledby="over-titel">
+        <img className="over-logo" src={logoGroot} alt="" loading="lazy" decoding="async" />
         <div className="over-tekst">
           <h2 id="over-titel">Over Bind'r</h2>
-          <p>Een gewone kaartmap wordt bij ons een stuk van je collectie.</p>
+          <p>Een gewone kaartmap wordt bij ons een stuk van je collectie, voor welke kaarten je ook verzamelt.</p>
           <ul className="over-lijst">
-            <li><OntwerpIcoon /><span><strong>Eigen ontwerp.</strong> Elk artwork maken we zelf, geïnspireerd op Pokémon, sets en card art.</span></li>
+            <li><OntwerpIcoon /><span><strong>Eigen ontwerp.</strong> Elk artwork maken we zelf: voor Pokémon, Lorcana, One Piece, Riftbound of elke andere TCG, of helemaal naar jouw idee.</span></li>
             <li><LaserIcoon /><span><strong>Lasergravure.</strong> Het ontwerp gaat er met de laser in, op de voorkant of op voor- én achterkant.</span></li>
             <li><StandIcoon /><span><strong>Op de beurs.</strong> Aan onze stand verkopen we ook kaarten, slabs en sealed, en kopen en ruilen we kaarten.</span></li>
           </ul>
@@ -746,7 +812,9 @@ function Beurzen({ beurzen, ig, geladen }: { beurzen: KomendeBeurs[]; ig: string
               <span>{MAANDEN[dag(eerste.datum).getMonth()]}</span>
             </div>
             <div className="ticket-lijf">
-              <span className="ticket-nog">{nogTe(eerste.datum)}</span>
+              {eerste.bezig && eerste.datum === vandaagLokaal()
+                ? <span className="ticket-nog live-nu"><span className="live-stip" aria-hidden="true" />Nu live</span>
+                : <span className="ticket-nog">{nogTe(eerste.datum)}</span>}
               <h3>{eerste.naam}</h3>
               {eerste.locatie && <p className="ticket-regel"><PinIcoon />{eerste.locatie}</p>}
               {eerste.uren && <p className="ticket-regel"><KlokIcoon />{eerste.uren}</p>}
@@ -787,6 +855,7 @@ function Kaarten({ data, stukken, sets, f, zetF, onOpen, onZoekFocus }: {
   data: Data | null; stukken: Stuk[]; sets: SetInfo | null; f: KaartFilter; zetF: (f: KaartFilter) => void;
   onOpen: (g: Groep<Stuk>) => void; onZoekFocus: (x: boolean) => void;
 }) {
+  const eend = useContext(EendBeeld);
   const kaarten = useMemo(() => stukken.filter((s) => s.plek === "kaarten"), [stukken]);
   const zet = (w: Partial<KaartFilter>) => zetF({ ...f, ...w });
   const slabs = kaarten.filter((s) => s.soort === "slab").length;
@@ -881,7 +950,7 @@ function Kaarten({ data, stukken, sets, f, zetF, onOpen, onZoekFocus }: {
 
           {!groepen.length ? (
             <div className="klant-leeg">
-              <img src={`${BASIS}img/eend.png`} alt="" width={96} height={96} />
+              <img src={eend} alt="" width={96} height={96} />
               <p>{kaarten.length ? "Niets gevonden met deze filters. Haal er een weg:" : "Er staan nog geen kaarten online. Kom zeker eens kijken aan onze stand."}</p>
               {actief > 0 && (
                 <div className="actieve-filters">
@@ -933,6 +1002,7 @@ const PLEK_TEKST: Record<Exclude<Plek, "kaarten">, { titel: string; uitleg: stri
 function Artikels({ plek, data, stukken, beurzen, sets, onOpen }: {
   plek: Exclude<Plek, "kaarten">; data: Data | null; stukken: Stuk[]; beurzen: KomendeBeurs[]; sets: SetInfo | null; onOpen: (g: Groep<Stuk>) => void;
 }) {
+  const eend = useContext(EendBeeld);
   const t = PLEK_TEKST[plek];
   const groepen = useMemo(() => sorteer(
     groepeer(stukken.filter((s) => s.plek === plek), (s) => (s.bron === "artikel" ? `a|${s.id}` : groepSleutel(s))),
@@ -946,7 +1016,7 @@ function Artikels({ plek, data, stukken, beurzen, sets, onOpen }: {
       </header>
       {!data ? <LaadRaster /> : !groepen.length ? (
         <div className="klant-leeg">
-          <img src={`${BASIS}img/eend.png`} alt="" width={96} height={96} />
+          <img src={eend} alt="" width={96} height={96} />
           <p>{t.leeg}</p>
           {beurzen[0] && <p className="zacht">Volgende beurs: {beurzen[0].naam}, {datumMooi(beurzen[0].datum)}.</p>}
           <a className="knop zacht" href="#">Naar de start</a>
@@ -1190,7 +1260,7 @@ function Prijs({ p, groot = false }: { p: number; groot?: boolean }) {
 
 // ── Onderaan: Instagram en het logo ──────────────────────────────────────────
 
-function Voet({ ig, fb, b, logo }: { ig: string; fb: string | null; b: BedrijfPubliek | null; logo: string | null }) {
+function Voet({ ig, fb, b, logo }: { ig: string; fb: string | null; b: BedrijfPubliek | null; logo: string }) {
   const kbo = kboMooi(b?.kbo);
   return (
     <footer className="klant-voet">
@@ -1199,7 +1269,7 @@ function Voet({ ig, fb, b, logo }: { ig: string; fb: string | null; b: BedrijfPu
         {fb && <a className="sociaal-knop" href={fb} target="_blank" rel="noreferrer"><FbIcoon /> <span>Facebook<em>Bind'r</em></span></a>}
       </div>
       <p className="sociaal-tekst">Onze nieuwste binders, lasergravures en kaarten, en waar we binnenkort staan.</p>
-      <img src={logo ?? `${BASIS}img/logo-woord.png`} alt="Bind'r" className="voet-logo" width={120} height={53} />
+      <img src={logo} alt="Bind'r" className="voet-logo" width={120} height={53} />
       <p>Collectibles, crafts en 3D-prints</p>
       <div className="voet-wettelijk">
         <p>
@@ -1221,6 +1291,7 @@ function Voet({ ig, fb, b, logo }: { ig: string; fb: string | null; b: BedrijfPu
 const EEND_SLEUTEL = "bindr-eend-v1";
 
 function Eend({ ig, verborgen }: { ig: string; verborgen: boolean }) {
+  const eend = useContext(EendBeeld);
   const [toon, setToon] = useState(false);
   const [open, setOpen] = useState(true);
   const [weg, setWeg] = useState(() => {
@@ -1263,7 +1334,7 @@ function Eend({ ig, verborgen }: { ig: string; verborgen: boolean }) {
         </>
       )}
       <button className="eend-knop" onClick={() => setOpen(!open)} aria-label={open ? "Ballon dichtklappen" : "Wat zegt de eend?"}>
-        <img className="eend-beeld" src={`${BASIS}img/eend.png`} alt="" width={96} height={96} />
+        <img className="eend-beeld" src={eend} alt="" width={96} height={96} />
       </button>
     </aside>
   );

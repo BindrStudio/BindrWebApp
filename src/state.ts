@@ -1963,7 +1963,7 @@ export function themaLijst(): Thema[] | null {
   const wacht = wachtendeOps("thema");
   if (!themaCache && !wacht.length) return themaCache;
   const lijst = new Map((themaCache ?? []).map((t) => [t.id, t]));
-  for (const op of wacht) { const oud = lijst.get(op.t.id); lijst.set(op.t.id, { ...oud, ...op.t, logo: op.t.logo !== undefined ? op.t.logo : oud?.logo ?? null }); }
+  for (const op of wacht) lijst.set(op.t.id, metLogos(lijst.get(op.t.id), op.t));
   return [...lijst.values()];
 }
 
@@ -1981,14 +1981,23 @@ export async function laadThemas(): Promise<void> {
   }
 }
 
+const LOGOS = ["logo", "logo_groot", "logo_eend"] as const;
+/** Een thema bijwerken: een logo dat niet meekomt (undefined), blijft zoals het was. */
+function metLogos(oud: Thema | undefined, t: Thema): Thema {
+  const uit: Thema = { ...oud, ...t };
+  for (const k of LOGOS) uit[k] = t[k] !== undefined ? t[k] : oud?.[k] ?? null;
+  return uit;
+}
+
 /**
- * Een thema bewaren. Zonder `logo` (undefined) blijft het logo zoals het was, zodat een andere datum of kleur het
+ * Een thema bewaren. Zonder een logo (undefined) blijft dat logo zoals het was, zodat een andere datum of kleur het
  * logo niet opnieuw verstuurt. Staat het thema nog in de wachtrij (niet vooraan), dan passen we dat aan.
  */
 export function bewaarThema(t: Thema) {
   const schoon: Thema = {
     id: t.id, naam: t.naam.trim().slice(0, 40) || t.id, van: t.van, tot: t.tot, aan: t.aan,
-    kleur: t.kleur ?? null, tekst: t.tekst?.trim().slice(0, 120) || null, ...(t.logo !== undefined ? { logo: t.logo } : {}),
+    kleur: t.kleur ?? null, tekst: t.tekst?.trim().slice(0, 120) || null,
+    ...Object.fromEntries(LOGOS.filter((k) => t[k] !== undefined).map((k) => [k, t[k]])),
   };
   const i = rij.findIndex((x, j) => j > 0 && x.op.soort === "thema" && x.op.t.id === t.id);
   if (i > 0) {
@@ -1998,8 +2007,7 @@ export function bewaarThema(t: Thema) {
   } else {
     inRij({ soort: "thema", t: schoon });
   }
-  const oud = themaCache?.find((x) => x.id === t.id);
-  themaCache = [...(themaCache ?? []).filter((x) => x.id !== t.id), { ...oud, ...schoon, logo: schoon.logo !== undefined ? schoon.logo : oud?.logo ?? null }];
+  themaCache = [...(themaCache ?? []).filter((x) => x.id !== t.id), metLogos(themaCache?.find((x) => x.id === t.id), schoon)];
   zet({ fotoVersie: state.fotoVersie + 1 });
 }
 

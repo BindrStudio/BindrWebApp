@@ -46,3 +46,29 @@ test("soorten, datums en kleuren", () => {
   assert.equal(geldigeMaandDag("02-29"), true);
   assert.equal(geldigeMaandDag("2-9"), false);
 });
+
+test("achtergrond weg: enkel wat met de rand verbonden is, de crème binnen een omlijning blijft", async () => {
+  const { achtergrondWeg } = await import("../src/lib/eigenfoto");
+  // 40 × 40 crème, met een donkere ring (dikte 3) rond een crème binnenkant (zoals de letters van ons logo).
+  const w = 40, h = 40;
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const r = Math.hypot(x - 20, y - 20);
+    const ring = r >= 9 && r <= 12;
+    const i = (y * w + x) * 4;
+    const [cr, cg, cb] = ring ? [59, 42, 18] : [253, 244, 230 + ((x * 7 + y * 3) % 5)]; // een beetje ruis, zoals een JPEG
+    data[i] = cr; data[i + 1] = cg; data[i + 2] = cb; data[i + 3] = 255;
+  }
+  const beeld = { width: w, height: h, data } as unknown as ImageData;
+  assert.equal(achtergrondWeg(beeld), true);
+  const alfa = (x: number, y: number) => data[(y * w + x) * 4 + 3];
+  assert.equal(alfa(0, 0), 0, "de hoek is weg");
+  assert.equal(alfa(3, 20), 0, "de achtergrond naast de ring is weg");
+  assert.equal(alfa(20, 20), 255, "de crème binnen de ring blijft");
+  assert.equal(alfa(20, 10), 255, "de ring blijft");
+  // Een gewone foto (de rand is niet vlak): niets doen.
+  const foto = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < foto.length; i += 4) { foto[i] = (i * 13) % 255; foto[i + 1] = (i * 7) % 255; foto[i + 2] = (i * 3) % 255; foto[i + 3] = 255; }
+  assert.equal(achtergrondWeg({ width: w, height: h, data: foto } as unknown as ImageData), false);
+  assert.ok(foto.every((v, i) => i % 4 !== 3 || v === 255), "niets doorzichtig gemaakt");
+});
