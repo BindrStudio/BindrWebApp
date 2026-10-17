@@ -58,7 +58,7 @@ export function verkochteStukken(transacties: Transactie[], exemplaren: Exemplaa
     }
     if (t.soort !== "verkoop" && t.soort !== "ruil") continue;
     for (const r of t.regels) {
-      if (r.richting !== "uit") continue;
+      if (r.richting !== "uit" || r.extra) continue; // verzendkosten zijn geen product
       if (t.conflicten.some((c) => c.exemplaar_id && c.exemplaar_id === r.exemplaar_id)) continue;
       const e = r.exemplaar_id ? ex.get(r.exemplaar_id) : undefined;
       const a = r.artikel_id ? art.get(r.artikel_id) : undefined;

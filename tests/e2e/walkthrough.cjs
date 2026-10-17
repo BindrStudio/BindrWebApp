@@ -392,7 +392,7 @@ function fouten(page) {
   await wacht(200);
 
   // ── G. Uitzonderingen ──────────────────────────────────────────────────────
-  stap("G2: gewone verkoop (reserveren bestaat niet meer)");
+  stap("G2: gewone verkoop");
   await verkoop("XS7-6TS"); await afrekenen("cash"); await volgende();
   stap("G3: verkeerd gescand, ongedaan maken");
   await verkoop("C99-983"); await afrekenen("cash");
@@ -807,6 +807,136 @@ function fouten(page) {
   await foto("35b-zonder-aankoop");
   await page.keyboard.press("Escape"); await wacht(200);
 
+  // ── Reserveren, online verkopen met verzending, storecredit (0.16) ─────────
+  const bedrag = (t) => Number(String(t).replace(/[^\d,]/g, "").replace(",", "."));
+  stap("reserveren: Morpeko voor Lotte aan € 20; uit de catalogus, in de vault met een lint");
+  await tab("Scan");
+  await page.getByLabel("Code typen").fill("8VH-N7M");
+  await page.locator(".scan-item", { hasText: "8VH-N7M" }).waitFor();
+  await page.locator(".scan-item", { hasText: "8VH-N7M" }).locator(".scan-rij-knop").first().click();
+  await sheet().locator(".sheet-titel", { hasText: "8VH-N7M" }).waitFor();
+  await sheet().getByRole("button", { name: "Reserveren voor iemand" }).click();
+  await sheet().getByLabel("Voor wie?").fill("Lotte");
+  await sheet().getByLabel("Afgesproken prijs (€)").fill("20");
+  await sheet().getByRole("button", { name: "Reserveren", exact: true }).click();
+  await sheet().locator(".reservering-kaart", { hasText: "Gereserveerd voor Lotte" }).waitFor();
+  assert.match(await sheet().locator(".reservering-kaart").innerText(), /Afgesproken prijs €\s?20/);
+  await wacht(300);
+  await foto("36-gereserveerd");
+  await page.keyboard.press("Escape"); await wacht(200);
+  await tab("Vault");
+  await page.locator(".tegel.gereserveerd", { hasText: "Morpeko" }).waitFor();
+  assert.match(await page.locator(".tegel.gereserveerd .gereserveerd-lint").first().innerText(), /Gereserveerd · Lotte/);
+  await page.locator(".filterchip, .chip", { hasText: /^Gereserveerd 1$/ }).first().click();
+  await wacht(200);
+  assert.equal(await page.locator(".tegel").count(), 1, "filter: enkel de gereserveerde kaart");
+  await foto("36b-vault-gereserveerd");
+  await page.locator(".filterchip, .chip", { hasText: /^Gereserveerd 1$/ }).first().click();
+  {
+    const e = await page.evaluate(() => JSON.parse(localStorage.getItem("bindr-demo-v1")).exemplaren.find((x) => x.code.replace("-", "") === "8VHN7M"));
+    assert.deepEqual([e.opslag, e.status, e.reservering && e.reservering.voor, e.reservering && e.reservering.prijs], ["stockdoos", "in voorraad", "Lotte", 20], "uit de catalogus, in de vault, nog in voorraad");
+  }
+
+  stap("verkocht buiten een beurs: Morpeko aan Lotte via Instagram, opgestuurd (€ 5 verzending), per overschrijving");
+  await tab("Profiel");
+  await page.locator(".profiel-tegel", { hasText: "Verkocht buiten een beurs" }).click();
+  await page.getByText(/Zet wat je verkocht in het mandje/).waitFor();
+  await scan("8VH-N7M");
+  await sheet().getByRole("button", { name: /Verkopen aan Lotte/ }).click();
+  await page.getByText(/Gereserveerd voor Lotte: aan de afgesproken €\s?20/).waitFor();
+  await scanKlaar();
+  assert.equal(bedrag(await page.locator(".regel", { hasText: "Morpeko" }).locator(".prijs-knop strong").innerText()), 20, "aan de afgesproken prijs (het hartje van 22 doorstreept)");
+  await page.getByRole("button", { name: "Afrekenen" }).click();
+  assert.match(await sheet().locator(".waarschuwing").innerText(), /Morpeko is gereserveerd voor Lotte/);
+  await sheet().getByLabel("Klant (optioneel)").fill("Lotte (@lotte.kaarten)");
+  await sheet().getByPlaceholder("bv. 5,50").fill("5");
+  await sheet().getByRole("button", { name: "Aanrekenen" }).click();
+  await sheet().locator(".verzend-rij", { hasText: /€\s?5/ }).waitFor();
+  await sheet().locator(".afreken-netto", { hasText: /€\s?25/ }).waitFor();
+  await sheet().getByRole("button", { name: "Bank", exact: true }).click();
+  await wacht(300);
+  await foto("37-online-verkoop");
+  await geenHorizontaleScroll("online verkoop");
+  await sheet().getByRole("button", { name: "Betaald", exact: true }).click();
+  await page.locator(".gelukt").waitFor();
+  assert.match(await page.locator(".gelukt-bedrag").innerText(), /€\s?25(,00)? ontvangen[\s\S]*per overschrijving/);
+  await volgende();
+
+  stap("storecredit: Jonas brengt kaarten van € 30 binnen en krijgt € 25 tegoed");
+  await tab("Profiel");
+  await page.locator(".profiel-tegel", { hasText: "Ingekocht buiten een beurs" }).click();
+  await sheet().getByRole("button", { name: "Handmatig", exact: true }).click();
+  await sheet().getByRole("button", { name: "Handmatig invullen" }).click();
+  await sheet().getByLabel("Naam (Engels)").fill("Jonas Pikachu");
+  await sheet().getByLabel("Marktwaarde").fill("30");
+  await sheet().getByRole("button", { name: /^Toevoegen/ }).click();
+  await wacht(150);
+  await sheet().getByRole("button", { name: /^Klaar/ }).last().click();
+  await bied(25);
+  await page.getByRole("button", { name: "Afrekenen" }).click();
+  await sheet().getByRole("button", { name: "Tegoed", exact: true }).click();
+  await sheet().getByText(/tegoedbon van €\s?25/).waitFor();
+  await sheet().getByLabel(/Naam/).first().fill("Jonas");
+  await wacht(300);
+  await foto("38-tegoed-geven");
+  await sheet().getByRole("button", { name: "Uitbetaald" }).click();
+  await page.locator(".gelukt .tegoedbon-gelukt").waitFor();
+  const bon = (await page.locator(".tegoedbon-gelukt strong").innerText()).trim();
+  assert.match(bon, /^TG-\d{4}-[0-9A-F]{6}$/);
+  assert.match(await page.locator(".tegoedbon-gelukt").innerText(), /€\s?25(,00)? voor Jonas/);
+  assert.match(await page.locator(".gelukt-bedrag").innerText(), /geen geld uit de koffer/);
+  await foto("38b-tegoedbon");
+  await volgende();
+  await tab("Profiel");
+  assert.match(await page.locator(".profiel-tegel", { hasText: "Tegoeden" }).innerText(), /€\s?25/);
+
+  stap("storecredit: later koopt Jonas Raichu en Skarmory (€ 25) met zijn bon");
+  await page.locator(".profiel-tegel", { hasText: "Verkocht buiten een beurs" }).click();
+  await verkoop("FMX-FSF", "EN9-7HJ");
+  assert.equal(bedrag(await wijGeven().locator(".totaal-rij .prijs-knop strong").innerText()), 25);
+  await page.getByRole("button", { name: "Afrekenen" }).click();
+  await sheet().getByRole("button", { name: "Tegoed", exact: true }).click();
+  await sheet().locator(".bon-rij", { hasText: "Jonas" }).click();
+  await sheet().getByText(/€\s?25(,00)? met tegoed/).waitFor();
+  await foto("39-betalen-met-tegoed");
+  await sheet().getByRole("button", { name: "Betaald", exact: true }).click();
+  await page.locator(".gelukt").waitFor();
+  assert.match(await page.locator(".gelukt").innerText(), /betaald met tegoed; de bon is op[\s\S]*volledig met tegoed/);
+  await volgende();
+  await tab("Profiel");
+  await page.locator(".profiel-tegel", { hasText: "Tegoeden" }).click();
+  await sheet().locator(".tegoed-totaal", { hasText: /€\s?0(,00)?/ }).waitFor();
+  await sheet().getByRole("button", { name: /Ook de opgebruikte bonnen \(1\)/ }).click();
+  await sheet().locator(".bon-rij", { hasText: "Jonas" }).click();
+  assert.match(await sheet().locator(".bon-detail").innerText(), /bon gekregen voor kaarten[\s\S]*\+ €\s?25[\s\S]*gebruikt[\s\S]*− €\s?25/);
+  await foto("40-tegoeden");
+  await geenHorizontaleScroll("tegoeden");
+  await page.keyboard.press("Escape"); await wacht(200);
+
+  stap("boekhouding: verzendkosten en de tegoedbon elk op een eigen lijn, alles klopt nog");
+  await page.locator(".profiel-tegel", { hasText: "Boekhouding" }).click();
+  await sheet().locator(".boek-dag").first().click();
+  await sheet().locator(".dexxter-lijnen li").first().waitFor();
+  const lijnen = await sheet().locator(".dexxter-lijnen").innerText();
+  assert.match(lijnen, /Verkoop betaald met tegoedbon[\s\S]*€\s?25/);
+  assert.match(lijnen, /Verzendkosten aangerekend[\s\S]*€\s?5/);
+  {
+    const d = await sheet().locator(".dexxter-lijnen li strong").allInnerTexts();
+    const som = d.reduce((x, t) => x + bedrag(t) * (/[−-]/.test(t) ? -1 : 1), 0);
+    const ontv = bedrag(await sheet().locator(".afsluit-rij.totaal", { hasText: "Ontvangsten" }).locator("strong").innerText());
+    assert.ok(Math.abs(som - ontv) < 0.01, `Dexxter-lijnen (${som}) = ontvangsten (${ontv})`);
+  }
+  await foto("41-dag-tegoed-verzending");
+  await page.keyboard.press("Escape"); await wacht(200);
+  await sheet().getByRole("button", { name: "Aankoop", exact: true }).click();
+  await sheet().locator(".boek-dag").first().click();
+  await sheet().locator(".dexxter-lijnen li", { hasText: "Aankoop kaarten tegen tegoedbon" }).waitFor();
+  await page.keyboard.press("Escape"); await wacht(200);
+  await sheet().getByRole("button", { name: "Hoe?", exact: true }).click();
+  await sheet().getByRole("heading", { name: "Tegoedbon (storecredit)" }).waitFor();
+  await sheet().getByRole("heading", { name: /Online verkocht/ }).waitFor();
+  await page.keyboard.press("Escape"); await wacht(200);
+
   // ── Klantenpagina ──────────────────────────────────────────────────────────
   stap("klantencatalogus (demo)");
   const klant = await ctx.newPage();
@@ -983,7 +1113,7 @@ function fouten(page) {
   await foto("14g-binders-vooraan");
   await page.keyboard.press("Escape"); await wacht(200);
   // Instagram: de strook boven de beurzen (het nieuwste bovenaan).
-  await page.locator(".profiel-tegel", { hasText: "Instagram" }).click();
+  await page.locator(".profiel-tegel.instagram").click();
   // Automatisch van Instagram: de feed van Behold instellen en testen (de feed is nagebootst).
   const jaar = new Date().getFullYear();
   await page.route("https://feeds.behold.so/**", (r) => r.fulfill({

@@ -15,6 +15,7 @@ export interface Instellingen {
   labelDonkerte?: number;     // 1–5 zoals in de Niimbot-app (standaard 3), enkel op dit toestel
   labelVerschuiving?: number; // mm langs de doorvoer: + = lager op het label, − = hoger (stappen van 0,5)
   labelTrager?: boolean;      // trager versturen als labels leeg of half uit de printer komen
+  labelPrinter?: "niimbot" | "fichero"; // welke labelprinter dit toestel gebruikt (standaard de Niimbot)
   inkoopPct: number; // wat we bieden bij inkoop, in % van de marktwaarde
   ruilPct: number;   // wat een kaart van de klant waard is bij ruil, in %
   toonMarge?: boolean; // aankoopprijs en marge zichtbaar in de kassa (enkel op deze gsm)
@@ -52,9 +53,19 @@ export interface Voorstel {
   gem7: number | null;
   gem30: number | null;
   factor: number;
-  nakijken: boolean;
+  nakijken: boolean;    // = er staat minstens één reden in `waarom`
+  waarom: Nakijken[];
   holo: boolean;
 }
+
+/** Waarom een voorstel nakijken vraagt (de uitleg staat in NAKIJKEN). */
+export type Nakijken = "spreiding" | "gedeeld" | "nieuw" | "vintage";
+export const NAKIJKEN: Record<Nakijken, string> = {
+  spreiding: "Trend, 7- en 30-dagengemiddelde liggen ver uit elkaar.",
+  gedeeld: "Cardmarket geeft één prijs voor meer dan één versie van deze kaart: kijk na of het de juiste is.",
+  nieuw: "Nieuwe set: de prijzen zakken de eerste weken nog snel.",
+  vintage: "Oude kaart: de gids telt ook mindere condities mee, in NM ligt de prijs vaak hoger.",
+};
 
 export function prijsVoor(regel: PrijsRegel | undefined, holo: boolean) {
   if (!regel) return null;
@@ -68,21 +79,25 @@ export function prijsVoor(regel: PrijsRegel | undefined, holo: boolean) {
 /**
  * De marktprijs van een kaart in NM: de middelste van trend, gemiddelde van 7 dagen en van 30 dagen.
  * Ontbreekt er een van de drie (bv. geen verkoop deze week), dan zoals vroeger: de trend, anders het
- * gemiddelde van 30 of 7 dagen, anders de laagste prijs.
+ * gemiddelde van 30 of 7 dagen, anders de laagste prijs. Nooit onder de laagste prijs van de gids:
+ * goedkoper dan het goedkoopste aanbod is geen marktprijs.
  *
  * Waarom de middelste: één cijfer alleen laat zich meetrekken. De trend reageert traag op een nieuwe set
  * en springt bij weinig verkopen; het weekgemiddelde springt bij één dure verkoop; het maandgemiddelde
- * hinkt achterop. De middelste van de drie negeert de uitschieter. Vergeleken met wat de kaarten in
- * oktober 2026 echt te koop stonden in de EU (de laagste NM-prijs bij TCGHeart, 812 kaarten van € 2 of
- * meer) zat de trend alleen voor 61% binnen 15%, de middelste van de drie voor 66%; bij de nieuwe set
- * 30th Celebration 25% tegenover 82% (zie README, Prijzen).
+ * hinkt achterop. De middelste van de drie negeert de uitschieter. Vergeleken met wat de kaarten echt
+ * te koop staan in België en Nederland (de laagste NM-prijs bij TCGHeart, oktober 2026, 812 kaarten van
+ * € 2 of meer) zat de trend alleen voor 61% binnen 15%, de middelste van de drie voor 66%; bij de nieuwe
+ * set 30th Celebration 25% tegenover 82%. Waar het minder goed lukt (nieuwe sets, oude kaarten, een
+ * prijs die bij meer kaarten hoort) zegt voorstelVoor "nakijken" met de reden (zie README, Prijzen).
  */
 export function marktprijs(p: { trend: number | null; gem7?: number | null; gem30: number | null; laagste: number | null }): number | null {
   const ok = (x: number | null | undefined): x is number => x != null && x > 0;
   const gem7 = p.gem7 ?? null;
-  if (ok(p.trend) && ok(gem7) && ok(p.gem30)) return [p.trend, gem7, p.gem30].sort((a, b) => a - b)[1];
-  for (const x of [p.trend, p.gem30, gem7, p.laagste]) if (ok(x)) return x;
-  return null;
+  let m: number | null = null;
+  if (ok(p.trend) && ok(gem7) && ok(p.gem30)) m = [p.trend, gem7, p.gem30].sort((a, b) => a - b)[1];
+  else for (const x of [p.trend, p.gem30, gem7, p.laagste]) if (ok(x)) { m = x; break; }
+  if (m != null && ok(p.laagste) && p.laagste > m) m = p.laagste;
+  return m;
 }
 
 /** Liggen trend, 7- en 30-dagengemiddelde zo ver uit elkaar dat de beheerder beter zelf kijkt? */
@@ -103,8 +118,16 @@ export function voorstelVoor(ex: Exemplaar, gids: Prijsgids | null, inst: Instel
   const referentie = marktprijs(p);
   if (referentie == null) return null;
   const factor = inst.conditiefactoren[ex.conditie || "NM"] ?? 1;
-  const nakijken = teNakijken(p, inst.nakijkenAfwijking);
-  return { voorstel: rondEuro(referentie * factor), referentie, trend: p.trend, laagste: p.laagste, gem7: p.gem7, gem30: p.gem30, factor, nakijken, holo: p.holo };
+  const id = ex.cardmarket_id;
+  const waarom: Nakijken[] = [];
+  if (teNakijken(p, inst.nakijkenAfwijking)) waarom.push("spreiding");
+  if (gids.gedeeld?.has(id)) waarom.push("gedeeld");
+  if (gids.nieuw?.has(id)) waarom.push("nieuw");
+  if (gids.vintage?.has(id)) waarom.push("vintage");
+  return {
+    voorstel: rondEuro(referentie * factor), referentie, trend: p.trend, laagste: p.laagste, gem7: p.gem7, gem30: p.gem30,
+    factor, nakijken: waarom.length > 0, waarom, holo: p.holo,
+  };
 }
 
 export function drempelVoor(hartje: number, inst: Instellingen): number {

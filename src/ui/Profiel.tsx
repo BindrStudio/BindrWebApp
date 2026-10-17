@@ -3,12 +3,14 @@
 // achter het tandwiel rechtsboven.
 import { useMemo, useState } from "react";
 import {
-  actieveBeurs, actieveOmgeving, beheerThema, boekhoudingAan, inkoopThuis, logUit, openAanvragen, openArtikelen, openBoekhouding, openEtalage, openHistoriek, openInzichten, openOverzicht, openPrive, openThema,
+  actieveBeurs, actieveOmgeving, beheerThema, boekhoudingAan, inkoopThuis, logUit, openAanvragen, openArtikelen, openBoekhouding, openEtalage, openHistoriek, openInzichten, openOverzicht, openPrive, openTegoeden, openThema,
+  verkoopThuis,
   synchroniseer, useApp,
 } from "../state";
 import { PinKiezen, WachtwoordWijzigen } from "./Login";
 import { datumKort, euro } from "../lib/format";
 import { dagontvangsten } from "../lib/boekhouding";
+import { openBonnen } from "../lib/tegoed";
 import { Icoon, Sheet } from "./common";
 import { BeurzenSheet, geplandeBeurzen } from "./Beurs";
 
@@ -80,6 +82,16 @@ export function Profiel() {
           <Icoon naam="inkoop" maat={26} />
           <strong>Ingekocht buiten een beurs</strong>
           <span>{beurs ? `Kan niet zolang ${beurs.naam} loopt: koop in via de kassa, of sluit eerst de beurs af` : "Facebook, Vinted, een rommelmarkt: kaarten, prijs, foto of screenshot"}</span>
+        </button>
+        <button className={`profiel-tegel verkoop-thuis${beurs ? " uit" : ""}`} onClick={verkoopThuis} aria-disabled={!!beurs}>
+          <Icoon naam="verzending" maat={26} />
+          <strong>Verkocht buiten een beurs</strong>
+          <span>{beurs ? `Kan niet zolang ${beurs.naam} loopt` : "Via Instagram, opgestuurd of afgehaald: met verzendkosten en de dag van betaling"}</span>
+        </button>
+        <button className="profiel-tegel tegoeden" onClick={openTegoeden}>
+          <Icoon naam="tegoed" maat={26} />
+          <strong>Tegoeden</strong>
+          <span>{(() => { const o = openBonnen(s.transacties); const t = o.reduce((x, b) => x + b.rest, 0); return o.length ? `${euro(Math.round(t * 100) / 100)} open op ${o.length} ${o.length === 1 ? "bon" : "bonnen"}` : "Storecredit: een bon in plaats van geld"; })()}</span>
         </button>
         {boekhouding && (
           <button className="profiel-tegel prive" onClick={openPrive}>

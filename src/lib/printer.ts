@@ -1,7 +1,9 @@
-// Labels printen op een Niimbot-printer via Web Bluetooth, met de open-source
-// driver in public/vendor/niimbot.js (MIT, github.com/iscarelli/niimbot-web-bluetooth).
+// Labels printen via Web Bluetooth: een Niimbot (B1, B1 Pro) met de open-source driver in
+// public/vendor/niimbot.js (MIT, github.com/iscarelli/niimbot-web-bluetooth), of de Fichero
+// van Action (30 × 14 mm) met onze eigen driver in lib/fichero.ts. Welke: per toestel.
 import type { Exemplaar } from "../types";
-import { laadLabelLogo, labelDataUrl, maatVoor, randtestDataUrl } from "./label";
+import { FICHERO_MAAT, laadLabelLogo, labelDataUrl, maatVoor, randtestDataUrl, tekenLabel, tekenRandtest, type LabelMaat } from "./label";
+import { ficheroDonkerte, ficheroSchuif, naarRaster, ontkoppelFichero, printFichero, verbindFichero } from "./fichero";
 
 interface Model {
   label: string;
@@ -31,11 +33,18 @@ declare global {
 interface Size { w_px: number; h_px: number; dpi: number; margin?: number; offset_y_px?: number }
 interface PrintOpties { model: Model; size: Size; density: number; offsetY: number; onProgress?: (s: string) => void }
 
+export type PrinterSoort = "niimbot" | "fichero";
+export const PRINTERS: { id: PrinterSoort; label: string; rol: string }[] = [
+  { id: "niimbot", label: "Niimbot", rol: "B1, B1 Pro" },
+  { id: "fichero", label: "Fichero", rol: "Action" },
+];
+
 /** Afstelling per toestel (Labels › Proeflabel en afstellen). */
 export interface Afstelling {
-  donkerte?: number;     // 1–5, standaard 3
-  verschuiving?: number; // mm: + = lager op het label, − = hoger
+  donkerte?: number;     // 1–5, standaard 3 (Fichero: 1–2 licht, 3 normaal, 4–5 donker)
+  verschuiving?: number; // mm: + = lager op het label, − = hoger (Fichero: + = naar rechts)
   trager?: boolean;      // gepaced versturen met een langere pauze
+  printer?: PrinterSoort; // standaard de Niimbot
 }
 
 export const VERSCHUIVING_MAX = 3; // mm, in beide richtingen
@@ -69,10 +78,10 @@ export function printOpties(sleutel: string, labelId: string, a: Afstelling = {}
   return { size, density, offsetY };
 }
 
-let verbonden: { sleutel: string; label: string } | null = null;
+let verbonden: { soort: PrinterSoort; sleutel: string; label: string } | null = null;
 
-export function bluetoothMogelijk(): boolean {
-  return !!(navigator as Navigator & { bluetooth?: unknown }).bluetooth && !!window.Niimbot;
+export function bluetoothMogelijk(soort: PrinterSoort = "niimbot"): boolean {
+  return !!(navigator as Navigator & { bluetooth?: unknown }).bluetooth && (soort === "fichero" || !!window.Niimbot);
 }
 
 export function isIphone(): boolean {
@@ -84,27 +93,42 @@ export function printerNaam(): string | null {
 }
 
 /** Verbindt met de printer (opent de Bluetooth-keuze) en herkent het model. */
-export async function verbindPrinter(): Promise<string> {
-  if (!window.Niimbot) throw new Error("Printerdriver niet geladen");
-  if (!bluetoothMogelijk()) {
+export async function verbindPrinter(soort: PrinterSoort = "niimbot"): Promise<string> {
+  if (verbonden && verbonden.soort !== soort) await ontkoppelPrinter();
+  if (!bluetoothMogelijk(soort)) {
+    if (soort === "niimbot" && !window.Niimbot) throw new Error("Printerdriver niet geladen");
     throw new Error(isIphone()
       ? "Op iPhone kan geen enkele gewone browser (ook Chrome niet) Bluetooth gebruiken. Open de app in de gratis browser Bluefy om te printen."
       : "Deze browser kan geen Bluetooth gebruiken. Gebruik Chrome.");
   }
-  const info = await window.Niimbot.identify({ name_prefixes: ["B1"] });
+  if (soort === "fichero") {
+    const naam = await verbindFichero();
+    // FICHERO_5836 → "Fichero 5836"; een andere naam (D11s_…) tussen haakjes.
+    const nr = /^fichero[_\s-]*(\w*)$/i.exec(naam)?.[1];
+    verbonden = { soort, sleutel: "fichero", label: nr !== undefined ? `Fichero ${nr}`.trim() : `Fichero (${naam})` };
+    return verbonden.label;
+  }
+  const info = await window.Niimbot!.identify({ name_prefixes: ["B1"] });
   const sleutel = info && info.modelId === 4096 ? "b1" : "b1pro";
-  verbonden = { sleutel, label: info?.label || MODELLEN[sleutel].label };
+  verbonden = { soort, sleutel, label: info?.label || MODELLEN[sleutel].label };
   return verbonden.label;
 }
 
 export async function ontkoppelPrinter() {
-  try { await window.Niimbot?.disconnect(); } catch { /* al los */ }
+  if (verbonden?.soort === "fichero") await ontkoppelFichero();
+  else { try { await window.Niimbot?.disconnect(); } catch { /* al los */ } }
   verbonden = null;
+}
+
+/** Labels naar de Fichero: liggend getekend, gedraaid en zwart-wit gemaakt in lib/fichero. */
+async function stuurFichero(maak: (maat: LabelMaat) => HTMLCanvasElement[], a: Afstelling, voortgang?: (s: string) => void) {
+  const schuif = ficheroSchuif(a.verschuiving ?? 0);
+  const rasters = maak(FICHERO_MAAT).map((c) => naarRaster(c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data, c.width, c.height, schuif));
+  await printFichero(rasters, ficheroDonkerte(a.donkerte ?? 3), a.trager ? 40 : 20, voortgang);
 }
 
 /** Stuurt beelden in één opdracht naar de printer, met de afstelling van dit toestel. */
 async function stuur(maak: (maat: ReturnType<typeof maatVoor>) => string[], labelId: string, a: Afstelling, voortgang?: (s: string) => void) {
-  if (!verbonden) await verbindPrinter();
   const n = window.Niimbot!;
   const sleutel = verbonden!.sleutel;
   const { maat } = printMaat(sleutel, labelId);
@@ -118,19 +142,29 @@ async function stuur(maak: (maat: ReturnType<typeof maatVoor>) => string[], labe
   else await n.printBatch(urls, opts);
 }
 
+/** Verbindt met de gekozen printer als dat nog niet gebeurde (of als het een andere is). */
+async function zorgVoor(soort: PrinterSoort) {
+  if (!verbonden || verbonden.soort !== soort) await verbindPrinter(soort);
+}
+
 /** Print één of meerdere labels in één opdracht. */
 export async function printLabels(exemplaren: Exemplaar[], labelId: string, voortgang?: (s: string) => void, a: Afstelling = {}): Promise<void> {
   if (!exemplaren.length) return;
+  await zorgVoor(a.printer ?? "niimbot");
   await laadLabelLogo();
+  if (verbonden!.soort === "fichero") return stuurFichero((maat) => exemplaren.map((ex) => tekenLabel(ex, maat)), a, voortgang);
   await stuur((maat) => exemplaren.map((ex) => labelDataUrl(ex, maat)), labelId, a, voortgang);
 }
 
 /** Een randtest: kader met millimeterstreepjes tot op de rand, om bijsnijden en verschuiving te zien. */
 export async function printRandtest(labelId: string, voortgang?: (s: string) => void, a: Afstelling = {}): Promise<void> {
+  await zorgVoor(a.printer ?? "niimbot");
+  if (verbonden!.soort === "fichero") return stuurFichero((maat) => [tekenRandtest(maat, a)], a, voortgang);
   await stuur((maat) => [randtestDataUrl(maat, a)], labelId, a, voortgang);
 }
 
-/** De labelmaat in pixels voor de verbonden printer (of de B1 Pro als er nog geen is). */
-export function huidigeMaat(labelId: string) {
-  return printMaat(verbonden?.sleutel || "b1pro", labelId).maat;
+/** De labelmaat in pixels voor de gekozen printer (Niimbot: het verbonden model, anders de B1 Pro). */
+export function huidigeMaat(labelId: string, soort: PrinterSoort = "niimbot"): LabelMaat {
+  if (soort === "fichero") return FICHERO_MAAT;
+  return printMaat(verbonden?.soort === "niimbot" ? verbonden.sleutel : "b1pro", labelId).maat;
 }

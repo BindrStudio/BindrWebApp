@@ -6,7 +6,7 @@
 import { useSyncExternalStore } from "react";
 import { Fout, isNetwerkFout, type Alles, type Backend, type PrijsMarkering } from "./store/backend";
 import { DemoBackend } from "./store/demo";
-import { BOEKHOUDING_VANAF, ETALAGE_VANAF, FEED_VANAF, SupabaseBackend, THEMA_VANAF } from "./store/supabase";
+import { BOEKHOUDING_VANAF, ETALAGE_VANAF, FEED_VANAF, RESERVEREN_VANAF, SupabaseBackend, TEGOED_VANAF, THEMA_VANAF } from "./store/supabase";
 import type { Aankoopfoto, Aanvraag, AanvraagStatus, Aanwezig, Artikel, Artikelfoto, Etalagefoto, EtalagePlek, Thema, ArtikelType, Bedrijf, BedrijfPubliek, Beurs, Exemplaar, NieuwArtikel, NieuwExemplaar, Omgeving, Regel, Tegenpartij, Transactie } from "./types";
 import { bewaarPin, controleerPin, isOudePin, isVergrendeld, leesPin, maakPinVanToestel, markeerActief, pinFout, teVeelPogingen, wachtwoordFout, wisPin, wisPogingen, VERGRENDEL_NA_MS } from "./lib/pin";
 import { laadPrijsgids, type Prijsgids } from "./lib/prices";
@@ -20,7 +20,8 @@ import { laadOcr } from "./lib/ocr";
 import { uuid } from "./lib/uuid";
 import { actiefThema, maandDag, soortVan, themaLogo, type ThemaSoort } from "./lib/thema";
 import { veiligeFoto } from "./lib/eigenfoto";
-import { inVoorraad, metTelling, metVitrineSinds, schoonArtikel, schoonExemplaar, standaardArtikel, standaardExemplaar } from "./lib/exemplaar";
+import { tegoedbonnen } from "./lib/tegoed";
+import { actieveReservering, inVoorraad, metTelling, metVitrineSinds, schoonArtikel, schoonExemplaar, standaardArtikel, standaardExemplaar } from "./lib/exemplaar";
 import {
   aanvaardConflict, losConflictOp, maakOngedaan, nieuweKasbeweging, nieuwePrive, nieuweRetour, nieuweTransactie, pasToe, pasTotaalAan, stand,
   type Betaling,
@@ -54,6 +55,7 @@ export type Open =
   | { soort: "prive" }
   | { soort: "etalage"; plek: EtalagePlek }
   | { soort: "thema" }
+  | { soort: "tegoeden" }
   | { soort: "aanvragen"; id?: string }
   | { soort: "inkoopThuis" }      // naar de kassa, meteen "Kaart van klant" (inkoop buiten een beurs)
   | null;
@@ -294,6 +296,14 @@ export function openHistoriek() { zet({ open: { soort: "historiek" } }); }
 export function openPrive() { zet({ open: { soort: "prive" } }); }
 export function openEtalage(plek: EtalagePlek) { zet({ open: { soort: "etalage", plek } }); }
 export function openThema() { zet({ open: { soort: "thema" } }); }
+export function openTegoeden() { zet({ open: { soort: "tegoeden" } }); }
+/** Verkocht buiten een beurs (Instagram, opgestuurd): via de kassa; bij Afrekenen kies je waar en wanneer, en de verzendkosten. */
+export function verkoopThuis() {
+  const b = actieveBeurs();
+  if (b) return meld(`${b.naam} loopt nog: verkoop via de kassa, of sluit eerst de beurs af.`, "fout");
+  zet({ tab: "kassa", open: null });
+  meld("Zet wat je verkocht in het mandje. Bij Afrekenen kies je waar, de dag van betaling en eventueel verzendkosten.", "info", undefined, 8000);
+}
 export function openAanvragen(id?: string) { zet({ open: { soort: "aanvragen", id } }); }
 /** Kaarten gekocht buiten een beurs (Facebook, rommelmarkt): via de kassa, Van de klant. */
 /** Kopen buiten een beurs (Facebook, rommelmarkt): enkel als er geen beurs loopt, anders klopt de kas niet. */
@@ -1262,7 +1272,7 @@ export function zetHartje(id: string, prijs: number, handmatig?: boolean) {
 // ── Labels ───────────────────────────────────────────────────────────────────
 export async function koppelPrinter() {
   try {
-    const naam = await verbindPrinter();
+    const naam = await verbindPrinter(state.instellingen.labelPrinter ?? "niimbot");
     zet({ printer: naam });
     meld(`${naam} verbonden`);
   } catch (e) {
@@ -1276,9 +1286,16 @@ export async function loskoppelen() {
   zet({ printer: null });
 }
 
+/** Een andere labelprinter kiezen (per toestel): de verbonden printer gaat eerst los. */
+export async function kiesPrinter(soort: "niimbot" | "fichero") {
+  if ((state.instellingen.labelPrinter ?? "niimbot") === soort) return;
+  if (state.printer) await loskoppelen();
+  zetInstellingen({ labelPrinter: soort, labelVerschuiving: 0 });
+}
+
 /** Donkerte, verschuiving en "trager" van dit toestel (Labels › Proeflabel en afstellen). */
 export function afstelling(i = state.instellingen): Afstelling {
-  return { donkerte: i.labelDonkerte ?? 3, verschuiving: i.labelVerschuiving ?? 0, trager: !!i.labelTrager };
+  return { donkerte: i.labelDonkerte ?? 3, verschuiving: i.labelVerschuiving ?? 0, trager: !!i.labelTrager, printer: i.labelPrinter ?? "niimbot" };
 }
 const voortgang = (s: string) => zet({ bezig: s === "ok" ? "Klaar" : `Printen: ${s}` });
 
@@ -1419,6 +1436,50 @@ export function kanFeed(s: State = state): boolean {
   return v == null || v >= FEED_VANAF;
 }
 export const SCHEMA_015 = "Bewaard. De site haalt de berichten pas op na de update van de database naar 0.15: voer supabase/schema.sql opnieuw uit in Supabase (zie de README).";
+
+/** Kan de database al reserveren, tegoed en verzendkosten aan (schema 0.16)? */
+export function kanReserveren(s: State = state): boolean {
+  const b = s.backend;
+  if (!b || b.soort !== "supabase") return true;
+  const v = (b as SupabaseBackend).versie;
+  return v == null || v >= RESERVEREN_VANAF;
+}
+export function kanTegoed(s: State = state): boolean {
+  const b = s.backend;
+  if (!b || b.soort !== "supabase") return true;
+  const v = (b as SupabaseBackend).versie;
+  return v == null || v >= TEGOED_VANAF;
+}
+export const SCHEMA_016 = "Dit kan pas na de update van de database naar 0.16: voer supabase/schema.sql opnieuw uit in Supabase (zie de README).";
+
+// ── Reserveren ──────────────────────────────────────────────────────────────
+/**
+ * Een kaart reserveren voor iemand, aan een afgesproken prijs: ze gaat uit de catalogus (naar de vault, met een
+ * duidelijke melding) en in de kassa krijgt ze die prijs. Ze blijft "in voorraad": verkopen gaat zoals altijd.
+ */
+export function reserveer(ex: Exemplaar, r: { voor: string; prijs: number | null; tot: string | null; opmerking?: string | null }) {
+  const voor = r.voor.trim().slice(0, 80);
+  if (!voor) throw new Error("Voor wie is de reservering?");
+  if (!inVoorraad(ex)) throw new Error("Deze kaart is niet meer in voorraad");
+  const reservering = {
+    voor, prijs: r.prijs != null && r.prijs > 0 ? Math.round(r.prijs * 100) / 100 : null, tot: r.tot || null,
+    op: new Date().toISOString(), opmerking: r.opmerking?.trim().slice(0, 200) || null,
+    vorige_opslag: ex.reservering?.vorige_opslag ?? ex.opslag,
+  };
+  wijzig(ex.id, { reservering, opslag: "stockdoos" }, `Gereserveerd voor ${voor}`);
+}
+
+/** De reservering opheffen; met `terug` gaat de kaart terug naar de catalogus als ze daar lag. */
+export function annuleerReservering(ex: Exemplaar, terug = true) {
+  const naarCatalogus = terug && ex.reservering?.vorige_opslag === "vitrine" && ex.opslag !== "vitrine";
+  wijzig(ex.id, { reservering: null, ...(naarCatalogus ? { opslag: "vitrine" as const } : {}) },
+    naarCatalogus ? "Reservering opgeheven: terug in de catalogus" : "Reservering opgeheven");
+}
+
+/** Alle kaarten die nu gereserveerd zijn (de eerste het eerst). */
+export function reserveringen(s: State = state): Exemplaar[] {
+  return s.exemplaren.filter((e) => actieveReservering(e)).sort((a, b) => (a.reservering!.op ?? "").localeCompare(b.reservering!.op ?? ""));
+}
 
 // ── Offline klaarzetten ──────────────────────────────────────────────────────
 /**
@@ -1600,6 +1661,17 @@ export function zetBod(b: Partial<BodInstelling>) {
 export function inMandje(r: Regel) {
   const dubbel = r.exemplaar_id && state.mandje.regels.some((x) => x.exemplaar_id === r.exemplaar_id && x.richting === r.richting);
   if (dubbel) { meld("Dat exemplaar zit al in het mandje", "info"); return; }
+  // Gereserveerd: aan de afgesproken prijs, met een melding (verkoop je ze aan die persoon, dan is het in orde).
+  const ex = r.exemplaar_id && r.richting === "uit" ? state.exemplaren.find((e) => e.id === r.exemplaar_id) : null;
+  const res = ex ? actieveReservering(ex) : null;
+  if (res) {
+    if (res.prijs != null) r = { ...r, prijs: res.prijs };
+    const vorige = state.mandje.regels;
+    zetRegels([...vorige, r]);
+    meld(`Gereserveerd voor ${res.voor}${res.prijs != null ? `: aan de afgesproken ${euro(res.prijs)}` : ""}. Verkoop ze enkel aan ${res.voor}.`, "info",
+      { label: "Toch niet", doe: () => zetRegels(state.mandje.regels.filter((x) => !(x.exemplaar_id === r.exemplaar_id && x.richting === "uit"))) }, 9000);
+    return;
+  }
   if (r.artikel_id && r.richting === "uit") {
     const i = state.mandje.regels.findIndex((x) => x.artikel_id === r.artikel_id && x.richting === "uit");
     if (i >= 0) {
@@ -1678,6 +1750,7 @@ export function afrekenen(b: Betaling, opmerking: string | null = null, tegenpar
 export function ongedaanMaken(id: string) {
   const t = state.transacties.find((x) => x.id === id);
   if (!t || t.status === "ongedaan") return;
+  if ((t.tegoed ?? 0) < 0 && tegoedbonnen(state.transacties).some((b) => b.id === t.id && b.gebruikt > 0)) return meld("Van deze tegoedbon werd al iets gebruikt: maak eerst die betaling ongedaan.", "fout");
   const r = maakOngedaan(state, t);
   zet({ exemplaren: r.voorraad.exemplaren, artikelen: r.voorraad.artikelen });
   vervangTransactie(r.transactie);
@@ -1685,8 +1758,12 @@ export function ongedaanMaken(id: string) {
   meld("Ongedaan gemaakt");
 }
 
-/** Mag deze transactie nog ongedaan gemaakt worden? Enkel dezelfde dag: een vorige dag staat misschien al in Dexxter. */
+/**
+ * Mag deze transactie nog ongedaan gemaakt worden? Enkel dezelfde dag: een vorige dag staat misschien al in Dexxter.
+ * Een tegoedbon waarvan al iets gebruikt werd, niet meer (anders hangt die betaling in de lucht).
+ */
 export function magOngedaan(t: Transactie, nu = new Date().toISOString()): boolean {
+  if ((t.tegoed ?? 0) < 0 && tegoedbonnen(state.transacties).some((b) => b.id === t.id && b.gebruikt > 0)) return false;
   return t.status !== "ongedaan" && dagVan(t.tijd) === dagVan(nu);
 }
 

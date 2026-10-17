@@ -49,6 +49,10 @@ export function maatVoor(dpi: number, labelId = "50x15"): LabelMaat {
 export const MAAT_300: LabelMaat = maatVoor(300);
 export const MAAT_203: LabelMaat = maatVoor(203);
 
+// De Fichero (Action): labels van 30 × 14 mm die in de lengte door de printer lopen. De printkop is
+// 12 mm (96 px op 203 dpi): we tekenen liggend 240 × 96 en lib/fichero draait het een kwartslag.
+export const FICHERO_MAAT: LabelMaat = { breedte: 240, hoogte: 96, dpi: 203, mmBreed: 30, mmHoog: 14 };
+
 export function labelRegels(ex: Exemplaar): { code: string; naam: string; detail: string } {
   let detail: string[];
   if (ex.soort === "slab") detail = [[ex.set_code, ex.nummer].filter(Boolean).join(" "), [ex.grader, ex.grade].filter(Boolean).join(" ")];
@@ -93,6 +97,7 @@ export function labelDatum(d = new Date()): string {
 
 /** Tekent het label (zwart op wit) op een canvas in de resolutie van de printer. */
 export function tekenLabel(ex: Exemplaar, maat: LabelMaat = MAAT_300, datum = labelDatum()): HTMLCanvasElement {
+  if (maat.mmBreed <= 32) return tekenKlein(ex, maat, datum);
   const pxmm = maat.dpi / 25.4;
   const c = document.createElement("canvas");
   c.width = maat.breedte;
@@ -156,14 +161,73 @@ export function tekenLabel(ex: Exemplaar, maat: LabelMaat = MAAT_300, datum = la
   return c;
 }
 
+/**
+ * Een klein label (30 × 14 mm, Fichero): QR links (± 10,5 mm), rechts de code groot, de naam en
+ * set · nummer · conditie, onderaan de datum en het logo. Dikkere letters: 203 dpi is grover.
+ */
+function tekenKlein(ex: Exemplaar, maat: LabelMaat, datum: string): HTMLCanvasElement {
+  const pxmm = maat.dpi / 25.4;
+  const c = document.createElement("canvas");
+  c.width = maat.breedte;
+  c.height = maat.hoogte;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = "#000";
+  const mm = (x: number) => Math.round(x * pxmm);
+
+  const qr = window.qrcode(0, "Q");
+  qr.addData(qrInhoud(ex.code));
+  qr.make();
+  const n = qr.getModuleCount();
+  const mod = Math.max(1, Math.floor(Math.min(mm(10.5), c.height - mm(1)) / n));
+  const qrZijde = mod * n;
+  const x0 = mm(1.5);
+  const y0 = Math.round((c.height - qrZijde) / 2);
+  for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (qr.isDark(r, k)) ctx.fillRect(x0 + k * mod, y0 + r * mod, mod, mod);
+
+  const { code, naam, detail } = labelRegels(ex);
+  const tx = x0 + qrZijde + mm(1.2);
+  const rechts = c.width - mm(1.2);
+  const max = rechts - tx;
+  const boven = Math.round((c.height - mm(11.4)) / 2);
+  const y = (v: number) => boven + mm(v);
+  const font = (gewicht: number, px: number) => `${gewicht} ${px}px "Helvetica Neue", Arial, sans-serif`;
+  ctx.textBaseline = "alphabetic";
+  // De code zo groot als past (hij moet leesbaar zijn als de QR niet scant).
+  let px = mm(3.2);
+  ctx.font = font(800, px);
+  while (px > mm(2.2) && ctx.measureText(code).width > max) ctx.font = font(800, --px);
+  ctx.fillText(code, tx, y(2.9));
+  ctx.font = font(600, mm(1.9));
+  ctx.fillText(past(ctx, naam, max), tx, y(5.6));
+  ctx.font = font(500, mm(1.75));
+  ctx.fillText(past(ctx, detail, max), tx, y(8.2));
+  // Onderaan: de datum links, het logo (of de naam) rechts.
+  ctx.font = font(500, mm(1.5));
+  ctx.fillText(datum, tx, y(11));
+  const datumEinde = tx + ctx.measureText(datum).width;
+  const logoH = mm(1.9);
+  if (logo && logo.naturalWidth) {
+    const logoB = Math.round((logoH * logo.naturalWidth) / logo.naturalHeight);
+    if (rechts - logoB > datumEinde + mm(0.8)) ctx.drawImage(logo, rechts - logoB, y(11) - logoH + mm(0.2), logoB, logoH);
+  } else {
+    ctx.font = font(800, mm(1.6));
+    const b = ctx.measureText("Bind'r").width;
+    if (rechts - b > datumEinde + mm(0.8)) ctx.fillText("Bind'r", rechts - b, y(11));
+  }
+  return c;
+}
+
 export function labelDataUrl(ex: Exemplaar, maat: LabelMaat = MAAT_300): string {
   return tekenLabel(ex, maat).toDataURL("image/png");
 }
 
-/** Hoe de verschuiving op het label heet: "0 mm", "0,5 mm lager", "1 mm hoger". */
-export function verschuivingTekst(mm: number): string {
+/** Hoe de verschuiving op het label heet: "0 mm", "0,5 mm lager", "1 mm hoger" (Fichero: naar rechts/links). */
+export function verschuivingTekst(mm: number, zijwaarts = false): string {
   if (!mm) return "0 mm";
-  return `${String(Math.abs(mm)).replace(".", ",")} mm ${mm > 0 ? "lager" : "hoger"}`;
+  const kant = zijwaarts ? (mm > 0 ? "naar rechts" : "naar links") : mm > 0 ? "lager" : "hoger";
+  return `${String(Math.abs(mm)).replace(".", ",")} mm ${kant}`;
 }
 
 /**
@@ -171,7 +235,7 @@ export function verschuivingTekst(mm: number): string {
  * Zie je alle vier de randen, dan valt er niets weg; mist er boven of onder iets, dan tel je
  * de millimeters en verschuif je zoveel. In het midden: maat, dpi en de afstelling.
  */
-export function tekenRandtest(maat: LabelMaat, a: { donkerte?: number; verschuiving?: number; trager?: boolean } = {}): HTMLCanvasElement {
+export function tekenRandtest(maat: LabelMaat, a: { donkerte?: number; verschuiving?: number; trager?: boolean; printer?: string } = {}): HTMLCanvasElement {
   const pxmm = maat.dpi / 25.4;
   const c = document.createElement("canvas");
   c.width = maat.breedte;
@@ -200,18 +264,19 @@ export function tekenRandtest(maat: LabelMaat, a: { donkerte?: number; verschuiv
     ctx.fillRect(0, y, l, dun);
     ctx.fillRect(c.width - l, y, l, dun);
   }
-  const pt = (p: number) => Math.round((p / 72) * maat.dpi);
+  const klein = Math.min(1, maat.mmBreed / 45); // op een label van 30 mm kleinere letters
+  const pt = (p: number) => Math.round((p * klein / 72) * maat.dpi);
   const midden = c.width / 2;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = `700 ${pt(9)}px "Helvetica Neue", Arial, sans-serif`;
   ctx.fillText(`▲ RANDTEST ${maat.mmBreed} × ${maat.mmHoog}`, midden, c.height / 2 - pt(4.2));
   ctx.font = `400 ${pt(5.6)}px "Helvetica Neue", Arial, sans-serif`;
-  const regel = [`${maat.dpi} dpi`, `donkerte ${a.donkerte ?? 3}`, verschuivingTekst(a.verschuiving ?? 0), a.trager ? "trager" : null].filter(Boolean).join(" · ");
+  const regel = [`${maat.dpi} dpi`, `donkerte ${a.donkerte ?? 3}`, verschuivingTekst(a.verschuiving ?? 0, a.printer === "fichero"), a.trager ? "trager" : null].filter(Boolean).join(" · ");
   ctx.fillText(regel, midden, c.height / 2 + pt(3.4));
   return c;
 }
 
-export function randtestDataUrl(maat: LabelMaat, a: { donkerte?: number; verschuiving?: number; trager?: boolean } = {}): string {
+export function randtestDataUrl(maat: LabelMaat, a: { donkerte?: number; verschuiving?: number; trager?: boolean; printer?: string } = {}): string {
   return tekenRandtest(maat, a).toDataURL("image/png");
 }

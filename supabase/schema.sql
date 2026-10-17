@@ -1,4 +1,4 @@
--- Bind'r Stock & Beurs App — databaseschema (versie 0.15: Instagram-berichten automatisch op de klantenpagina)
+-- Bind'r Stock & Beurs App — databaseschema (versie 0.16: reserveren, storecredit en verzendkosten)
 --
 -- Uitvoeren: Supabase-dashboard › SQL Editor › New query › dit hele bestand plakken › Run.
 -- Het script mag gerust een tweede keer lopen; het overschrijft geen gegevens.
@@ -445,6 +445,24 @@ alter table public.instellingen add constraint instellingen_instagram_feed_check
   or (jsonb_typeof(waarde) = 'string' and (waarde #>> '{}') ~ '^https://feeds\.behold\.so/[A-Za-z0-9_-]{6,64}$')
 );
 
+-- ── Versie 0.16: reserveren, storecredit (tegoed) en verzendkosten ──
+-- Reserveren: een kaart achterhouden voor iemand, aan een afgesproken prijs. Ze blijft "in voorraad" (verkopen gaat
+-- gewoon via de kassa) en ligt in de vault; de klantenpagina toont ze niet. {voor, prijs, tot, op, opmerking, vorige_opslag}.
+alter table public.exemplaren add column if not exists reservering jsonb;
+alter table public.exemplaren drop constraint if exists exemplaren_reservering_check;
+alter table public.exemplaren add constraint exemplaren_reservering_check check (
+  reservering is null or (jsonb_typeof(reservering) = 'object' and length(reservering::text) <= 2000)
+);
+-- Storecredit: een inkoop uitbetaald in tegoed (tegoed < 0: we geven een tegoedbon, de transactie zelf is de bon) of
+-- een verkoop betaald met tegoed (tegoed > 0), met in tegoed_van van welke bon(nen): [{bon, bedrag}]. Zoals cash,
+-- SumUp en overschrijving: samen het totaal. Verzendkosten zijn een regel zonder exemplaar of artikel (omzet).
+alter table public.transacties add column if not exists tegoed numeric(10, 2) not null default 0;
+alter table public.transacties add column if not exists tegoed_van jsonb;
+alter table public.transacties drop constraint if exists transacties_tegoed_van_check;
+alter table public.transacties add constraint transacties_tegoed_van_check check (
+  tegoed_van is null or (jsonb_typeof(tegoed_van) = 'array' and jsonb_array_length(tegoed_van) <= 20)
+);
+
 -- ── Triggers: gewijzigd_op bijhouden en elke wijziging loggen ────────────────
 -- Ook bij een nieuwe rij zet de server zelf gewijzigd_op: zo ziet de 30-secondensynchronisatie van de
 -- andere gsm's ook kaarten die offline werden toegevoegd (met een oudere tijd van de gsm).
@@ -747,7 +765,8 @@ begin
           -- Twee keer terugnemen kan niet.
           conflicten := conflicten || jsonb_build_object('exemplaar_id', r->>'exemplaar_id', 'reden', 'al in voorraad');
         else
-          update public.exemplaren set status = 'in voorraad', transactie_id = null, afgeboekt_op = null where id = e.id;
+          -- 0.16: wat terugkomt, begint opnieuw (een oude reservering vervalt), zoals pasToe in kassa.ts.
+          update public.exemplaren set status = 'in voorraad', transactie_id = null, afgeboekt_op = null, reservering = null where id = e.id;
         end if;
       elsif r->>'artikel_id' is not null then
         update public.artikelen set aantal = aantal + n where id = (r->>'artikel_id')::uuid;
@@ -831,10 +850,12 @@ begin
     end if;
   end loop;
 
-  insert into public.transacties (id, omgeving_id, beurs_id, soort, tijd, regels, totaal, cash, sumup, bank, tegenpartij, status, conflicten, opmerking)
+  insert into public.transacties (id, omgeving_id, beurs_id, soort, tijd, regels, totaal, cash, sumup, bank, tegoed, tegoed_van, tegenpartij, status, conflicten, opmerking)
   values (tid, v_omgeving, nullif(t->>'beurs_id', '')::uuid, v_soort, v_tijd, coalesce(t->'regels', '[]'::jsonb),
           coalesce((t->>'totaal')::numeric, 0), coalesce((t->>'cash')::numeric, 0), coalesce((t->>'sumup')::numeric, 0),
-          coalesce((t->>'bank')::numeric, 0), case when jsonb_typeof(t->'tegenpartij') = 'object' then t->'tegenpartij' end,
+          coalesce((t->>'bank')::numeric, 0), coalesce((t->>'tegoed')::numeric, 0),
+          case when jsonb_typeof(t->'tegoed_van') = 'array' then t->'tegoed_van' end,
+          case when jsonb_typeof(t->'tegenpartij') = 'object' then t->'tegenpartij' end,
           case when jsonb_array_length(conflicten) > 0 then 'conflict' else 'ok' end, conflicten, t->>'opmerking')
   returning * into uitkomst;
   return uitkomst;
@@ -1027,12 +1048,12 @@ revoke all on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid)
 grant execute on function public.boek_transactie(jsonb), public.maak_ongedaan(uuid),
   public.los_conflict_op(uuid, uuid, uuid), public.aanvaard_conflict(uuid, text), public.markeer_prijzen(uuid, jsonb) to authenticated;
 
--- Welke versie van dit schema draait er? De app vraagt het na het inloggen (0.8 = 8, 0.9 = 9, 0.10 = 10, 0.11 = 11, 0.13 = 13, 0.14 = 14, 0.15 = 15).
+-- Welke versie van dit schema draait er? De app vraagt het na het inloggen (0.8 = 8, 0.9 = 9, 0.10 = 10, 0.11 = 11, 0.13 = 13, 0.14 = 14, 0.15 = 15, 0.16 = 16).
 create or replace function public.schema_versie()
 returns integer
 language sql
 stable
-as $$ select 15 $$;
+as $$ select 16 $$;
 revoke all on function public.schema_versie() from public, anon;
 grant execute on function public.schema_versie() to authenticated;
 
@@ -1050,6 +1071,7 @@ create view public.publieke_vitrine as
          foto  -- eigen foto (enkel als er nergens een foto van de kaart is); de klantenpagina laadt ze apart
     from public.exemplaren
    where opslag = 'vitrine' and status = 'in voorraad' and hartjesprijs is not null and nieuw_hartje is null
+     and reservering is null  -- 0.16: gereserveerd voor iemand
      and (label_status = 'gestickerd' or soort = 'eigen product')  -- eigen producten krijgen geen label
      and omgeving_id in (select id from public.omgevingen where zichtbaar_voor_klanten);
 

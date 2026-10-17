@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
-import { afstelling, koppelPrinter, loskoppelen, openExemplaar, print, printRandtestNu, printTestlabel, useApp, wijzigVeel, zetInstellingen } from "../state";
+import { afstelling, kiesPrinter, koppelPrinter, loskoppelen, openExemplaar, print, printRandtestNu, printTestlabel, useApp, wijzigVeel, zetInstellingen } from "../state";
 import type { Exemplaar } from "../types";
 import { toonCode } from "../lib/code";
 import { krijgtLabel } from "../lib/exemplaar";
-import { LABELMATEN, labelDataUrl, verschuivingTekst } from "../lib/label";
-import { bluetoothMogelijk, huidigeMaat, isIphone, VERSCHUIVING_MAX } from "../lib/printer";
+import { FICHERO_MAAT, LABELMATEN, labelDataUrl, verschuivingTekst } from "../lib/label";
+import { bluetoothMogelijk, huidigeMaat, isIphone, PRINTERS, VERSCHUIVING_MAX } from "../lib/printer";
+import { ficheroDonkerte } from "../lib/fichero";
 import { Icoon, Leeg, Segment } from "./common";
 import { PLAATS } from "../lib/categorie";
 
@@ -22,7 +23,10 @@ export function Labels({ inSheet = false }: { inSheet?: boolean }) {
   const geprint = useMemo(() => exemplaren.filter((e) => ACTIEF(e) && e.label_status === "geprint"), [exemplaren]);
   const toon = lijst === "te printen" ? tePrinten : geprint;
   const selectie = gekozen ? toon.filter((e) => gekozen.has(e.id)) : toon;
-  const kan = bluetoothMogelijk();
+  const soort = instellingen.labelPrinter ?? "niimbot";
+  const fichero = soort === "fichero";
+  const kan = bluetoothMogelijk(soort);
+  const rol = fichero ? `${FICHERO_MAAT.mmBreed} × ${FICHERO_MAAT.mmHoog} mm` : LABELMATEN.find((l) => l.id === instellingen.labelMaat)?.label ?? "";
 
   const wissel = (id: string) => {
     const s = new Set(gekozen ?? toon.map((e) => e.id));
@@ -46,7 +50,7 @@ export function Labels({ inSheet = false }: { inSheet?: boolean }) {
         <div className="printer-tekst">
           <strong>{printer || "Geen printer verbonden"}</strong>
           <span className="zacht klein">
-            {printer ? `Labels ${LABELMATEN.find((l) => l.id === instellingen.labelMaat)?.label ?? ""}` : kan ? "Zet de Niimbot aan en verbind" : isIphone() ? "Op iPhone print enkel de gratis Bluefy-browser (Safari en Chrome kunnen het niet)" : "Printen werkt in Chrome op Android of een computer"}
+            {printer ? `Labels ${rol}` : kan ? `Zet de ${fichero ? "Fichero" : "Niimbot"} aan en verbind` : isIphone() ? "Op iPhone print enkel de gratis Bluefy-browser (Safari en Chrome kunnen het niet)" : "Printen werkt in Chrome op Android of een computer"}
           </span>
         </div>
         {kan ? (
@@ -58,14 +62,29 @@ export function Labels({ inSheet = false }: { inSheet?: boolean }) {
         ) : null}
       </section>
 
-      <div className="maatkeuze">
-        <span className="zacht klein">Labelrol</span>
+      <div className="maatkeuze printerkeuze">
+        <span className="zacht klein">Printer</span>
         <div className="chips">
-          {LABELMATEN.map((m) => (
-            <button key={m.id} className={`chip${instellingen.labelMaat === m.id ? " aan" : ""}`} onClick={() => zetInstellingen({ labelMaat: m.id })}>{m.label}</button>
+          {PRINTERS.map((p) => (
+            <button key={p.id} className={`chip${soort === p.id ? " aan" : ""}`} aria-pressed={soort === p.id} onClick={() => void kiesPrinter(p.id)}>
+              {p.label} <span className="zacht klein">{p.rol}</span>
+            </button>
           ))}
         </div>
       </div>
+
+      {fichero ? (
+        <p className="zacht klein">Labelrol 30 × 14 mm. Het label loopt in de lengte door de printer; de app draait het zelf.</p>
+      ) : (
+        <div className="maatkeuze">
+          <span className="zacht klein">Labelrol</span>
+          <div className="chips">
+            {LABELMATEN.map((m) => (
+              <button key={m.id} className={`chip${instellingen.labelMaat === m.id ? " aan" : ""}`} onClick={() => zetInstellingen({ labelMaat: m.id })}>{m.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {kan && <Afstellen />}
 
@@ -118,6 +137,7 @@ export function Labels({ inSheet = false }: { inSheet?: boolean }) {
 function Afstellen() {
   const { instellingen, bezig } = useApp();
   const a = afstelling(instellingen);
+  const fichero = a.printer === "fichero";
   const schuif = (d: number) => {
     const n = Math.min(VERSCHUIVING_MAX, Math.max(-VERSCHUIVING_MAX, Math.round(((a.verschuiving ?? 0) + d) * 2) / 2));
     zetInstellingen({ labelVerschuiving: n });
@@ -129,21 +149,29 @@ function Afstellen() {
         <button className="knop zacht klein" disabled={!!bezig} onClick={() => void printTestlabel()}><Icoon naam="printer" maat={16} /> Proeflabel</button>
         <button className="knop zacht klein" disabled={!!bezig} onClick={() => void printRandtestNu()}><Icoon naam="printer" maat={16} /> Randtest</button>
       </div>
-      <p className="zacht klein">Randtest: zie je de vier randen met streepjes (1 streepje = 1 mm)? Dan valt er niets weg. Links en rechts een smal wit randje is normaal.</p>
+      <p className="zacht klein">
+        Randtest: zie je de vier randen met streepjes (1 streepje = 1 mm)? Dan valt er niets weg.
+        {fichero ? " Boven en onder een smal wit randje is normaal: de printkop is 12 mm breed." : " Links en rechts een smal wit randje is normaal."}
+      </p>
       <div className="afstel-rij">
         <span>Donkerte</span>
         <div className="chips">
-          {[1, 2, 3, 4, 5].map((d) => (
-            <button key={d} className={`chip${a.donkerte === d ? " aan" : ""}`} aria-pressed={a.donkerte === d} onClick={() => zetInstellingen({ labelDonkerte: d })}>{d}{d === 3 ? " · standaard" : ""}</button>
-          ))}
+          {fichero
+            ? ([[1, "Licht"], [3, "Normaal · standaard"], [5, "Donker"]] as const).map(([d, naam]) => {
+              const aan = ficheroDonkerte(a.donkerte) === ficheroDonkerte(d);
+              return <button key={d} className={`chip${aan ? " aan" : ""}`} aria-pressed={aan} onClick={() => zetInstellingen({ labelDonkerte: d })}>{naam}</button>;
+            })
+            : [1, 2, 3, 4, 5].map((d) => (
+              <button key={d} className={`chip${a.donkerte === d ? " aan" : ""}`} aria-pressed={a.donkerte === d} onClick={() => zetInstellingen({ labelDonkerte: d })}>{d}{d === 3 ? " · standaard" : ""}</button>
+            ))}
         </div>
       </div>
       <div className="afstel-rij">
-        <span>Staat de print te hoog of te laag?</span>
+        <span>{fichero ? "Staat de print te ver naar links of rechts?" : "Staat de print te hoog of te laag?"}</span>
         <div className="afstel-schuif">
-          <button className="knop zacht klein" onClick={() => schuif(-0.5)} disabled={(a.verschuiving ?? 0) <= -VERSCHUIVING_MAX}>Hoger</button>
-          <strong aria-live="polite">{verschuivingTekst(a.verschuiving ?? 0)}</strong>
-          <button className="knop zacht klein" onClick={() => schuif(0.5)} disabled={(a.verschuiving ?? 0) >= VERSCHUIVING_MAX}>Lager</button>
+          <button className="knop zacht klein" onClick={() => schuif(-0.5)} disabled={(a.verschuiving ?? 0) <= -VERSCHUIVING_MAX}>{fichero ? "Naar links" : "Hoger"}</button>
+          <strong aria-live="polite">{verschuivingTekst(a.verschuiving ?? 0, fichero)}</strong>
+          <button className="knop zacht klein" onClick={() => schuif(0.5)} disabled={(a.verschuiving ?? 0) >= VERSCHUIVING_MAX}>{fichero ? "Naar rechts" : "Lager"}</button>
         </div>
       </div>
       <label className="schakel rij">
@@ -158,8 +186,8 @@ function Afstellen() {
 function LabelRij({ ex, aan, onWissel }: { ex: Exemplaar; aan: boolean; onWissel: () => void }) {
   const { instellingen } = useApp();
   const beeld = useMemo(() => {
-    try { return labelDataUrl(ex, huidigeMaat(instellingen.labelMaat)); } catch { return null; }
-  }, [ex, instellingen.labelMaat]);
+    try { return labelDataUrl(ex, huidigeMaat(instellingen.labelMaat, instellingen.labelPrinter)); } catch { return null; }
+  }, [ex, instellingen.labelMaat, instellingen.labelPrinter]);
   return (
     <li className={`labelrij${aan ? " aan" : ""}`}>
       <button className="vink" onClick={onWissel} aria-label={aan ? "Niet printen" : "Wel printen"}>

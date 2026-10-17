@@ -4,6 +4,16 @@ export type LabelStatus = "te printen" | "geprint" | "gestickerd";
 export type Soort = "kaart" | "slab" | "eigen product";
 export type Catalogus = "en" | "asia";
 
+/** Een kaart die we achterhouden voor iemand (een vriend, een klant die het via Instagram vroeg), aan een afgesproken prijs. */
+export interface Reservering {
+  voor: string;               // voor wie
+  prijs: number | null;       // de afgesproken prijs (null = de gewone prijs)
+  tot: string | null;         // tot wanneer (JJJJ-MM-DD), of open
+  op: string;                 // wanneer gereserveerd
+  opmerking?: string | null;
+  vorige_opslag?: Opslag | null; // waar ze lag (om ze na het opheffen terug te leggen)
+}
+
 export interface Exemplaar {
   id: string;
   code: string;
@@ -41,6 +51,7 @@ export interface Exemplaar {
   verkopen?: Verkoop[] | null;   // graded: laatste verkopen die we opzochten (eBay sold …)
   omgeving_id?: string | null;   // Bind'r of Brent
   foto?: string | null;          // eigen foto (data-URL), enkel als er nergens een foto van de kaart is
+  reservering?: Reservering | null; // gereserveerd voor iemand (schema 0.16); telt enkel zolang ze in voorraad is
   aangemaakt_op: string;
   gewijzigd_op: string;
 }
@@ -187,8 +198,12 @@ export interface Regel {
   vorige_aankoopprijs?: number | null; // privé in, bestaand exemplaar: om ongedaan maken terug te zetten
   vorige_aankoopbron?: string | null;
   vorige_aankoopdatum?: string | null;
+  extra?: "verzending" | null;   // uit, zonder kaart of artikel: verzendkosten die de klant betaalt (omzet)
   // Bij een retour: "in" = ons stuk komt terug, "uit" = we geven hun stuk terug (een ruil of inkoop terugdraaien).
 }
+
+/** Een stuk van een tegoedbon dat gebruikt wordt: `bon` = de id van de transactie die de bon gaf. */
+export interface TegoedGebruik { bon: string; bedrag: number }
 
 export interface Conflict {
   exemplaar_id?: string | null;
@@ -207,6 +222,8 @@ export interface Transactie {
   cash: number;     // + in de cashkoffer, − eruit
   sumup: number;
   bank?: number;    // overschrijving (+ ontvangen, − betaald), bv. boven de cashgrens van € 3.000
+  tegoed?: number;  // storecredit: − = wij geven een tegoedbon (deze transactie is de bon), + = de klant betaalt met tegoed
+  tegoed_van?: TegoedGebruik[] | null; // betaald met tegoed: van welke bon(nen) en hoeveel
   tegenpartij?: Tegenpartij | null;
   status: "ok" | "conflict" | "ongedaan";
   conflicten: Conflict[];

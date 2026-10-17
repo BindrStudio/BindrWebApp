@@ -2,7 +2,7 @@
 // conflicten oplossen en de cijfers van een beurs. Zonder netwerk of opslag, zodat
 // de demo, de offline wachtrij en de tests exact dezelfde regels volgen als de
 // databasefunctie boek_transactie in supabase/schema.sql.
-import type { Artikel, Beurs, Conflict, Exemplaar, NieuwExemplaar, Regel, Stand, Tegenpartij, Transactie, TransactieSoort } from "../types";
+import type { Artikel, Beurs, Conflict, Exemplaar, NieuwExemplaar, Regel, Stand, Tegenpartij, TegoedGebruik, Transactie, TransactieSoort } from "../types";
 import { inVoorraad, standaardExemplaar } from "./exemplaar";
 import { verdeelTotaal } from "./pricing";
 import { uuid } from "./uuid";
@@ -110,6 +110,11 @@ export function regelInbreng(e: Exemplaar, prijs: number, referentie: number | n
   };
 }
 
+/** Verzendkosten die de klant betaalt (online verkoop): omzet, geen voorraad. */
+export function regelVerzending(prijs: number): Regel {
+  return { richting: "uit", naam: "Verzending", prijs: rond2(prijs), extra: "verzending" };
+}
+
 /** Artikelen komen binnen (bv. drie booster packs van de klant). */
 export function regelArtikelIn(a: Artikel, aantal: number, prijs: number): Regel {
   return { richting: "in", artikel_id: a.id, aantal, naam: a.naam, prijs: rond2(prijs) };
@@ -136,6 +141,8 @@ export interface Betaling {
   cash: number;
   sumup: number;
   bank?: number; // overschrijving
+  tegoed?: number; // storecredit: − = we geven een tegoedbon, + = de klant betaalt met tegoed
+  tegoedVan?: TegoedGebruik[]; // betaald met tegoed: van welke bon(nen)
 }
 
 /** Wettelijke grens voor cash bij de aankoop of verkoop van goederen (art. 67 witwaswet): € 3.000. */
@@ -145,19 +152,25 @@ export const CASH_GRENS = 3000;
 export function betalingKlopt(regels: Regel[], b: Betaling): string | null {
   const n = netto(regels);
   const bank = b.bank ?? 0;
-  if (n < 0 && (b.sumup !== 0 || b.cash > 0 || bank > 0)) return "Terugbetalen gaat enkel cash of met een overschrijving";
-  if (n >= 0 && (b.cash < 0 || b.sumup < 0 || bank < 0)) return "Bedragen kunnen niet negatief zijn";
-  if (rond2(b.cash + b.sumup + bank) !== n) return `Cash, SumUp en overschrijving moeten samen ${n.toFixed(2)} zijn`;
+  const tegoed = b.tegoed ?? 0;
+  if (n < 0 && (b.sumup !== 0 || b.cash > 0 || bank > 0 || tegoed > 0)) return "Terugbetalen gaat enkel cash, met een overschrijving of in tegoed";
+  if (n >= 0 && (b.cash < 0 || b.sumup < 0 || bank < 0 || tegoed < 0)) return "Bedragen kunnen niet negatief zijn";
+  if (rond2(b.cash + b.sumup + bank + tegoed) !== n) return `Cash, SumUp, overschrijving en tegoed moeten samen ${n.toFixed(2)} zijn`;
   if (Math.abs(b.cash) > CASH_GRENS) return `Cash mag hoogstens ${CASH_GRENS} euro zijn (wettelijke grens). Betaal de rest met SumUp of een overschrijving.`;
+  if (tegoed > 0 && rond2((b.tegoedVan ?? []).reduce((s, x) => s + x.bedrag, 0)) !== tegoed) return "Kies van welke tegoedbon";
   return null;
 }
 
 export function nieuweTransactie(regels: Regel[], b: Betaling, beursId: string | null, opmerking: string | null = null, tijd = new Date().toISOString(), tegenpartij: Tegenpartij | null = null): Transactie {
   const fout = betalingKlopt(regels, b);
   if (fout) throw new Error(fout);
+  const tegoed = rond2(b.tegoed ?? 0);
+  // Een tegoedbon staat op naam: anders weet niemand later voor wie hij is.
+  if (tegoed < 0 && !tegenpartij?.naam?.trim()) throw new Error("Een tegoedbon heeft een naam nodig");
   return {
     id: uuid(), beurs_id: beursId, soort: bepaalSoort(regels), tijd, regels,
     totaal: netto(regels), cash: rond2(b.cash), sumup: rond2(b.sumup), bank: rond2(b.bank ?? 0),
+    ...(tegoed ? { tegoed, tegoed_van: tegoed > 0 ? (b.tegoedVan ?? []).map((x) => ({ bon: x.bon, bedrag: rond2(x.bedrag) })) : null } : {}),
     status: "ok", conflicten: [], opmerking, tegenpartij,
   };
 }
@@ -246,7 +259,8 @@ export function pasToe(v: Voorraad, t: Transactie): { voorraad: Voorraad; transa
         if (!e) { conflicten.push({ exemplaar_id: r.exemplaar_id, reden: "onbekend exemplaar" }); continue; }
         // Twee keer terugnemen kan niet: wat al in voorraad ligt, wordt een conflict.
         if (inVoorraad(e)) { conflicten.push({ exemplaar_id: r.exemplaar_id, reden: "al in voorraad" }); continue; }
-        exemplaren.set(e.id, { ...e, status: "in voorraad", transactie_id: null, afgeboekt_op: null, gewijzigd_op: t.tijd });
+        // Een kaart die terugkomt, begint opnieuw: een oude reservering (ze werd aan die persoon verkocht) vervalt.
+        exemplaren.set(e.id, { ...e, status: "in voorraad", transactie_id: null, afgeboekt_op: null, gewijzigd_op: t.tijd, ...(e.reservering ? { reservering: null } : {}) });
       } else if (r.artikel_id) {
         const a = artikelen.get(r.artikel_id);
         if (a) artikelen.set(a.id, { ...a, aantal: a.aantal + (r.aantal ?? 1) });
@@ -518,6 +532,7 @@ export function beursOverzicht(transacties: Transactie[], soortVan: (r: Regel) =
     }
     for (const r of t.regels) {
       const n = r.aantal ?? 1;
+      if (r.extra) continue; // verzendkosten: geen product
       if (r.richting === "uit") {
         if (t.soort === "ruil") { trades.weg += n; continue; }
         const v = verkocht[soortVan(r)];

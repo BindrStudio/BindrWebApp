@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   actieveBeurs, afrekenen, alleCodes, boekhoudingAan, huidig, inMandje, mandjeLegen, meld, ongedaanMaken, openTransactie, print, totaalAanpassen,
-  bodPct, kanNieuweBoekhouding, kasbeweging, OUD_SCHEMA, sluit as sluitOpen, useApp, verwijderRegel, wijzigRegel, zetArtikelAantal, zetBod, zetInstellingen, zetPerKaart, zetRegelPct,
+  bodPct, kanNieuweBoekhouding, kanTegoed, kasbeweging, OUD_SCHEMA, sluit as sluitOpen, useApp, verwijderRegel, wijzigRegel, zetArtikelAantal, zetBod, zetInstellingen, zetPerKaart, zetRegelPct,
 } from "../state";
 import type { Artikel, CatalogusKaart, Exemplaar, Regel, Tegenpartij, Transactie } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
-import { inVoorraad } from "../lib/exemplaar";
-import { beursCijfers, CASH_GRENS, marge, netto, regelArtikelUit, regelIn, regelUit, totaalIn, totaalUit, type Betaling } from "../lib/kassa";
+import { actieveReservering, inVoorraad } from "../lib/exemplaar";
+import { beursCijfers, CASH_GRENS, marge, netto, regelArtikelUit, regelIn, regelUit, regelVerzending, totaalIn, totaalUit, type Betaling } from "../lib/kassa";
 import { datumKort, euro, getal, vandaag, zonderAccenten } from "../lib/format";
 import { nieuweCode, toonCode } from "../lib/code";
 import { afbeelding } from "../lib/catalog";
@@ -28,6 +28,7 @@ import { HandtekeningBeeld, HandtekeningPad } from "./Handtekening";
 import { cardmarketKentTaal, cardmarketLink, gradedZoektekst, NIET_OP_CARDMARKET } from "../lib/markt";
 import { afrondKeuzes, exactBod, marktwaarde, PCT_MAX, PCT_MIN, procentVan, samenPct, type BodInstelling } from "../lib/bod";
 import { GELUKT, kies, MANDJE_LEEG } from "../lib/grapjes";
+import { bonCode, openBonnen, tegoedbonnen, verdeelOverBonnen, zoekBonnen } from "../lib/tegoed";
 
 type Paneel = null | "scan" | "zoek" | "artikel" | "klantkaart" | "afrekenen" | "start" | "afsluiten" | "transacties" | "kas";
 
@@ -209,7 +210,7 @@ function RegelRij({ r, i }: { r: Regel; i: number }) {
   };
   return (
     <div className={`regel ${r.richting}`}>
-      {r.artikel_id ? <div className="regel-icoon"><Icoon naam={r.richting === "in" ? "stapel" : "doos"} maat={22} /></div> : <KaartFoto src={beeld} alt={r.naam} klein kaart={ex ?? r.nieuw ?? undefined} />}
+      {r.artikel_id || r.extra ? <div className="regel-icoon"><Icoon naam={r.extra ? "verzending" : r.richting === "in" ? "stapel" : "doos"} maat={22} /></div> : <KaartFoto src={beeld} alt={r.naam} klein kaart={ex ?? r.nieuw ?? undefined} />}
       <div className="regel-tekst">
         <strong>{r.naam}</strong>
         <span className="zacht klein">
@@ -231,6 +232,7 @@ function RegelRij({ r, i }: { r: Regel; i: number }) {
           </span>
         )}
         {r.artikel_id && r.richting === "in" && <span className="zacht klein">{r.aantal} stuks</span>}
+        {ex && r.richting === "uit" && actieveReservering(ex) && <span className="regel-gereserveerd">Gereserveerd voor {actieveReservering(ex)!.voor}</span>}
         {klantKaart && mandje.bod?.perKaart && (r.referentie ?? 0) > 0 && <PctStapper r={r} i={i} algemeen={bodPct(mandje)} />}
       </div>
       <div className="regel-prijs">
@@ -819,8 +821,18 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
   const regels = mandje.regels;
   const n = netto(regels);
   const teVeelCash = Math.abs(n) > CASH_GRENS;
-  const [wijze, setWijze] = useState<"cash" | "sumup" | "beide" | "bank">(teVeelCash && n > 0 ? "sumup" : "cash");
-  const [uitbetalen, setUitbetalen] = useState<"cash" | "bank">(teVeelCash ? "bank" : "cash");
+  const [wijze, setWijze] = useState<"cash" | "sumup" | "beide" | "bank" | "tegoed">(teVeelCash && n > 0 ? "sumup" : "cash");
+  const [uitbetalen, setUitbetalen] = useState<"cash" | "bank" | "tegoed">(teVeelCash ? "bank" : "cash");
+  // Storecredit: met een tegoedbon betalen (welke bonnen, en hoe de rest betaald wordt).
+  const tegoedKan = kanTegoed();
+  const bonnen = useMemo(() => openBonnen(transacties), [transacties]);
+  const [bonZoek, setBonZoek] = useState("");
+  const [bonKeuze, setBonKeuze] = useState<string[]>([]);
+  const [restWijze, setRestWijze] = useState<"cash" | "sumup" | "bank">("cash");
+  const gekozenBonnen = bonnen.filter((b) => bonKeuze.includes(b.id));
+  const opBonnen = Math.round(gekozenBonnen.reduce((s, b) => s + b.rest, 0) * 100) / 100;
+  const metTegoed = n > 0 && wijze === "tegoed" ? Math.min(n, opBonnen) : 0;
+  const restNaTegoed = Math.round((n - metTegoed) * 100) / 100;
   const [gegeven, setGegeven] = useState("");
   const [cashDeel, setCashDeel] = useState("");
   // Bij een inkoop of ruil: het aankoopbewijs (foto, naam, en buiten een beurs: waar en wanneer). Alles mag ook later.
@@ -831,6 +843,10 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
   const [fotos, setFotos] = useState<string[]>([]);
   const [datum, setDatum] = useState(vandaag());
   const [tekenen, setTekenen] = useState(false);
+  // Online verkocht (buiten een beurs): waar, wanneer betaald, en eventueel verzendkosten.
+  const verkoopt = !koopt && totaalUit(regels) > 0;
+  const [verzendInvoer, setVerzendInvoer] = useState("");
+  const verzendIndex = regels.findIndex((r) => r.extra === "verzending");
   const groot = totaalIn(regels) >= BEWIJS_GROOT;
 
   const waarschuwingen = regels.flatMap((r) => {
@@ -838,11 +854,21 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
     if (r.richting === "uit" && r.aankoopprijs != null && r.prijs < r.aankoopprijs) w.push(`${r.naam}: onder de aankoopprijs (${euro(r.aankoopprijs)})`);
     else if (r.richting === "uit" && r.hartjesprijs && r.prijs < r.hartjesprijs * 0.8) w.push(`${r.naam}: meer dan 20% korting`);
     if (r.richting === "in" && !r.prijs) w.push(`${r.naam}: nog geen waarde`);
+    const ex = r.richting === "uit" && r.exemplaar_id ? app.exemplaren.find((e) => e.id === r.exemplaar_id) : null;
+    const res = ex ? actieveReservering(ex) : null;
+    if (res) w.push(`${r.naam} is gereserveerd voor ${res.voor}: verkoop ze enkel aan ${res.voor}`);
     return w;
   });
 
   let betaling: Betaling | null;
-  if (n < 0) betaling = uitbetalen === "bank" && nieuw ? { cash: 0, sumup: 0, bank: n } : { cash: n, sumup: 0 };
+  if (n < 0) betaling = uitbetalen === "tegoed" && tegoedKan ? { cash: 0, sumup: 0, tegoed: n } : uitbetalen === "bank" && nieuw ? { cash: 0, sumup: 0, bank: n } : { cash: n, sumup: 0 };
+  else if (n > 0 && wijze === "tegoed") {
+    const rest = restNaTegoed;
+    betaling = metTegoed <= 0 ? null : {
+      cash: restWijze === "cash" ? rest : 0, sumup: restWijze === "sumup" ? rest : 0, bank: restWijze === "bank" ? rest : 0,
+      tegoed: metTegoed, tegoedVan: verdeelOverBonnen(gekozenBonnen, metTegoed),
+    };
+  }
   else if (n === 0 || wijze === "cash") betaling = { cash: n, sumup: 0 };
   else if (wijze === "sumup") betaling = { cash: 0, sumup: n };
   else if (wijze === "bank" && nieuw) betaling = { cash: 0, sumup: 0, bank: n };
@@ -866,11 +892,16 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
 
   const ingevuld = !!(tp.naam?.trim() || tp.handtekening || tp.adres?.trim() || tp.kanaal || tp.factuur?.trim() || tp.vendor || tp.met_factuur);
   const bevestig = () => {
-    if (!betaling) return meld("Vul het cash-deel in", "fout");
+    if (!betaling) return meld(wijze === "tegoed" ? "Kies een tegoedbon" : "Vul het cash-deel in", "fout");
+    if (betaling.tegoed && betaling.tegoed < 0 && !tp.naam?.trim()) return meld("Op wiens naam komt de tegoedbon?", "fout");
     try {
       // Thuis ingegeven voor een andere dag: om 12 uur die dag (zo staat het op de juiste dag in de boekhouding).
       const tijd = !opBeurs && datum && datum !== vandaag() ? new Date(`${datum}T12:00:00`).toISOString() : undefined;
-      const t = afrekenen(betaling, null, koopt && nieuw && ingevuld ? { ...tp, naam: tp.naam?.trim() || null } : null, tijd, koopt && nieuw ? fotos : []);
+      // Een tegoedbon staat altijd op naam (ook als particulier, zonder aankoopbewijs).
+      const metNaam = (koopt && nieuw && ingevuld) || (betaling.tegoed ?? 0) < 0;
+      // Verkocht buiten een beurs: enkel waar (online, rommelmarkt …) en eventueel aan wie.
+      const verkoopInfo = verkoopt && !opBeurs && nieuw && (tp.kanaal || tp.naam?.trim()) ? { kanaal: tp.kanaal ?? null, naam: tp.naam?.trim() || null } : null;
+      const t = afrekenen(betaling, null, metNaam ? { ...tp, naam: tp.naam?.trim() || null } : verkoopInfo, tijd, koopt && nieuw ? fotos : []);
       onKlaar(t, wisselgeld);
     } catch (e) {
       meld(e instanceof Error ? e.message : String(e), "fout");
@@ -895,10 +926,42 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
 
       {n > 0 && (
         <>
-          <Segment<"cash" | "sumup" | "beide" | "bank"> waarde={wijze} onKies={setWijze} opties={[
+          <Segment<"cash" | "sumup" | "beide" | "bank" | "tegoed"> waarde={wijze} onKies={setWijze} opties={[
             { waarde: "cash", label: "Cash" }, { waarde: "sumup", label: "SumUp" }, { waarde: "beide", label: "Beide" },
             ...(nieuw ? [{ waarde: "bank" as const, label: "Bank" }] : []),
+            ...(tegoedKan && bonnen.length ? [{ waarde: "tegoed" as const, label: "Tegoed" }] : []),
           ]} />
+          {wijze === "tegoed" && (
+            <section className="blok tegoed-keuze">
+              <span className="veld-label">Met welke tegoedbon?</span>
+              {bonnen.length > 4 && <input value={bonZoek} onChange={(e) => setBonZoek(e.target.value)} placeholder="Naam of code (TG-…)" aria-label="Zoek een tegoedbon" />}
+              <ul className="bon-lijst">
+                {zoekBonnen(bonnen, bonZoek).slice(0, 8).map((b) => {
+                  const aan = bonKeuze.includes(b.id);
+                  return (
+                    <li key={b.id}>
+                      <button className={`bon-rij${aan ? " aan" : ""}`} aria-pressed={aan} onClick={() => setBonKeuze(aan ? bonKeuze.filter((x) => x !== b.id) : [...bonKeuze, b.id])}>
+                        <span className="bon-vink">{aan && <Icoon naam="check" maat={16} />}</span>
+                        <span className="bon-tekst"><strong>{b.naam}</strong><span className="zacht klein">{b.code} · {datumKort(b.datum)}{b.gebruikt ? ` · van ${euro(b.bedrag)}` : ""}</span></span>
+                        <strong className="bon-rest">{euro(b.rest)}</strong>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              {metTegoed > 0 && (
+                <p className="zacht">
+                  {euro(metTegoed)} met tegoed{opBonnen > metTegoed ? ` (er blijft ${euro(Math.round((opBonnen - metTegoed) * 100) / 100)} op de bon)` : ""}.
+                  {restNaTegoed > 0 && <> Nog {euro(restNaTegoed)} te betalen:</>}
+                </p>
+              )}
+              {metTegoed > 0 && restNaTegoed > 0 && (
+                <Segment<"cash" | "sumup" | "bank"> waarde={restWijze} onKies={setRestWijze} opties={[
+                  { waarde: "cash", label: "Cash" }, { waarde: "sumup", label: "SumUp" }, ...(nieuw ? [{ waarde: "bank" as const, label: "Bank" }] : []),
+                ]} />
+              )}
+            </section>
+          )}
           {wijze === "beide" && (
             <Veld label="Deel in cash (€)" hint={betaling ? `SumUp: ${euro(betaling.sumup)}` : `Tussen 0 en ${euro(n)}`}>
               <input inputMode="decimal" value={cashDeel} onChange={(e) => setCashDeel(e.target.value)} autoFocus />
@@ -920,11 +983,55 @@ function Afrekenen({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: (t: Tra
       )}
       {n < 0 && (
         <>
-          {nieuw && <Segment<"cash" | "bank"> waarde={uitbetalen} onKies={setUitbetalen} opties={[{ waarde: "cash", label: "Cash" }, { waarde: "bank", label: "Overschrijving" }]} />}
-          {uitbetalen === "cash" ? <p>Geef de klant <strong>{euro(-n)}</strong> uit de cashkoffer.</p> : <p>Schrijf <strong>{euro(-n)}</strong> over naar de rekening van de klant (noteer het rekeningnummer niet in de app).</p>}
+          {nieuw && <Segment<"cash" | "bank" | "tegoed"> waarde={uitbetalen} onKies={setUitbetalen} opties={[
+            { waarde: "cash", label: "Cash" }, { waarde: "bank", label: "Overschrijving" }, ...(tegoedKan && koopt ? [{ waarde: "tegoed" as const, label: "Tegoed" }] : []),
+          ]} />}
+          {uitbetalen === "cash" ? <p>Geef de klant <strong>{euro(-n)}</strong> uit de cashkoffer.</p>
+            : uitbetalen === "bank" ? <p>Schrijf <strong>{euro(-n)}</strong> over naar de rekening van de klant (noteer het rekeningnummer niet in de app).</p>
+            : (
+              <section className="blok tegoed-keuze">
+                <p>De klant krijgt een <strong>tegoedbon van {euro(-n)}</strong> om later bij ons te gebruiken. Geen geld uit de koffer.</p>
+                {!metBoekhouding && (
+                  <Veld label="Op naam van">
+                    <input value={tp.naam ?? ""} onChange={(e) => setTp({ ...tp, naam: e.target.value })} placeholder="Naam (en eventueel @instagram)" maxLength={120} />
+                  </Veld>
+                )}
+                {metBoekhouding && <p className="zacht klein">Vul hieronder de naam in: de bon staat op naam.</p>}
+                {bodPct(mandje) < instellingen.ruilPct && !mandje.bod?.perKaart && (mandje.bod?.afronding ?? "exact") !== "eigen" && (
+                  <button className="knop zacht klein" onClick={() => zetBod({ pct: instellingen.ruilPct })}>Tegoed aan het ruilpercentage: bod naar {instellingen.ruilPct}%</button>
+                )}
+              </section>
+            )}
         </>
       )}
       {n === 0 && <p className="zacht">Er gaat geen geld over en weer.</p>}
+      {verkoopt && !opBeurs && (
+        <section className="blok afreken-borderel">
+          <span><strong>Verkocht buiten een beurs</strong> <span className="zacht klein">bv. via Instagram, opgestuurd of afgehaald</span></span>
+          {nieuw && <KanaalVeld waarde={tp} onChange={setTp} label="Waar verkocht?" />}
+          {nieuw && (
+            <Veld label="Klant (optioneel)" hint="Een naam of @instagram, zodat je het later terugvindt.">
+              <input value={tp.naam ?? ""} onChange={(e) => setTp({ ...tp, naam: e.target.value })} maxLength={120} />
+            </Veld>
+          )}
+          <Veld label="Wanneer betaald?" hint="De dag dat het geld binnenkwam (bij een overschrijving: de dag dat het op de rekening stond). Zo staat het op de juiste dag bij de dagontvangsten.">
+            <input type="date" value={datum} max={vandaag()} onChange={(e) => setDatum(e.target.value || vandaag())} />
+          </Veld>
+          {verzendIndex >= 0 ? (
+            <div className="verzend-rij">
+              <Icoon naam="verzending" maat={18} /> <span>Verzending aangerekend: <strong>{euro(regels[verzendIndex].prijs)}</strong></span>
+              <button className="tekstknop klein" onClick={() => verwijderRegel(verzendIndex)}>Weg</button>
+            </div>
+          ) : (
+            <Veld label="Verzendkosten aanrekenen (optioneel)" hint="Wat de klant voor de verzending betaalt: dat is omzet. Wat je zelf bij bpost betaalt, is een kost: bewaar het bonnetje en geef het in Dexxter in.">
+              <div className="verzend-invoer">
+                <input inputMode="decimal" value={verzendInvoer} onChange={(e) => setVerzendInvoer(e.target.value)} placeholder="bv. 5,50" />
+                <button className="knop zacht klein" disabled={!(getal(verzendInvoer) ?? 0)} onClick={() => { const x = getal(verzendInvoer); if (x && x > 0) { inMandje(regelVerzending(x)); setVerzendInvoer(""); } }}>Aanrekenen</button>
+              </div>
+            </Veld>
+          )}
+        </section>
+      )}
       {kofferTeKort && <p className="nakijken klein">Volgens de app zit er nog {euro(inKoffer!)} in de cashkoffer. Leg je er eigen geld bij? Boek dat eerst bij Kas › Geld erbij, anders klopt de kas straks niet.</p>}
       {cashTeHoog && <p className="nakijken">Cash kan hoogstens {euro(CASH_GRENS, true)} zijn (wettelijke grens). {n > 0 ? "Laat de rest met SumUp of een overschrijving betalen." : "Betaal met een overschrijving."}</p>}
 
@@ -995,8 +1102,27 @@ function Gelukt({ t, wisselgeld, onVolgende }: { t: Transactie; wisselgeld: numb
       <Eend maat={110} />
       <h2>{huidigT.status === "ongedaan" ? "Ongedaan gemaakt" : titel}</h2>
       {huidigT.status !== "ongedaan" && <p className="gelukt-grapje">{kies(GELUKT[t.soort], t.id)}</p>}
+      {(t.tegoed ?? 0) < 0 && (
+        <div className="tegoedbon-gelukt">
+          <span className="zacht klein">Tegoedbon</span>
+          <strong>{bonCode(t)}</strong>
+          <span>{euro(-(t.tegoed ?? 0))} voor {t.tegenpartij?.naam ?? "?"}</span>
+          <span className="zacht klein">Zeg de klant de code of zijn naam: daarmee betaalt hij later.</span>
+        </div>
+      )}
+      {(t.tegoed ?? 0) > 0 && (
+        <p className="zacht">{euro(t.tegoed!)} betaald met tegoed{(() => {
+          const rest = tegoedbonnen(transacties).filter((b) => (t.tegoed_van ?? []).some((g) => g.bon === b.id)).reduce((s, b) => s + b.rest, 0);
+          return rest > 0.004 ? `; er blijft ${euro(Math.round(rest * 100) / 100)} op de bon` : "; de bon is op";
+        })()}.</p>
+      )}
       <p className="gelukt-bedrag">
-        {t.totaal > 0 ? `${euro(t.totaal)} ontvangen` : t.totaal < 0 ? `${euro(-t.totaal)} uitbetaald` : "zonder geld"}
+        {(() => {
+          const geld = Math.round((t.cash + t.sumup + (t.bank ?? 0)) * 100) / 100;
+          if ((t.tegoed ?? 0) < 0) return geld ? `${euro(-geld)} uitbetaald` : "geen geld uit de koffer";
+          if (t.totaal > 0) return geld > 0 ? `${euro(geld)} ontvangen` : "volledig met tegoed";
+          return t.totaal < 0 ? `${euro(-t.totaal)} uitbetaald` : "zonder geld";
+        })()}
         {t.cash > 0 && t.sumup > 0 && <span className="zacht"> ({euro(t.cash)} cash, {euro(t.sumup)} SumUp)</span>}
         {t.sumup > 0 && !t.cash && <span className="zacht"> via SumUp</span>}
         {!!t.bank && <span className="zacht"> per overschrijving</span>}

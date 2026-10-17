@@ -12,6 +12,7 @@ import { AfdrukLaag } from "./ui/Afdruk";
 import { Prive } from "./ui/Prive";
 import { EtalageSheet } from "./ui/Etalage";
 import { ThemaSheet } from "./ui/Thema";
+import { TegoedSheet } from "./ui/Tegoed";
 import { AanvragenSheet } from "./ui/Aanvragen";
 import { Login, PinKiezen, Slot, WachtwoordKiezen } from "./ui/Login";
 import { Bovenbalk } from "./ui/Bovenbalk";
@@ -135,6 +136,7 @@ export function App() {
         {open?.soort === "prive" && <Prive onSluit={sluit} />}
         {open?.soort === "etalage" && <EtalageSheet key={open.plek} plek={open.plek} />}
         {open?.soort === "thema" && <ThemaSheet />}
+        {open?.soort === "tegoeden" && <TegoedSheet />}
         {open?.soort === "aanvragen" && <AanvragenSheet id={open.id} />}
       </Vangnet>
       <AfdrukLaag />

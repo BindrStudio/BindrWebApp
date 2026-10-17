@@ -1,5 +1,7 @@
 // Labels printen met een nagebootste Niimbot B1 Pro: verbinden, proeflabel, randtest en de
 // afstelling (donkerte, hoger/lager, trager). Kijkt na wat de app aan de driver geeft.
+// Daarna de Fichero (Action, 30 × 14 mm) met een nagebootste Bluetooth-printer: welke bytes
+// er in welke volgorde naartoe gaan, het gedraaide beeld en de verschuiving naar rechts.
 //   npm run serve            (in een ander venster: http://localhost:8080)
 //   node tests/e2e/printer.cjs [map-voor-screenshots]
 const { chromium, devices } = require("playwright");
@@ -19,7 +21,35 @@ const toestel = { ...devices["iPhone 13"], locale: "nl-BE" };
   // (public/vendor/niimbot.js) zet window.Niimbot ook: die toewijzing wordt genegeerd.
   await ctx.addInitScript(() => {
     localStorage.setItem("bindr-modus", "demo");
-    if (!navigator.bluetooth) Object.defineProperty(Navigator.prototype, "bluetooth", { configurable: true, get: () => ({}) });
+    // Nep-Bluetooth voor de Fichero: houdt elke write bij en antwoordt zoals de printer
+    // (status 00, "OK" op de donkerte en na het stoppen). De Niimbot kijkt enkel of er Bluetooth is.
+    const eq = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+    const bt = { writes: [], filters: null };
+    const lees = Object.assign(new EventTarget(), { properties: { notify: true }, value: null });
+    lees.startNotifications = async () => lees;
+    const antwoord = (bytes) => setTimeout(() => { lees.value = new DataView(Uint8Array.from(bytes).buffer); lees.dispatchEvent(new Event("characteristicvaluechanged")); }, 5);
+    const schrijf = {
+      properties: { writeWithoutResponse: true },
+      writeValueWithoutResponse: async (v) => {
+        const b = [...new Uint8Array(v.buffer, v.byteOffset, v.byteLength)];
+        bt.writes.push(b);
+        if (eq(b, [0x10, 0xff, 0x40])) antwoord([0x00]);
+        else if (b.length === 5 && eq(b.slice(0, 4), [0x10, 0xff, 0x10, 0x00])) antwoord([0x4f, 0x4b]);
+        else if (eq(b, [0x10, 0xff, 0xfe, 0x45])) antwoord([0x4f, 0x4b]);
+      },
+      writeValue: async () => { throw new Error("niet zonder antwoord geschreven"); },
+    };
+    const dienst = { getCharacteristic: async (u) => (u.includes("2af1") ? schrijf : lees) };
+    const gatt = {
+      connected: false,
+      connect: async () => { gatt.connected = true; return gatt; },
+      disconnect: () => { gatt.connected = false; },
+      getPrimaryService: async (u) => { if (!u.includes("18f0")) throw new Error("geen dienst"); return dienst; },
+    };
+    const toestel = Object.assign(new EventTarget(), { name: "FICHERO_5836", gatt });
+    bt.requestDevice = async (o) => { bt.filters = o.filters; return toestel; };
+    Object.defineProperty(Navigator.prototype, "bluetooth", { configurable: true, get: () => bt });
+    window.__bt = bt;
     const log = [];
     const nep = {
       WRITE_MODE: null, PACE_MS: 10, verbonden: 0,
@@ -102,7 +132,74 @@ const toestel = { ...devices["iPhone 13"], locale: "nl-BE" };
   await sheet().locator(".afstellen summary").click();
   await sheet().locator(".afstel-schuif strong", { hasText: "1 mm hoger" }).waitFor();
   assert.equal(await sheet().locator(".afstellen .chip.aan").innerText(), "4");
-  assert.equal(await sheet().locator(".maatkeuze .chip.aan").innerText(), "50 × 30 mm");
+  assert.equal(await sheet().locator(".maatkeuze:not(.printerkeuze) .chip.aan").innerText(), "50 × 30 mm");
+
+  stap("Fichero (Action): kiezen en verbinden");
+  await sheet().locator(".printerkeuze .chip", { hasText: "Fichero" }).click();
+  await sheet().locator(".printerkeuze .chip.aan", { hasText: "Fichero" }).waitFor();
+  assert.equal(await sheet().locator(".maatkeuze:not(.printerkeuze)").count(), 0, "geen keuze van de rol: altijd 30 × 14");
+  await sheet().getByRole("button", { name: "Verbinden" }).click();
+  await sheet().locator(".printerkaart.verbonden", { hasText: "Fichero 5836" }).waitFor();
+  await sheet().locator(".printerkaart", { hasText: "Labels 30 × 14 mm" }).waitFor();
+  const filters = await page.evaluate(() => window.__bt.filters);
+  assert.ok(filters.some((f) => f.namePrefix === "FICHERO"), "enkel printers die Fichero heten");
+  assert.ok(await sheet().locator(".afstellen .chip.aan", { hasText: "Donker" }).count(), "donkerte 4 = Donker bij de Fichero");
+  assert.equal(await sheet().locator(".afstel-schuif strong").innerText(), "0 mm", "de verschuiving begint opnieuw op 0");
+
+  stap("Fichero: proeflabel = status, donkerte, dan per label papier, wakker, aan, beeld, volgende, stop");
+  await sheet().getByRole("button", { name: "Proeflabel" }).click();
+  await page.getByText(/Proeflabel geprint/).waitFor();
+  const raster = async (vanaf) => page.evaluate((vanaf) => {
+    const w = window.__bt.writes.slice(vanaf);
+    const i = w.findIndex((b) => b[0] === 0x1d && b[1] === 0x76 && b[2] === 0x30);
+    const kop = w[i].slice(0, 8);
+    const data = [];
+    let j = i;
+    for (; data.length < 8 + 2880; j++) data.push(...w[j]);
+    return { kop, rest: data.length - 8 - 2880, data: data.slice(8), voor: w.slice(0, i).map((b) => b.length === 12 && b.every((x) => x === 0) ? "wakker" : b.map((x) => x.toString(16).padStart(2, "0")).join(" ")), na: w.slice(j).map((b) => b.map((x) => x.toString(16).padStart(2, "0")).join(" ")), groot: Math.max(...w.map((b) => b.length)) };
+  }, vanaf);
+  let r = await raster(0);
+  assert.deepEqual(r.voor, ["10 ff 40", "10 ff 10 00 02", "10 ff 84 00", "wakker", "10 ff fe 01"]);
+  assert.deepEqual(r.kop, [0x1d, 0x76, 0x30, 0x00, 0x0c, 0x00, 0xf0, 0x00]);
+  assert.equal(r.rest, 0, "precies 240 rijen van 12 bytes");
+  assert.deepEqual(r.na, ["1d 0c", "10 ff fe 45"]);
+  assert.ok(r.groot <= 180, "hoogstens 180 bytes per keer");
+  const zwart = r.data.reduce((n, b) => n + b.toString(2).split("1").length - 1, 0);
+  assert.ok(zwart > 1500 && zwart < 12000, `een QR en tekst, geen leeg of zwart label (${zwart} zwarte pixels)`);
+  // Het gedraaide beeld bewaren om te bekijken (zoals het uit de printer komt: 96 breed, 240 lang).
+  const rasterPng = async (data, naam) => {
+    const url = await page.evaluate((data) => {
+      const c = document.createElement("canvas");
+      c.width = 96; c.height = 240;
+      const x = c.getContext("2d");
+      x.fillStyle = "#fff"; x.fillRect(0, 0, 96, 240); x.fillStyle = "#000";
+      for (let rij = 0; rij < 240; rij++) for (let k = 0; k < 96; k++) if ((data[rij * 12 + (k >> 3)] >> (7 - (k & 7))) & 1) x.fillRect(k, rij, 1, 1);
+      return c.toDataURL("image/png");
+    }, data);
+    fs.writeFileSync(path.join(SHOTS, naam), Buffer.from(url.split(",")[1], "base64"));
+  };
+  await rasterPng(r.data, "p4-fichero-proeflabel.png");
+
+  stap("Fichero: 0,5 mm naar rechts, randtest: de rand begint 4 rijen later");
+  await sheet().getByRole("button", { name: "Naar rechts" }).click();
+  await sheet().locator(".afstel-schuif strong", { hasText: "0,5 mm naar rechts" }).waitFor();
+  const voor = await page.evaluate(() => window.__bt.writes.length);
+  await sheet().getByRole("button", { name: "Randtest" }).click();
+  await page.getByText(/Randtest geprint/).last().waitFor();
+  await page.waitForFunction((n) => window.__bt.writes.length > n + 10, voor);
+  r = await raster(voor);
+  assert.ok(r.data.slice(0, 48).every((b) => b === 0), "de eerste 4 rijen zijn leeg");
+  assert.ok(r.data.slice(48, 72).every((b) => b === 0xff), "rij 4 en 5: de linkerrand, over de hele kop");
+  await rasterPng(r.data, "p5-fichero-randtest.png");
+
+  await page.waitForTimeout(500);
+  await foto("p3-fichero");
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 0, "niets steekt uit");
+
+  stap("terug naar de Niimbot: de Fichero gaat los");
+  await sheet().locator(".printerkeuze .chip", { hasText: "Niimbot" }).click();
+  await sheet().locator(".printerkaart:not(.verbonden)").waitFor();
+  await sheet().locator(".maatkeuze:not(.printerkeuze) .chip.aan", { hasText: "50 × 30 mm" }).waitFor();
 
   assert.deepEqual(fouten, [], "geen JavaScript-fouten");
   await browser.close();

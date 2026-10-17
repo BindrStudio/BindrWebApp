@@ -155,9 +155,9 @@ function laadDemo(): (Data & { etalage: Etalage }) | null {
     // Zoals de publieke weergaven: enkel aangevinkte omgevingen, geen kaarten waarvan het hartje moet wisselen of het label nog niet hangt.
     const zichtbaar = new Set(((d.omgevingen ?? []) as { id: string; zichtbaar_voor_klanten: boolean }[]).filter((o) => o.zichtbaar_voor_klanten).map((o) => o.id));
     const toon = (r: { omgeving_id?: string | null }) => !zichtbaar.size || !r.omgeving_id || zichtbaar.has(r.omgeving_id);
-    type DemoEx = VitrineRij & { opslag: string; status: string; hartjesprijs: number | null; hartjesdatum: string | null; vitrine_sinds?: string | null; nieuw_hartje?: number | null; omgeving_id?: string | null; label_status?: string };
+    type DemoEx = VitrineRij & { opslag: string; status: string; hartjesprijs: number | null; hartjesdatum: string | null; vitrine_sinds?: string | null; nieuw_hartje?: number | null; omgeving_id?: string | null; label_status?: string; reservering?: unknown };
     const kaarten = (d.exemplaren as DemoEx[])
-      .filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null && e.nieuw_hartje == null && (e.label_status === "gestickerd" || e.soort === "eigen product") && toon(e))
+      .filter((e) => e.opslag === "vitrine" && e.status === "in voorraad" && e.hartjesprijs != null && e.nieuw_hartje == null && (e.label_status === "gestickerd" || e.soort === "eigen product") && !e.reservering && toon(e))
       .map((e) => vanKaart({ ...e, prijs: e.hartjesprijs!, sinds: e.hartjesdatum, toegevoegd: e.vitrine_sinds ?? e.hartjesdatum }));
     type DemoArt = ArtikelRij & { opslag: string; omgeving_id?: string | null; zichtbaar?: boolean | null; details?: Record<string, unknown> | null };
     const artikelen = (d.artikelen as DemoArt[])
@@ -1394,6 +1394,16 @@ const SpeelIcoon = () => <Svg maat={16}><path d="M8 5.5v13l10-6.5Z" fill="curren
 const PijlIcoon = () => <Svg maat={18}><path d="M5 12h13M13 6l6 6-6 6" /></Svg>;
 const StandIcoon = () => <Svg maat={22}><path d="M3.5 9.5 6 4.5h12l2.5 5" /><path d="M3.5 9.5a2.8 2.8 0 0 0 5.67 0 2.8 2.8 0 0 0 5.66 0 2.8 2.8 0 0 0 5.67 0" /><path d="M5 12v8h14v-8" /></Svg>;
 const Sparkel = () => <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2c.6 4.6 2.4 7.4 10 10-7.6 2.6-9.4 5.4-10 10-.6-4.6-2.4-7.4-10-10 7.6-2.6 9.4-5.4 10-10Z" /></svg>;
+
+// De breedte van het scherm zonder schuifbalk, voor wat over de hele breedte loopt (de balk, de zoekrij, de
+// Instagram-strook). 100vw telt op Windows de schuifbalk mee: dan staken die 15 px uit (klant.css: --vol).
+function zetBreedte() {
+  const w = document.documentElement.clientWidth;
+  if (w > 0) document.documentElement.style.setProperty("--vol", `${w}px`);
+}
+zetBreedte();
+addEventListener("resize", zetBreedte);
+if (typeof ResizeObserver !== "undefined") new ResizeObserver(zetBreedte).observe(document.documentElement);
 
 // Een link uit een herstelmail (wachtwoord vergeten) die hier landt, hoort bij het beheer.
 // (ook een verlopen link: #error=…&error_code=otp_expired, dan legt het beheer het uit).

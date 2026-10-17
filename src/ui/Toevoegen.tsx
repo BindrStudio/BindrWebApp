@@ -6,7 +6,7 @@ import { afbeelding, herken, laadCatalogus, zoek, type Index, type Kandidaat } f
 import { uitCatalogus } from "../lib/foto";
 import { nieuweCode, toonCode } from "../lib/code";
 import { euro, getal, vandaag } from "../lib/format";
-import { voorstelVoor } from "../lib/pricing";
+import { NAKIJKEN, voorstelVoor } from "../lib/pricing";
 import { bestandNaarCanvas } from "../lib/camera";
 import { leesKaart } from "../lib/ocr";
 import { Icoon, KaartFoto, Kiezer, OnderAankoop, onderAankoop, Segment, Sheet, Veld } from "./common";
@@ -304,6 +304,7 @@ function Details({ kaart, opslag, onTerug, onKlaar }: { kaart: CatalogusKaart | 
               <strong>{euro(voorstel.voorstel)}</strong>
             </div>
           )}
+          {voorstel?.nakijken && <p className="nakijken klein">{voorstel.waarom.map((w) => NAKIJKEN[w]).join(" ")}</p>}
         </MarktBlok>
       )}
 

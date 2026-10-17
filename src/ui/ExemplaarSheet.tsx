@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { bevestigLabel, kanNieuweBoekhouding, meld, OUD_SCHEMA, openExemplaar, openToevoegen, print, prive, sluit, useApp, wijzig, zetHartje } from "../state";
+import { annuleerReservering, bevestigLabel, kanNieuweBoekhouding, kanReserveren, meld, OUD_SCHEMA, openExemplaar, openToevoegen, print, prive, reserveer, SCHEMA_016, sluit, useApp, wijzig, zetHartje } from "../state";
 import type { Exemplaar } from "../types";
 import { CONDITIES, TALEN, VARIANTEN } from "../types";
-import { dagenGeleden, datumKort, euro, getal } from "../lib/format";
+import { dagenGeleden, datumKort, euro, getal, vandaag } from "../lib/format";
 import { toonCode } from "../lib/code";
-import { krijgtLabel } from "../lib/exemplaar";
-import { voorstelVoor } from "../lib/pricing";
+import { actieveReservering, inVoorraad, krijgtLabel, reserveringVerlopen } from "../lib/exemplaar";
+import { NAKIJKEN, voorstelVoor } from "../lib/pricing";
 import { labelDataUrl } from "../lib/label";
 import { huidigeMaat } from "../lib/printer";
 import { Badges, FotoGroot, Hartje, Icoon, KaartFoto, Kiezer, OnderAankoop, onderAankoop, Sheet, Veld } from "./common";
@@ -71,6 +71,7 @@ export function ExemplaarSheet({ id }: { id: string }) {
         onderschrift={<><strong>{ex.naam}</strong><span>{[ex.set_code, ex.nummer].filter(Boolean).join(" ")}{ex.taal ? ` · ${ex.taal}` : ""}</span></>} />}
       {(geenFoto || ex.foto || bewerk) && <EigenFoto ex={ex} geen={geenFoto} />}
 
+      <ReserveerBlok ex={ex} />
       <MandjeActie ex={ex} />
       <KlantZiet ex={ex} />
 
@@ -99,7 +100,7 @@ export function ExemplaarSheet({ id }: { id: string }) {
             <strong>{euro(voorstel.voorstel)}</strong>
           </div>
         )}
-        {voorstel?.nakijken && <p className="nakijken">Trend en 30-dagengemiddelde wijken sterk af: even nakijken.</p>}
+        {voorstel?.nakijken && <p className="nakijken">Even nakijken. {voorstel.waarom.map((w) => NAKIJKEN[w]).join(" ")}</p>}
       </MarktBlok>}
 
       {krijgtLabel(ex) && <LabelBlok ex={ex} printer={printer} />}
@@ -129,6 +130,80 @@ export function ExemplaarSheet({ id }: { id: string }) {
         <UitVoorraad ex={ex} />
       </div>
     </Sheet>
+  );
+}
+
+/**
+ * Reserveren: een kaart achterhouden voor iemand (een vriend, iemand die via Instagram vroeg), aan een afgesproken
+ * prijs. Ze gaat uit de catalogus naar de vault; in de kassa krijgt ze die prijs en zegt de app voor wie ze is.
+ */
+function ReserveerBlok({ ex }: { ex: Exemplaar }) {
+  const res = actieveReservering(ex);
+  const [open, setOpen] = useState(false);
+  const [voor, setVoor] = useState("");
+  const [prijs, setPrijs] = useState("");
+  const [tot, setTot] = useState("");
+  const [opmerking, setOpmerking] = useState("");
+  if (!inVoorraad(ex)) return null;
+  if (res) {
+    const verlopen = reserveringVerlopen(res, vandaag());
+    return (
+      <div className={`reservering-kaart${verlopen ? " verlopen" : ""}`}>
+        <Icoon naam="slot" maat={20} />
+        <div>
+          <strong>Gereserveerd voor {res.voor}</strong>
+          <span>
+            {res.prijs != null ? `Afgesproken prijs ${euro(res.prijs)}` : "Aan de gewone prijs"}
+            {res.tot ? ` · ${verlopen ? "verlopen op" : "tot"} ${datumKort(res.tot)}` : ""} · sinds {datumKort(res.op)}
+          </span>
+          {res.opmerking && <span className="zacht">{res.opmerking}</span>}
+          <span className="zacht klein">Ze ligt in de vault en staat niet op de klantenpagina. Komt {res.voor} ze halen: tik op Verkopen aan {res.voor}.</span>
+          <div className="knoppenrij">
+            {res.vorige_opslag === "vitrine" && <button className="knop zacht klein" onClick={() => annuleerReservering(ex, true)}>Opheffen, terug naar de catalogus</button>}
+            <button className="tekstknop klein" onClick={() => annuleerReservering(ex, false)}>{res.vorige_opslag === "vitrine" ? "Opheffen, in de vault laten" : "Reservering opheffen"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (!open) {
+    return (
+      <button className="knop zacht reserveer-knop" onClick={() => { setPrijs(String(ex.opslag === "vitrine" ? ex.hartjesprijs ?? "" : ex.verkoopprijs ?? ex.hartjesprijs ?? "")); setOpen(true); }}>
+        <Icoon naam="slot" maat={18} /> Reserveren voor iemand
+      </button>
+    );
+  }
+  if (!kanReserveren()) return <p className="nakijken">{SCHEMA_016}</p>;
+  const p = prijs.trim() ? getal(prijs) : null;
+  const bewaar = () => {
+    try {
+      reserveer(ex, { voor, prijs: p, tot: tot || null, opmerking });
+      setOpen(false);
+    } catch (e) {
+      meld(e instanceof Error ? e.message : String(e), "fout");
+    }
+  };
+  return (
+    <section className="blok reserveer-form">
+      <h3>Reserveren</h3>
+      <p className="zacht klein">De kaart gaat uit de catalogus (ook op de klantenpagina) en ligt in de vault tot de persoon ze komt halen.</p>
+      <Veld label="Voor wie?">
+        <input value={voor} onChange={(e) => setVoor(e.target.value)} placeholder="Naam (of @instagram)" maxLength={80} autoFocus />
+      </Veld>
+      <Veld label="Afgesproken prijs (€)" hint="Leeg = de gewone prijs.">
+        <input inputMode="decimal" value={prijs} onChange={(e) => setPrijs(e.target.value)} />
+      </Veld>
+      <Veld label="Tot wanneer? (optioneel)">
+        <input type="date" value={tot} min={vandaag()} onChange={(e) => setTot(e.target.value)} />
+      </Veld>
+      <Veld label="Opmerking (optioneel)">
+        <input value={opmerking} onChange={(e) => setOpmerking(e.target.value)} maxLength={200} placeholder="bv. komt naar de beurs in Gent" />
+      </Veld>
+      <div className="knoppenrij">
+        <button className="knop" disabled={!voor.trim() || (prijs.trim() !== "" && (p == null || p <= 0))} onClick={bewaar}>Reserveren</button>
+        <button className="knop zacht" onClick={() => setOpen(false)}>Annuleer</button>
+      </div>
+    </section>
   );
 }
 
@@ -315,8 +390,8 @@ function HartjeBlok({ ex, voorstelPrijs }: { ex: Exemplaar; voorstelPrijs: numbe
 function LabelBlok({ ex, printer }: { ex: Exemplaar; printer: string | null }) {
   const { instellingen } = useApp();
   const voorbeeld = useMemo(() => {
-    try { return labelDataUrl(ex, huidigeMaat(instellingen.labelMaat)); } catch { return null; }
-  }, [ex.code, ex.naam, ex.set_code, ex.nummer, ex.conditie, ex.taal, ex.variant, ex.grader, ex.grade, ex.soort, instellingen.labelMaat, printer]);
+    try { return labelDataUrl(ex, huidigeMaat(instellingen.labelMaat, instellingen.labelPrinter)); } catch { return null; }
+  }, [ex.code, ex.naam, ex.set_code, ex.nummer, ex.conditie, ex.taal, ex.variant, ex.grader, ex.grade, ex.soort, instellingen.labelMaat, instellingen.labelPrinter, printer]);
   const status = { "te printen": "Nog te printen", geprint: "Geprint, nog niet gescand na het plakken", gestickerd: "Hangt op de kaart" }[ex.label_status];
   return (
     <section className="blok">

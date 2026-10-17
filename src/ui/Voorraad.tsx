@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { doePrijscheck, openArtikel, openExemplaar, openLabels, openToevoegen, useApp } from "../state";
 import type { Artikel, Exemplaar, Opslag } from "../types";
-import { datumKort, euro, zonderAccenten } from "../lib/format";
+import { datumKort, euro, vandaag, zonderAccenten } from "../lib/format";
 import { toonCode } from "../lib/code";
 import { waardeStijgers, type TeWijzigen } from "../lib/pricing";
 import { CATEGORIEEN, PLAATS, actiefArtikel, artikelOmschrijving, categorieArtikel, categorieExemplaar, type Categorie } from "../lib/categorie";
-import { inVoorraad, krijgtLabel } from "../lib/exemplaar";
+import { actieveReservering, inVoorraad, krijgtLabel, reserveringVerlopen } from "../lib/exemplaar";
 import { kantel } from "../lib/kantel";
 import { veiligeFoto } from "../lib/eigenfoto";
 
@@ -17,7 +17,7 @@ import { Badges, Hartje, Icoon, KaartFoto, Leeg } from "./common";
 import { SetKiezer } from "../gedeeld/SetKiezer";
 import { setLogo } from "../lib/foto";
 
-type Filter = "geen" | "wijzigen" | "label" | "gestegen";
+type Filter = "geen" | "wijzigen" | "label" | "gestegen" | "gereserveerd";
 type Item = { soort: "ex"; groep: Groep<Exemplaar>; t: Toonbaar } | { soort: "art"; art: Artikel; t: Toonbaar };
 
 /** Een exemplaar zoals de catalogusweergave het ziet (prijs = het hartje of, in de vault, de waarde). */
@@ -100,6 +100,7 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
       if (filter === "wijzigen" && !teWijzigen.has(e.id)) return false;
       if (filter === "gestegen" && !stijgers.has(e.id)) return false;
       if (filter === "label" && e.label_status === "gestickerd") return false;
+      if (filter === "gereserveerd" && !actieveReservering(e)) return false;
       if (set && setIdVan(e) !== set) return false;
       if (snel.size && !pastFilters(toonbaar(e), snel)) return false;
       if (woorden.length) {
@@ -109,7 +110,8 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
       return true;
     });
     // Dubbels (zelfde kaart, conditie en prijs) worden één tegel met een aantal.
-    const groepen = groepeer(passend, (e) => groepSleutel(toonbaar(e)) + (band.has(e.id) ? "|band" : ""));
+    // Een gereserveerde kaart staat apart (ze is niet zomaar te koop).
+    const groepen = groepeer(passend, (e) => groepSleutel(toonbaar(e)) + (band.has(e.id) ? "|band" : "") + (actieveReservering(e) ? `|res:${e.id}` : ""));
     let items: Item[] = groepen.map((g) => ({ soort: "ex" as const, groep: g, t: toonbaar(g.eerste) }));
     if (filter === "geen" && !set && !snel.size) {
       items.push(...art
@@ -124,6 +126,7 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
 
   const aantalLabels = exemplaren.filter((e) => inVoorraad(e) && krijgtLabel(e) && e.label_status === "te printen").length;
   const nogTePlakken = ex.filter((e) => krijgtLabel(e) && e.label_status !== "gestickerd").length;
+  const gereserveerd = ex.filter((e) => actieveReservering(e)).length;
   const zichtbareCats = CATEGORIEEN.filter((c) => telling[c.id]);
   const wisselSnel = (f: Snelfilter) => { const n = new Set(snel); if (n.has(f)) n.delete(f); else n.add(f); setSnel(n); };
   const nieuwAantal = useMemo(() => ex.filter((e) => isNieuw(toonbaar(e))).length, [ex]);
@@ -195,6 +198,7 @@ export function Voorraad({ opslag }: { opslag: Opslag }) {
         )}
         {catalogus && teWijzigen.size > 0 && <FilterChip aan={filter === "wijzigen"} onClick={() => setFilter(filter === "wijzigen" ? "geen" : "wijzigen")} rood>Te wijzigen {teWijzigen.size}</FilterChip>}
         {!catalogus && stijgers.size > 0 && <FilterChip aan={filter === "gestegen"} onClick={() => setFilter(filter === "gestegen" ? "geen" : "gestegen")}>Waarde gestegen {stijgers.size}</FilterChip>}
+        {gereserveerd > 0 && <FilterChip aan={filter === "gereserveerd"} onClick={() => setFilter(filter === "gereserveerd" ? "geen" : "gereserveerd")}>Gereserveerd {gereserveerd}</FilterChip>}
         {nogTePlakken > 0 && <FilterChip aan={filter === "label"} onClick={() => setFilter(filter === "label" ? "geen" : "label")}>Label nog niet geplakt {nogTePlakken}</FilterChip>}
         {SNELFILTERS.filter((f) => f.id !== "nieuw" || nieuwAantal > 0).map((f) => (
           <FilterChip key={f.id} aan={snel.has(f.id)} onClick={() => wisselSnel(f.id)}>{f.id === "nieuw" ? `${catalogus ? "Nieuw binnen" : "Nieuw"} ${nieuwAantal}` : f.label}</FilterChip>
@@ -243,9 +247,10 @@ export function Tegel({ ex, i, band, vault, aantal = 1, labelOpen }: { ex: Exemp
   const prijs = ex.opslag === "vitrine" ? ex.hartjesprijs : ex.verkoopprijs;
   const duur = (prijs ?? 0) >= 50;
   const label = labelOpen ?? ex.label_status !== "gestickerd";
+  const res = actieveReservering(ex);
   return (
     <button
-      className={`tegel${band && !vault ? " wijzig" : ""}${duur && ex.soort !== "slab" ? " holo" : ""}${ex.soort === "slab" ? " slab" : ""}`}
+      className={`tegel${res ? " gereserveerd" : ""}${band && !vault ? " wijzig" : ""}${duur && ex.soort !== "slab" ? " holo" : ""}${ex.soort === "slab" ? " slab" : ""}`}
       style={{ ["--i" as string]: Math.min(i, 24) }}
       onClick={() => openExemplaar(ex.id)}
       {...kantel}
@@ -262,12 +267,15 @@ export function Tegel({ ex, i, band, vault, aantal = 1, labelOpen }: { ex: Exemp
         </div>
       )}
       {aantal > 1 && <span className="aantal-merk" title={`${aantal} exemplaren`}>×{aantal}</span>}
+      {res && <span className={`gereserveerd-lint${reserveringVerlopen(res, vandaag()) ? " verlopen" : ""}`} title={`Gereserveerd voor ${res.voor}`}>Gereserveerd · {res.voor}</span>}
       <div className="tegel-info">
         <div className="tegel-naam">{ex.naam}</div>
         <div className="tegel-set">{[ex.set_code, ex.nummer].filter(Boolean).join(" ") || (ex.soort === "eigen product" ? "Bind'r" : ex.soort)}</div>
         <Badges ex={ex} />
         <div className="tegel-onder">
-          {ex.opslag === "vitrine" ? <Hartje prijs={ex.hartjesprijs} /> : <span className="waarde">{euro(ex.verkoopprijs)}</span>}
+          {res?.prijs != null
+            ? <span className="waarde" title="Afgesproken prijs">{euro(res.prijs)} <span className="zacht klein">afgesproken</span></span>
+            : ex.opslag === "vitrine" ? <Hartje prijs={ex.hartjesprijs} /> : <span className="waarde">{euro(ex.verkoopprijs)}</span>}
           {label && <span className="label-stip" title="Label nog niet geplakt"><Icoon naam="label" maat={14} /></span>}
         </div>
       </div>

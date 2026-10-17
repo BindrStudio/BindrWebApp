@@ -6,8 +6,8 @@ import { schoonArtikel, schoonExemplaar } from "../lib/exemplaar";
 
 const SESSIE_SLEUTEL = "bindr-sessie-v1";
 const VERSIE_SLEUTEL = "bindr-schema-v1";
-/** De versie van het schema die alles van de app kan (supabase/schema.sql van 0.15). */
-export const NIEUWSTE = 14;
+/** De versie van het schema die alles van de app kan (supabase/schema.sql van 0.16). */
+export const NIEUWSTE = 15;
 /** Vanaf deze versie (schema 0.10): meer foto's per artikel, de etalage en aanvragen voor een eigen binder. */
 export const ETALAGE_VANAF = 9;
 /** Vanaf deze versie (schema 0.11): aanvragen met toploader ja/nee en afbeeldingen van het idee. */
@@ -18,6 +18,9 @@ export const THEMA_VANAF = 12;
 export const LOGOS_VANAF = 13;
 /** Vanaf deze versie (schema 0.15): de feed met onze Instagram-berichten staat in publieke_instellingen. */
 export const FEED_VANAF = 14;
+/** Vanaf deze versie (schema 0.16): reserveren, storecredit (tegoed) en verzendkosten. */
+export const RESERVEREN_VANAF = 15;
+export const TEGOED_VANAF = 15;
 /** Vanaf deze versie kan de boekhouding van 0.8 (kas, overschrijving, privé, aankoopfoto's …) naar de server. */
 export const BOEKHOUDING_VANAF = 7;
 const PAGINA = 1000;
@@ -200,7 +203,7 @@ export class SupabaseBackend implements Backend {
   /** True als de database nog het schema van fase 1 heeft (geen beurzen en transacties). */
   schemaOud = false;
 
-  /** 14 = Instagram-berichten automatisch (0.15), 13 = drie logo's per thema, "nu live" (0.14), 12 = binders vooraan, Instagram-strook en thema's (0.13), 10 = aanvragen met toploader en afbeeldingen, wettelijke gegevens (0.11), 9 = etalage, meer foto's per artikel en aanvragen (0.10), 8 = beurzen met uren en link, artikels zichtbaar per stuk (0.9), 7 = inbreng van kaarten die al in de app staan (0.8), 6 = aankoopfoto's en privé (0.7), 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
+  /** 15 = reserveren, tegoed en verzendkosten (0.16), 14 = Instagram-berichten automatisch (0.15), 13 = drie logo's per thema, "nu live" (0.14), 12 = binders vooraan, Instagram-strook en thema's (0.13), 10 = aanvragen met toploader en afbeeldingen, wettelijke gegevens (0.11), 9 = etalage, meer foto's per artikel en aanvragen (0.10), 8 = beurzen met uren en link, artikels zichtbaar per stuk (0.9), 7 = inbreng van kaarten die al in de app staan (0.8), 6 = aankoopfoto's en privé (0.7), 5 = eigen kaartfoto's en boekhouding (0.6), 4 = artikel-details en graded (0.5), 3 = omgevingen (0.4), 2 = ouder. Null zolang we het niet weten. */
   versie: number | null = (() => { const v = Number(localStorage.getItem(VERSIE_SLEUTEL)); return v >= 2 && v <= NIEUWSTE ? v : null; })();
 
   private async zekerVersie() {
@@ -209,6 +212,8 @@ export class SupabaseBackend implements Backend {
 
   private schoon<T extends object>(r: T, tabel: Tabel): T {
     const v = this.versie ?? 5;
+    // Een reservering gaat enkel mee met een ander schema dan 0.16 als ze er niet in zit (zie wijzigExemplaar).
+    if (v < RESERVEREN_VANAF && tabel === "exemplaren" && "reservering" in r) { const { reservering: _, ...rest } = r as Record<string, unknown>; r = rest as T; }
     if (v >= 8) return r;
     const k = { ...r } as Record<string, unknown>;
     for (const x of KOLOMMEN_V8[tabel]) delete k[x];
@@ -234,7 +239,7 @@ export class SupabaseBackend implements Backend {
         if (e instanceof Fout && (e.status === 400 || e.status === 404)) return false; // onbekende kolom of tabel
         throw e;
       });
-      // Vanaf 0.8 zegt de database zelf welke versie ze heeft (schema_versie: 8 = 0.8, 9 = 0.9, 10 = 0.10, 11 = 0.11, 13 = 0.13, 14 = 0.14, 15 = 0.15).
+      // Vanaf 0.8 zegt de database zelf welke versie ze heeft (schema_versie: 8 = 0.8, 9 = 0.9, 10 = 0.10, 11 = 0.11, 13 = 0.13, 14 = 0.14, 15 = 0.15, 16 = 0.16).
       const schema = await this.vraag<number>("GET", "rpc/schema_versie").then((n) => Number(n) || 0, (e) => {
         if (e instanceof Fout && (e.status === 400 || e.status === 404)) return 0;
         throw e;
@@ -289,7 +294,7 @@ export class SupabaseBackend implements Backend {
   }
 
   private exemplaarKolommen() {
-    return (this.versie ?? 0) >= 5 ? EXEMPLAAR_KOLOMMEN : "*";
+    return (this.versie ?? 0) >= 5 ? EXEMPLAAR_KOLOMMEN + ((this.versie ?? 0) >= RESERVEREN_VANAF ? ",reservering" : "") : "*";
   }
 
   private async vulFotos<T extends { id: string; foto?: string | null }>(tabel: "artikelen" | "exemplaren", rijen: T[], alles: boolean): Promise<T[]> {
@@ -471,6 +476,8 @@ export class SupabaseBackend implements Backend {
   }
 
   async wijzigExemplaar(id: string, wijziging: Partial<Exemplaar>) {
+    // Een reservering kan pas met schema 0.16: tot dan wacht ze in de wachtrij (niet weigeren en kwijtraken).
+    if ("reservering" in wijziging) await this.vraagNieuw("Een reservering", RESERVEREN_VANAF);
     await this.zekerVersie();
     wijziging = this.schoon(wijziging, "exemplaren");
     if (!Object.keys(wijziging).length) return { id } as Exemplaar;
@@ -545,10 +552,16 @@ export class SupabaseBackend implements Backend {
   }
 
   async boekTransactie(t: Transactie) {
-    const { id, beurs_id, soort, tijd, regels, totaal, cash, sumup, bank, tegenpartij, opmerking, omgeving_id } = t;
+    const { id, beurs_id, soort, tijd, regels, totaal, cash, sumup, bank, tegoed, tegoed_van, tegenpartij, opmerking, omgeving_id } = t;
     const nieuw = soort === "kas" || soort === "prive" || !!bank || !!tegenpartij || (soort === "retour" && regels.some((r) => r.richting === "uit"));
     if (nieuw) await this.vraagNieuw(soort === "kas" ? "Geld in of uit de kas" : soort === "prive" ? "Kaarten van of naar privé" : soort === "retour" ? "Een deal terugdraaien" : "Een aankoopbewijs of overschrijving");
-    return this.rpc("boek_transactie", { t: { id, beurs_id, soort, tijd, regels, totaal, cash, sumup, opmerking, omgeving_id, ...(nieuw ? { bank: bank ?? 0, tegenpartij: tegenpartij ?? null } : {}) } });
+    // Storecredit (0.16): wacht in de wachtrij tot het schema er klaar voor is (anders zou de bon verloren gaan).
+    if (tegoed) await this.vraagNieuw("Storecredit (tegoed)", TEGOED_VANAF);
+    return this.rpc("boek_transactie", { t: {
+      id, beurs_id, soort, tijd, regels, totaal, cash, sumup, opmerking, omgeving_id,
+      ...(nieuw ? { bank: bank ?? 0, tegenpartij: tegenpartij ?? null } : {}),
+      ...(tegoed ? { tegoed, tegoed_van: tegoed_van ?? null, tegenpartij: tegenpartij ?? null } : {}),
+    } });
   }
 
   /** Het borderel aanvullen (naam, adres, handtekening) nadat de transactie geboekt is. */

@@ -11,6 +11,7 @@ import {
 } from "../lib/boekhouding";
 import { beursCijfers, CASH_GRENS, rond2 } from "../lib/kassa";
 import { datumKort, euro, vandaag } from "../lib/format";
+import { bonCode, openTegoedOp } from "../lib/tegoed";
 import { toonCode } from "../lib/code";
 import { Icoon, Segment, Sheet, Veld } from "./common";
 import { kasOmschrijving, SOORT, TransactieRij } from "./Historiek";
@@ -205,6 +206,9 @@ function DagSheet({ dag, onSluit, onAankopen }: { dag: Dag; onSluit: () => void;
         <div className="afsluit-rij"><span>Geld: cash</span><strong>{euro(dag.cash)}</strong></div>
         <div className="afsluit-rij"><span>Geld: SumUp</span><strong>{euro(dag.sumup)}</strong></div>
         {dag.bank !== 0 && <div className="afsluit-rij"><span>Geld: overschrijving</span><strong>{euro(dag.bank)}</strong></div>}
+        {dag.verkopenTegoed !== 0 && <div className="afsluit-rij"><span>Betaald met een tegoedbon (geen geld, wel omzet)</span><strong>{euro(dag.verkopenTegoed)}</strong></div>}
+        {dag.verzending !== 0 && <div className="afsluit-rij"><span>waarvan verzendkosten aangerekend</span><strong>{euro(dag.verzending)}</strong></div>}
+        {dag.aankopenTegoed !== 0 && <div className="afsluit-rij"><span>Gekocht tegen een tegoedbon (geen geld, wel een kost)</span><strong>{euro(dag.aankopenTegoed)}</strong></div>}
         {(dag.kas !== 0 || dag.kasSumup !== 0) && <div className="afsluit-rij"><span>Kasbewegingen (geen omzet)</span><strong>{euro(dag.kas)}{dag.kasSumup ? ` · SumUp ${euro(dag.kasSumup)}` : ""}</strong></div>}
         {dag.kasSumup > 0 && <p className="zacht klein">SumUp van een kasbeweging is geen verkoop: trek het af als je de SumUp-uitbetaling met je ontvangsten vergelijkt.</p>}
         <p className="zacht klein">Een ruil telt als verkoop van onze kaarten: die waarde telt mee voor de grens van de btw-vrijstelling. Hun kaarten staan als kost bij de aankopen van deze dag.</p>
@@ -331,9 +335,9 @@ function AankoopDagSheet({ dag, onSluit, onBewijs }: { dag: Dag; onSluit: () => 
  * volledige naam en de gemeente. Een handelaar geeft een factuur. Geen identiteitskaart.
  */
 /** Waar we buiten een beurs kochten: online, op een rommelmarkt of elders. */
-export function KanaalVeld({ waarde, onChange }: { waarde: Tegenpartij; onChange: (t: Tegenpartij) => void }) {
+export function KanaalVeld({ waarde, onChange, label = "Waar gekocht?" }: { waarde: Tegenpartij; onChange: (t: Tegenpartij) => void; label?: string }) {
   return (
-    <Veld label="Waar gekocht?">
+    <Veld label={label}>
       <div className="kiezer">
         {(["online", "rommelmarkt", "andere"] as const).map((k) => (
           <button key={k} type="button" className={`chip${waarde.kanaal === k ? " aan" : ""}`} onClick={() => onChange({ ...waarde, kanaal: k })}>{KANAAL[k]}</button>
@@ -453,7 +457,8 @@ export function BewijsSheet({ id, onSluit }: { id: string; onSluit: () => void }
         {t.soort === "prive"
           ? <p className="zacht klein">{priveIn ? "Geen geld: een kost die je met privémiddelen betaalde." : "Geen geld: de aankoopwaarde gaat uit de kosten (onttrekking)."}</p>
           : <><div className="afsluit-rij totaal"><span>{t.soort === "ruil" ? (t.totaal > 0 ? "Klant betaalde bij" : t.totaal < 0 ? "Wij betaalden bij" : "Zonder bijbetaling") : "Betaald"}</span><strong>{euro(Math.abs(t.totaal))}</strong></div>
-            <div className="zacht klein">{betaalTekst(t)}</div></>}
+            <div className="zacht klein">{betaalTekst(t)}</div>
+            {(t.tegoed ?? 0) < 0 && <p className="zacht klein">{bonTekst(t, bedrijfVan(s))}</p>}</>}
       </section>
 
       {t.soort !== "prive" && (groot || bewaard.handtekening || bewaard.handtekening_ons) && (
@@ -528,12 +533,24 @@ function BorderelTabel({ lijnen, datum }: { lijnen: ReturnType<typeof borderelLi
 
 const betaalTekst = (t: Transactie) => [
   t.cash ? `cash ${euro(Math.abs(t.cash))}` : null, t.sumup ? `SumUp ${euro(Math.abs(t.sumup))}` : null, t.bank ? `overschrijving ${euro(Math.abs(t.bank))}` : null,
+  (t.tegoed ?? 0) < 0 ? `tegoedbon ${bonCode(t)} ${euro(-(t.tegoed ?? 0))}` : (t.tegoed ?? 0) > 0 ? `tegoed ${euro(t.tegoed ?? 0)}` : null,
 ].filter(Boolean).join(" + ") || "zonder geld";
+
+/** Een inkoop tegen een tegoedbon: wat de bon is (op het bewijs en het scherm). */
+function bonTekst(t: Transactie, b: Bedrijf): string {
+  const wie = b.naam?.trim() || "Bind'r";
+  return `Betaald met tegoedbon ${bonCode(t)} van ${euro(-(t.tegoed ?? 0))}, op naam van ${t.tegenpartij?.naam?.trim() || "de verkoper"}, uitgegeven op ${datumKort(t.tijd)}. Inwisselbaar bij ${wie} voor kaarten en artikels, niet in geld.`;
+}
 
 /** Wat de verkoper ondertekent (enkel als hij tekent). */
 function verklaring(t: Transactie, b: Bedrijf): string {
   const wie = b.naam?.trim() || "Bind'r";
   if (t.soort === "ruil") return `Ik ruil de kaarten op dit bewijs met ${wie}, als particulier en uit mijn eigen verzameling. Ze zijn mijn eigendom.`;
+  const bon = -(t.tegoed ?? 0);
+  if (bon > 0) {
+    const geld = rond2(Math.abs(t.totaal) - bon);
+    return `Ik verkoop de kaarten op dit bewijs aan ${wie} voor ${euro(Math.abs(t.totaal))}, als particulier en uit mijn eigen verzameling. Ze zijn mijn eigendom. Ik ontving ${geld > 0 ? `${euro(geld)} en ` : ""}tegoedbon ${bonCode(t)} van ${euro(bon)}, op mijn naam en inwisselbaar bij ${wie} voor kaarten en artikels.`;
+  }
   return `Ik verkoop de kaarten op dit bewijs aan ${wie} voor ${euro(Math.abs(t.totaal))}, als particulier en uit mijn eigen verzameling. Ze zijn mijn eigendom en ik ontving het bedrag.`;
 }
 
@@ -582,6 +599,7 @@ function VoorraadOpDatum({ jaar, bedrijf }: { jaar: number; bedrijf: Bedrijf }) 
     const h = huidig();
     return voorraadOp(datum, h.exemplaren, h.artikelen, h.transacties);
   }, [datum, s.exemplaren, s.artikelen, s.transacties]);
+  const tegoed = useMemo(() => openTegoedOp(huidig().transacties, datum), [datum, s.transacties]);
   const kaarten = inv.lijnen.filter((l) => l.code);
   const artikels = inv.lijnen.filter((l) => !l.code);
   const som = (ls: typeof inv.lijnen) => rond2(ls.reduce((x, l) => x + l.waarde, 0));
@@ -594,6 +612,12 @@ function VoorraadOpDatum({ jaar, bedrijf }: { jaar: number; bedrijf: Bedrijf }) 
         <strong>{euro(inv.totaal)}</strong>
         <span className="zacht klein">kaarten {euro(som(kaarten))} · artikels {euro(som(artikels))}</span>
       </div>
+      {tegoed > 0 && (
+        <p className="nakijken klein">
+          Open tegoedbonnen op die dag: <strong>{euro(tegoed)}</strong>. Dat zijn we nog aan klanten verschuldigd (een schuld, geen voorraad).
+          Geef het bedrag op 31/12 door aan je boekhouder, met de lijst uit Profiel › Tegoeden.
+        </p>
+      )}
       {inv.zonderWaarde > 0 && <p className="nakijken klein">{inv.zonderWaarde} {inv.zonderWaarde === 1 ? "lijn heeft" : "lijnen hebben"} geen aankoop- of kostprijs (tellen als € 0). Lege binders en ander materiaal om te verkopen horen ook in de voorraad: vul vóór 31/12 de kostprijs in bij de artikels.</p>}
       {inv.zonderAankoop.aantal > 0 && (
         <div className="nakijken klein">
@@ -644,6 +668,21 @@ function Uitleg() {
         <li>Een ruil telt als verkoop van onze kaarten (dagontvangst, aan de afgesproken prijs, met wat de klant bijbetaalt) én aankoop van hun kaarten (kost). De winst is dezelfde als wanneer je enkel het verschil boekt.</li>
         <li>Waarom niet enkel het verschil? Voor de btw is een ruil een levering aan de normale waarde: die telt mee voor de grens van € 25.000. Enkel het verschil boeken toont te weinig omzet. De teller bovenaan telt de ruilwaarde mee.</li>
       </ul>
+      <h3>Tegoedbon (storecredit)</h3>
+      <ul>
+        <li>Verkoopt iemand ons kaarten en wil hij liever tegoed? Kies bij Afrekenen <em>Tegoed</em>. Bijvoorbeeld: kaarten met een marktwaarde van € 30, we geven € 25 tegoed. Dat is een aankoop van € 25 (lijn <em>Aankoop kaarten tegen tegoedbon</em> op de dagstaat), met een aankoopbewijs en een bon TG-… op zijn naam.</li>
+        <li>Later koopt hij een kaart van € 25 en betaalt met de bon: dat is een gewone verkoop van € 25 (dagontvangst, lijn <em>Verkoop betaald met tegoedbon</em>), ook al komt er geen geld binnen. Betaalt hij een deel met de bon, dan is de rest cash of SumUp zoals altijd.</li>
+        <li>Zo kloppen de cijfers: de kaarten die we kregen zijn een kost, de kaart die we gaven is omzet, en de bon zelf is tussendoor een schuld aan de klant.</li>
+        <li>Op 31 december: wat er nog op de bonnen staat, zie je bij <em>Voorraad</em> (open tegoedbonnen) en in <em>Profiel › Tegoeden</em>. Geef dat aan je boekhouder door.</li>
+      </ul>
+      <h3>Online verkocht (Instagram, Facebook) en verzenden</h3>
+      <ol>
+        <li>Staat het product nog niet in de app? Maak het eerst aan (een kaart via Toevoegen, een binder, 3D-print of sealed bij <em>Profiel › Artikels</em>). Zo klopt de voorraad.</li>
+        <li>Open <em>Profiel › Verkocht buiten een beurs</em>, zet het in het mandje en kies bij Afrekenen hoe hij betaalde (meestal overschrijving). Vul in waar je het verkocht en bij <em>Wanneer betaald?</em> de dag dat het geld binnenkwam.</li>
+        <li>Verzonden? Vul bij <em>Verzendkosten aanrekenen</em> in wat de klant ervoor betaalde. Dat is omzet (een eigen lijn bij de dagontvangsten). Wat de post jou kost (bpost-bonnetje, verzendlabel) is een kost: die geef je apart in Dexxter in, met het bonnetje.</li>
+        <li>Komt de klant het halen? Dan geen verzendkosten; betaalt hij cash bij het afhalen, kies dan de dag van het afhalen.</li>
+        <li>De dag die telt, is de dag dat je het geld ontving. De app is je dagontvangstenboek: boek elke verkoop de dag zelf. In Dexxter mag je de dagtotalen later ingeven (bv. op het einde van de maand), elk op zijn eigen datum.</li>
+      </ol>
       <h3>Starten met je eigen verzameling</h3>
       <ol>
         <li>Zet de kaarten gewoon in de app (scannen, zoeken), zonder aankoopprijs: die ken je toch niet meer.</li>
@@ -680,6 +719,8 @@ function Uitleg() {
         <li>Met drie: één onderneming of elk apart? Dat bepaalt wie aangifte doet en voor wie de grens van € 25.000 geldt.</li>
         <li>De eigen verzameling inbrengen als aankoop van jezelf (zoals Dexxter het uitlegt) of anders? Er circuleert ook een andere lezing (privégoederen kunnen niet "verkocht" worden aan je eigen eenmanszaak): laat dit zeker bevestigen.</li>
         <li>Moet je ook dagen zonder verkoop (€ 0) ingeven in Dexxter?</li>
+        <li>Mag je de dagtotalen van online verkopen op het einde van de maand in Dexxter ingeven, als de app ze elke dag bijhoudt?</li>
+        <li>Tegoedbonnen: is "aankoop + schuld aan de klant, verkoop bij het inwisselen" goed voor jou, en hoe zet je de open bonnen op 31/12 in je aangifte?</li>
       </ul>
       <p className="zacht klein">Dit is geen boekhoudkundig of fiscaal advies. De app maakt de cijfers en documenten; je boekhouder beslist hoe ze geboekt worden.</p>
     </section>
@@ -760,6 +801,7 @@ function BewijsDocument({ t, beurs, beurzen, bedrijf }: { t: Transactie; beurs: 
         sub={<><div>Nr. {bewijsNummer(t)}</div><div>{dagLang(dagVan(t.tijd))}, {tijdKort(t.tijd)}</div>{beurs && <div>{beurs.naam}{beurs.locatie ? `, ${beurs.locatie}` : ""}</div>}</>} />
       <BewijsBlok t={t} beurzen={beurzen} />
       <p className="doc-klein">Marktwaarde: de waarde op de dag van de aankoop, volgens de vermelde bron (Cardmarket-prijsgids, laatste verkopen of eigen schatting). Het percentage is de prijs tegenover die marktwaarde. Elke kaart kreeg een eigen code (label).</p>
+      {(t.tegoed ?? 0) < 0 && <p className="doc-klein">{bonTekst(t, bedrijf)}</p>}
       {t.tegenpartij?.handtekening && <p className="doc-klein">{verklaring(t, bedrijf)}</p>}
       <footer className="doc-voet">Gemaakt met Bind'r Voorraad · transactie {t.id}</footer>
     </article>

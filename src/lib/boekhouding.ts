@@ -71,6 +71,9 @@ export interface Dag {
   aankopenGeld: number;  // waarvan inkoop voor geld (inkoop, en teruggedraaide inkopen)
   aankopenRuil: number;  // waarvan via ruil (de waarde van hun kaarten)
   aankopenFactuur: number; // waarvan met factuur (een vendor of webshop): die factuur geef je zelf in Dexxter in
+  aankopenTegoed: number; // waarvan betaald met een tegoedbon (storecredit): een aankoop, de betaling volgt later in natura
+  verkopenTegoed: number; // ontvangsten betaald met een tegoedbon (in natura, zoals een ruil): telt mee als omzet
+  verzending: number;    // verzendkosten die de klant betaalde (online verkoop): omzet
   inbreng: number;       // uit privé ingebracht (kost, betaald met privémiddelen)
   onttrekking: number;   // naar privé, aan aankoopwaarde
   kaarten: number;       // ontvangsten uit kaarten en slabs
@@ -86,6 +89,7 @@ export interface Dag {
 
 const legeDag = (datum: string): Dag => ({
   datum, verkopen: 0, ruil: 0, retour: 0, ontvangsten: 0, eigenLijnen: [], rest: 0, aankopen: 0, aankopenGeld: 0, aankopenRuil: 0, aankopenFactuur: 0,
+  aankopenTegoed: 0, verkopenTegoed: 0, verzending: 0,
   inbreng: 0, onttrekking: 0, kaarten: 0, artikels: 0, cash: 0, sumup: 0, bank: 0, kas: 0, kasSumup: 0, transacties: [], beurzen: [],
 });
 
@@ -109,14 +113,21 @@ export function dagontvangsten(transacties: Transactie[]): Dag[] {
     else if (t.soort === "ruil") d.ruil += b.ontvangst;
     else d.verkopen += b.ontvangst;
     d.aankopen += b.aankoop;
+    // Storecredit: een inkoop betaald met een tegoedbon (het deel in tegoed), een verkoop betaald met tegoed.
+    const tg = t.tegoed ?? 0;
+    const inTegoed = t.soort === "inkoop" && tg < 0 ? Math.min(b.aankoop, -tg) : 0;
+    if (tg > 0 && t.soort !== "retour") d.verkopenTegoed += tg;
     if (viaFactuur(t)) d.aankopenFactuur += b.aankoop;
-    else if (t.soort === "ruil") d.aankopenRuil += b.aankoop; else d.aankopenGeld += b.aankoop;
+    else if (t.soort === "ruil") d.aankopenRuil += b.aankoop; else { d.aankopenGeld += b.aankoop - inTegoed; d.aankopenTegoed += inTegoed; }
+    // Verzendkosten (een regel zonder kaart of artikel): omzet, apart getoond.
+    if (t.soort !== "retour") d.verzending += som(t.regels.filter((r) => r.richting === "uit" && r.extra === "verzending").map((r) => r.prijs));
     // Kaarten of artikels? (Een retour: wat terugkwam, telt negatief bij zijn soort.)
     const teken = t.soort === "retour" ? -1 : 1;
     const kant = t.soort === "retour" ? "in" : "uit";
     const art = som(t.regels.filter((r) => r.richting === kant && r.artikel_id).map((r) => r.prijs)) * teken;
+    const extra = som(t.regels.filter((r) => r.richting === kant && r.extra).map((r) => r.prijs)) * teken;
     d.artikels += art;
-    d.kaarten += b.ontvangst - art;
+    d.kaarten += b.ontvangst - art - extra;
     d.cash += b.cash; d.sumup += b.sumup; d.bank += b.bank;
     if (t.soort === "verkoop" || t.soort === "ruil") {
       for (const r of t.regels) {
@@ -133,6 +144,7 @@ export function dagontvangsten(transacties: Transactie[]): Dag[] {
       verkopen: rond2(d.verkopen), ruil: rond2(d.ruil), retour: rond2(d.retour), ontvangsten,
       rest: rond2(ontvangsten - som(d.eigenLijnen.map((l) => l.bedrag))),
       aankopen: rond2(d.aankopen), aankopenGeld: rond2(d.aankopenGeld), aankopenRuil: rond2(d.aankopenRuil), aankopenFactuur: rond2(d.aankopenFactuur),
+      aankopenTegoed: rond2(d.aankopenTegoed), verkopenTegoed: rond2(d.verkopenTegoed), verzending: rond2(d.verzending),
       inbreng: rond2(d.inbreng), onttrekking: rond2(d.onttrekking), kaarten: rond2(d.kaarten), artikels: rond2(d.artikels),
       cash: rond2(d.cash), sumup: rond2(d.sumup), bank: rond2(d.bank),
       kas: rond2(d.kas), kasSumup: rond2(d.kasSumup),
@@ -149,6 +161,7 @@ export function kostenLijnen(d: Dag, waar?: string): DexxterLijn[] {
   const w = waar ? ` (${waar})` : "";
   return [
     d.aankopenGeld ? { omschrijving: `Aankoop kaarten van particulieren${w}`, bedrag: d.aankopenGeld } : null,
+    d.aankopenTegoed ? { omschrijving: `Aankoop kaarten tegen tegoedbon${w}`, bedrag: d.aankopenTegoed } : null,
     d.aankopenRuil ? { omschrijving: `Inkoop via ruil${w}`, bedrag: d.aankopenRuil } : null,
     d.inbreng ? { omschrijving: "Inbreng kaarten uit privé (betaald met privémiddelen)", bedrag: d.inbreng } : null,
   ].filter(Boolean) as DexxterLijn[];
@@ -160,8 +173,14 @@ export interface DexxterLijn { omschrijving: string; bedrag: number }
 export function dexxterLijnen(d: Dag, beursNaam?: string): DexxterLijn[] {
   const waar = beursNaam ? ` (${beursNaam})` : "";
   const lijnen: DexxterLijn[] = d.eigenLijnen.map((l) => ({ omschrijving: `${l.omschrijving}${l.code ? ` · ${l.code}` : ""}`, bedrag: l.bedrag }));
-  const restZonderRetour = rond2(d.rest - d.retour);
-  if (restZonderRetour !== 0 || !lijnen.length) lijnen.push({ omschrijving: `Verkoop kaarten en artikels${waar}`, bedrag: restZonderRetour });
+  // Apart: wat met een tegoedbon betaald werd (geen geld, wel omzet) en de verzendkosten (online verkoop).
+  // (Nooit meer apart dan er in de rest zit: een stuk boven € 500 staat al op een eigen lijn.)
+  const vz = Math.max(0, Math.min(d.verzending, rond2(d.rest - d.retour)));
+  const tg = Math.max(0, Math.min(d.verkopenTegoed, rond2(d.rest - d.retour - vz)));
+  const restZonderRetour = rond2(d.rest - d.retour - tg - vz);
+  if (restZonderRetour !== 0 || (!lijnen.length && !tg && !vz)) lijnen.push({ omschrijving: `Verkoop kaarten en artikels${waar}`, bedrag: restZonderRetour });
+  if (tg) lijnen.push({ omschrijving: `Verkoop betaald met tegoedbon${waar}`, bedrag: rond2(tg) });
+  if (vz) lijnen.push({ omschrijving: "Verzendkosten aangerekend (online verkoop)", bedrag: rond2(vz) }); // nooit op een beurs
   if (d.retour !== 0) lijnen.push({ omschrijving: `Retour (terugbetaald)${waar}`, bedrag: d.retour });
   return lijnen;
 }
@@ -384,7 +403,7 @@ export const csv = (rijen: (string | number | null | undefined)[][]) => rijen.ma
 // ── Waar het gebeurde ────────────────────────────────────────────────────────
 
 export const KANAAL: Record<NonNullable<Tegenpartij["kanaal"]>, string> = {
-  beurs: "Beurs", online: "Online (Facebook, Vinted …)", rommelmarkt: "Rommelmarkt", andere: "Andere",
+  beurs: "Beurs", online: "Online (Instagram, Facebook, Vinted …)", rommelmarkt: "Rommelmarkt", andere: "Andere",
 };
 
 /** Waar een transactie gebeurde: de beurs, of het kanaal dat bij het afrekenen gekozen werd (buiten een beurs). */

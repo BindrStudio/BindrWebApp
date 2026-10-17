@@ -6,6 +6,7 @@ import {
 import type { Beurs, Regel, Stand, Transactie } from "../types";
 import { beursCijfers, beursOverzicht, CASH_GRENS, PRODUCTSOORTEN, retourBedrag, stand } from "../lib/kassa";
 import { bewijsNummer, csv, heeftBewijs } from "../lib/boekhouding";
+import { bonCode } from "../lib/tegoed";
 import { datumKort, euro, getal, vandaag } from "../lib/format";
 import { normaliseerCode, toonCode } from "../lib/code";
 import { inVoorraad } from "../lib/exemplaar";
@@ -294,6 +295,11 @@ export function TransactieSheet({ id }: { id: string }) {
           {t.cash !== 0 && <div className="afsluit-rij"><span>Cash</span><strong>{euro(t.cash)}</strong></div>}
           {t.sumup !== 0 && <div className="afsluit-rij"><span>SumUp</span><strong>{euro(t.sumup)}</strong></div>}
           {!!t.bank && <div className="afsluit-rij"><span>Overschrijving</span><strong>{euro(t.bank)}</strong></div>}
+          {(t.tegoed ?? 0) < 0 && <div className="afsluit-rij"><span>Tegoedbon {bonCode(t)} voor {t.tegenpartij?.naam ?? "?"}</span><strong>{euro(t.tegoed!)}</strong></div>}
+          {(t.tegoed ?? 0) > 0 && (t.tegoed_van ?? []).map((g) => {
+            const bon = huidig().transacties.find((x) => x.id === g.bon);
+            return <div key={g.bon} className="afsluit-rij"><span>Met tegoed{bon ? ` (${bonCode(bon)}, ${bon.tegenpartij?.naam ?? "?"})` : ""}</span><strong>{euro(g.bedrag)}</strong></div>;
+          })}
           {t.beheerder && <div className="afsluit-rij"><span>Door</span><strong>{beheerders[t.beheerder] ?? "beheerder"}</strong></div>}
         </section>
       )}
@@ -502,11 +508,11 @@ export function Overzicht() {
 
 function downloadCsv(naam: string, transacties: Transactie[], beheerders: Record<string, string>, beurzen: Beurs[] = huidig().beurzen) {
   const beursNaam = Object.fromEntries(beurzen.map((b) => [b.id, b.naam]));
-  const kop = ["datum", "tijd", "beurs", "soort", "status", "beheerder", "richting", "code", "naam", "aantal", "hartjesprijs", "prijs", "marktwaarde", "aankoopprijs", "transactie_totaal", "cash", "sumup", "overschrijving", "bewijs", "transactie_id"];
+  const kop = ["datum", "tijd", "beurs", "soort", "status", "beheerder", "richting", "code", "naam", "aantal", "hartjesprijs", "prijs", "marktwaarde", "aankoopprijs", "transactie_totaal", "cash", "sumup", "overschrijving", "tegoed", "bewijs", "transactie_id"];
   const rijen: (string | number | null | undefined)[][] = [kop];
   for (const t of transacties.slice().sort((a, b) => a.tijd.localeCompare(b.tijd))) {
     const basis = [t.tijd.slice(0, 10), tijdKort(t.tijd), t.beurs_id ? beursNaam[t.beurs_id] ?? "" : "", t.soort, t.status, t.beheerder ? beheerders[t.beheerder] ?? "" : ""];
-    const geld = [t.totaal, t.cash, t.sumup, t.bank ?? 0, heeftBewijs(t) ? bewijsNummer(t) : "", t.id];
+    const geld = [t.totaal, t.cash, t.sumup, t.bank ?? 0, t.tegoed ?? 0, heeftBewijs(t) ? bewijsNummer(t) : (t.tegoed ?? 0) < 0 ? bonCode(t) : "", t.id];
     if (!t.regels.length) rijen.push([...basis, "", "", t.opmerking ?? kasOmschrijving(t), 1, null, 0, null, null, ...geld]);
     for (const r of t.regels) {
       rijen.push([...basis, r.richting, r.code ? toonCode(r.code) : "", r.naam, r.aantal ?? 1, r.hartjesprijs, r.prijs, r.referentie, r.aankoopprijs, ...geld]);

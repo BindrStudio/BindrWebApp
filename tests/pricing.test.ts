@@ -61,7 +61,8 @@ test("prijscheck slaat stockdoos, slotjes en kleine verschillen over", () => {
 test("marktprijs = de middelste van trend, week en maand", () => {
   assert.equal(marktprijs({ trend: 20, gem7: 12, gem30: 14, laagste: 9 }), 14);       // trend loopt achter
   assert.equal(marktprijs({ trend: 10, gem7: 25, gem30: 11, laagste: 9 }), 11);       // één dure verkoop deze week
-  assert.equal(marktprijs({ trend: 20, gem7: null, gem30: 19, laagste: 15 }), 20);    // geen week: de trend
+  assert.equal(marktprijs({ trend: 20, gem7: null, gem30: 19, laagste: 15 }), 20);    // geen week: de trend (testcase A4)
+  assert.equal(marktprijs({ trend: 10, gem7: 11, gem30: 12, laagste: 14 }), 14);      // nooit onder het goedkoopste aanbod
   assert.equal(marktprijs({ trend: null, gem7: null, gem30: 8, laagste: 5 }), 8);
   assert.equal(marktprijs({ trend: null, gem7: null, gem30: null, laagste: 5 }), 5);  // enkel de laagste
   assert.equal(marktprijs({ trend: 0, gem7: null, gem30: null, laagste: null }), null);
@@ -72,6 +73,23 @@ test("marktprijs = de middelste van trend, week en maand", () => {
   assert.equal(v.referentie, 27);
   assert.equal(v.voorstel, 27);
   assert.equal(v.nakijken, true); // 25 tot 42: meer dan 30% uit elkaar
+  assert.deepEqual(v.waarom, ["spreiding"]);
+});
+
+test("nakijken ook bij een gedeelde Cardmarket-prijs, een nieuwe set of een oude kaart", () => {
+  const regel = [10, 8, 10, null, null, null, 10, 10];
+  const gids: Prijsgids = {
+    datum: "2026-10-15",
+    prijzen: new Map([[1, regel], [2, regel], [3, regel], [4, regel]]),
+    gedeeld: new Set([2]), nieuw: new Set([3]), vintage: new Set([4, 2]),
+  };
+  const waarom = (id: number) => voorstelVoor(ex({ cardmarket_id: id }), gids, STANDAARD_INSTELLINGEN)!.waarom;
+  assert.deepEqual(waarom(1), []);
+  assert.deepEqual(waarom(2), ["gedeeld", "vintage"]);
+  assert.deepEqual(waarom(3), ["nieuw"]);
+  assert.equal(voorstelVoor(ex({ cardmarket_id: 4 }), gids, STANDAARD_INSTELLINGEN)!.nakijken, true);
+  // Een oudere prijsgids zonder die lijsten: enkel de spreiding.
+  assert.deepEqual(voorstelVoor(ex({ cardmarket_id: 2 }), { datum: "x", prijzen: gids.prijzen }, STANDAARD_INSTELLINGEN)!.waarom, []);
 });
 
 test("nakijken als trend, week en maand ver uit elkaar liggen", () => {

@@ -1,21 +1,23 @@
 import { useState } from "react";
 import { huidig, inMandje, meld, naarTab, openTransactie, useApp, wijzig } from "../state";
 import type { Exemplaar } from "../types";
-import { inVoorraad } from "../lib/exemplaar";
+import { actieveReservering, inVoorraad } from "../lib/exemplaar";
 import { regelUit } from "../lib/kassa";
 import { datumKort, euro, getal, vandaag } from "../lib/format";
 import { Icoon, OnderAankoop, onderAankoop } from "./common";
 
 /**
  * De knop "In het mandje" voor één exemplaar. Een kaart uit de vault krijgt eerst een hartje
- * en gaat naar de catalogus, zodat de verkoop klopt met wat de klant zag.
+ * en gaat naar de catalogus, zodat de verkoop klopt met wat de klant zag. Een gereserveerde kaart niet:
+ * die gaat meteen in het mandje, aan de afgesproken prijs (inMandje zegt voor wie).
  */
 export function MandjeActie({ ex, naToevoegen, onAnnuleer, stil = false, vraagMeteen = false }: {
   ex: Exemplaar; naToevoegen?: () => void; onAnnuleer?: () => void; stil?: boolean; vraagMeteen?: boolean;
 }) {
   const { mandje } = useApp();
+  const res = actieveReservering(ex);
   const [stap, setStap] = useState<null | "vault" | "verlies">(() =>
-    vraagMeteen && inVoorraad(ex) && ex.opslag === "stockdoos" ? "vault" : null);
+    vraagMeteen && inVoorraad(ex) && ex.opslag === "stockdoos" && !actieveReservering(ex) ? "vault" : null);
   const [hartje, setHartje] = useState(String(ex.hartjesprijs ?? ex.verkoopprijs ?? ""));
 
   if (!inVoorraad(ex)) {
@@ -43,12 +45,12 @@ export function MandjeActie({ ex, naToevoegen, onAnnuleer, stil = false, vraagMe
   const voegToe = () => {
     const actueel = huidig().exemplaren.find((x) => x.id === ex.id) ?? ex;
     inMandje(regelUit(actueel));
-    if (!stil) meld(`${actueel.naam} in het mandje`, "ok", { label: "Naar kassa", doe: () => naarTab("kassa") });
+    if (!stil && !actieveReservering(actueel)) meld(`${actueel.naam} in het mandje`, "ok", { label: "Naar kassa", doe: () => naarTab("kassa") });
     setStap(null);
     naToevoegen?.();
   };
   const klik = () => {
-    if (ex.opslag === "stockdoos") setStap("vault");
+    if (ex.opslag === "stockdoos" && !res) setStap("vault");
     else voegToe();
   };
 
@@ -89,8 +91,9 @@ export function MandjeActie({ ex, naToevoegen, onAnnuleer, stil = false, vraagMe
 
   return (
     <button className="knop groot mandje-knop" onClick={klik}>
-      <Icoon naam="mandje" maat={20} /> In het mandje
-      {ex.opslag === "stockdoos" && <span className="mini-label">vault</span>}
+      <Icoon naam="mandje" maat={20} /> {res ? `Verkopen aan ${res.voor}` : "In het mandje"}
+      {ex.opslag === "stockdoos" && !res && <span className="mini-label">vault</span>}
+      {res?.prijs != null && <span className="mini-label">{euro(res.prijs)}</span>}
     </button>
   );
 }

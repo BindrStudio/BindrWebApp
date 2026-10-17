@@ -42,6 +42,12 @@ export function metTelling(a: Artikel, nieuwAantal: number, reden: string | null
 }
 
 export const inVoorraad = (e: Exemplaar) => e.status === "in voorraad";
+
+/** De reservering die nu geldt (enkel zolang de kaart in voorraad ligt; na de verkoop blijft ze als geschiedenis). */
+export const actieveReservering = (e: Exemplaar) => (inVoorraad(e) && e.reservering?.voor ? e.reservering : null);
+
+/** Is de reservering voorbij haar einddatum? */
+export const reserveringVerlopen = (r: { tot?: string | null } | null | undefined, vandaag: string) => !!r?.tot && r.tot < vandaag;
 /** Enkel kaarten en slabs krijgen een QR-label; eigen producten (binders, 3D) en artikels nooit. */
 export const krijgtLabel = (e: Pick<Exemplaar, "soort">) => e.soort === "kaart" || e.soort === "slab";
 

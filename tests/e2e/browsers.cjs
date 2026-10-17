@@ -25,6 +25,10 @@ const PROFIELEN = {
     ["galaxy-tab-s8-rechtop", { viewport: { width: 800, height: 1280 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, userAgent: TAB_UA }],
     ["galaxy-tab-s8-liggend", { viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, userAgent: SAMSUNG_UA }],
     ["pixel-7", { ...pw.devices["Pixel 7"] }],
+    // Smalle Android-gsm's (Samsung): twee kaarten naast elkaar werden er ooit anderhalve, en de pagina zoomde uit.
+    ["galaxy-s9", { ...pw.devices["Galaxy S9+"] }],
+    // Chrome op Windows: de schuifbalk neemt plaats in (100vw telt hem mee; de strook stak 15 px uit).
+    ["windows-laptop", { viewport: { width: 1366, height: 768 } }],
     ["macbook-air", { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 }],
   ],
   webkit: [
@@ -137,6 +141,8 @@ async function doorloop(ctx, page, motor, naam, opties) {
         return { teVeel, wie, w, iw: innerWidth, pad: pad.slice(-4).join(" > ") };
       });
       assert.ok(r.teVeel <= 1, `${waar}: ${r.teVeel}px te breed bij ${r.w}px (innerWidth ${r.iw}): ${r.wie.join(", ") || "niets buiten een scrollvak"}; oorzaak: ${r.pad || "?"}`);
+      // Op een gsm of tablet: de pagina is even breed als het scherm (anders laat Android ze uitzoomen).
+      if (opties.isMobile) assert.ok(r.iw <= breedte + 1, `${waar}: de pagina is ${r.iw}px breed op een scherm van ${breedte}px (Android zoomt dan uit)`);
     }
   };
   const tabbalk = (tab) => page.locator(".tabbalk button").filter({ hasText: tab }).click();
@@ -292,7 +298,8 @@ async function doorloop(ctx, page, motor, naam, opties) {
   for (const motor of MOTOREN) {
     let browser;
     try {
-      browser = await pw[motor].launch();
+      // Chromium met echte schuifbalken (zoals Windows), niet verborgen zoals Playwright standaard doet.
+      browser = await pw[motor].launch(motor === "chromium" ? { ignoreDefaultArgs: ["--hide-scrollbars"] } : {});
     } catch (e) {
       uitslag.push([motor, "-", `niet beschikbaar: ${String(e.message).split("\n")[0]}`]);
       if (process.env.GITHUB_ACTIONS) console.log(`::error title=${motor}::niet beschikbaar: ${String(e.message).split("\n")[0]}`);
