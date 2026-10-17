@@ -23,7 +23,8 @@ export function ThemaSheet() {
   const app = useApp();
   const kan = kanThema(app);
   const [bewerk, setBewerk] = useState<string | null>(null);
-  useEffect(() => { if (kan) void laadThemas(); }, [kan]);
+  // Opnieuw als je weer online bent.
+  useEffect(() => { if (kan && app.online) void laadThemas(); }, [kan, app.online]);
   // Pas als alle thema's met hun logo's er zijn (het beheer laadt eerst enkel die van vandaag).
   const lijst = themaLijstVolledig() ? themaLijst() : null;
   const md = maandDag(vandaag());
@@ -40,7 +41,9 @@ export function ThemaSheet() {
         Voor een feest of seizoen: een eigen logo, een kleur, versiering in de achtergrond en een korte zin op de klantenpagina.
         Zet het één keer klaar; daarna komt het elk jaar vanzelf in de periode.
       </p>
-      {!kan ? <p className="nakijken">{SCHEMA_013}</p> : lijst == null ? <p className="zacht">Laden…</p> : (
+      {!kan ? <p className="nakijken">{SCHEMA_013}</p> : lijst == null ? (
+        <p className="zacht">{app.online ? "Laden…" : "Geen internet: de thema's verschijnen hier zodra je weer online bent."}</p>
+      ) : (
         <>
           <p className={`thema-nu${nu ? " aan" : ""}`}>{nu ? <>Nu op de site: <strong>{nu.naam}</strong></> : "Nu geen thema: de gewone site met belletjes en sterretjes."}</p>
           <ul className="thema-lijst">

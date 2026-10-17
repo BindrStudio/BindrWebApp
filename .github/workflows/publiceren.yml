@@ -32,15 +32,8 @@ jobs:
         with:
           node-version: 22
 
-      - name: Cardmarket-prijsgids ophalen
-        run: node scripts/fetch-prices.mjs || echo "::warning::Prijsgids niet opgehaald; de vorige versie blijft online"
-
-      # Onze laatste berichten voor de Instagram-strook (de klanten vragen de feed zo nooit zelf op). Lukt het niet,
-      # dan blijven de berichten van de vorige keer staan; het script laat de publicatie nooit mislukken.
-      - name: Instagram ophalen
-        run: node scripts/instagram.mjs
-
-      # Een gratis Supabase-project pauzeert na een week zonder verkeer. Eén vraag per nacht houdt het wakker.
+      # Een gratis Supabase-project pauzeert na een week zonder verkeer. Eén vraag per nacht houdt het wakker (vóór
+      # Instagram: dat leest de feed uit Supabase).
       - name: Supabase wakker houden
         if: github.event_name == 'schedule'
         continue-on-error: true
@@ -48,6 +41,14 @@ jobs:
           curl -fsS -o /dev/null \
             "https://thnrmrvpkcrujxtwwqhy.supabase.co/rest/v1/publieke_vitrine?select=naam&limit=1" \
             -H "apikey: sb_publishable_rFo0QZlgdsQTMOU7buKHJg_hMBrCSPV"
+
+      - name: Cardmarket-prijsgids ophalen
+        run: node scripts/fetch-prices.mjs || echo "::warning::Prijsgids niet opgehaald; de vorige versie blijft online"
+
+      # Onze laatste berichten voor de Instagram-strook (de klanten vragen de feed zo nooit zelf op). Lukt het niet,
+      # dan blijven de berichten van de vorige keer staan; het script laat de publicatie nooit mislukken.
+      - name: Instagram ophalen
+        run: node scripts/instagram.mjs
 
       - name: Staat GitHub Pages aan?
         env:

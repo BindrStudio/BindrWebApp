@@ -10,7 +10,7 @@ import {
 import type { Etalagefoto, EtalagePlek } from "../types";
 import { veiligeFoto, verkleinFoto, verkleinUitgeknipt } from "../lib/eigenfoto";
 import { feedSamenvatting, geldigeFeed, siteBerichten } from "../lib/instafeed";
-import { datumKort } from "../lib/format";
+import { dagVan, datumKort } from "../lib/format";
 import { klantUrl } from "../config";
 import { Icoon, Sheet, Veld } from "./common";
 
@@ -169,8 +169,11 @@ function InstaAutomatisch() {
       const r = await fetch(geldig, { cache: "no-store" });
       if (!r.ok) throw new Error(String(r.status));
       const s = feedSamenvatting(await r.json());
+      // Behold schrijft +0000 (zonder dubbelpunt): dat leest Safari niet. Een vreemde datum laten we weg.
+      const d = s.nieuwste ? new Date(s.nieuwste.replace(/([+-]\d{2})(\d{2})$/, "$1:$2")) : null;
+      s.nieuwste = d && !Number.isNaN(d.getTime()) ? d.toISOString() : null;
       setTest(s.aantal
-        ? { ok: true, tekst: `In orde: ${s.aantal} ${s.aantal === 1 ? "bericht" : "berichten"}${s.naam ? ` van @${s.naam}` : ""}${s.nieuwste ? `, het nieuwste van ${datumKort(s.nieuwste)}` : ""}.` }
+        ? { ok: true, tekst: `In orde: ${s.aantal} ${s.aantal === 1 ? "bericht" : "berichten"}${s.naam ? ` van @${s.naam}` : ""}${s.nieuwste ? `, het nieuwste van ${datumKort(dagVan(s.nieuwste))}` : ""}.` }
         : { ok: true, tekst: "De feed werkt, maar er staan nog geen berichten in." });
     } catch {
       setTest({ ok: false, tekst: "De feed antwoordt niet. Kijk de link na (https://feeds.behold.so/…). Vulde je bij Behold domeinen in, zet er dan ook bindrstudio.github.io bij." });
@@ -186,7 +189,7 @@ function InstaAutomatisch() {
     else meld(geldig ? "Bewaard. De volgende keer dat de site bijwerkt (twee keer per dag) staan de berichten erop." : "Automatisch van Instagram staat uit");
   };
   const stand = site?.op && site.aantal
-    ? `Nu op de site: ${site.aantal} ${site.aantal === 1 ? "bericht" : "berichten"}, opgehaald op ${datumKort(site.op)} om ${new Date(site.op).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" })}.`
+    ? `Nu op de site: ${site.aantal} ${site.aantal === 1 ? "bericht" : "berichten"}, opgehaald op ${datumKort(dagVan(site.op))} om ${new Date(site.op).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" })}.`
     : null;
   return (
     <section className="groep insta-auto">

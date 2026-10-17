@@ -45,6 +45,12 @@ test("data/instagram.json op onze site: enkel img/insta/ en instagram.com", () =
   assert.deepEqual(siteBerichten(null), []);
   assert.equal(zelfdeBericht("https://www.instagram.com/p/C1a/", "https://www.instagram.com/p/C1a"), true);
   assert.equal(zelfdeBericht(null, "https://www.instagram.com/p/C1a"), false);
+  // Een link uit de app van Instagram: met ?igsh=…, zonder www, als reel of met onze naam ervoor.
+  assert.equal(zelfdeBericht("https://www.instagram.com/p/C1a/", "https://instagram.com/p/C1a/?igsh=MWx0bnRp"), true);
+  assert.equal(zelfdeBericht("https://www.instagram.com/p/C1a/", "https://www.instagram.com/reel/C1a/?utm_source=ig_web_copy_link"), true);
+  assert.equal(zelfdeBericht("https://www.instagram.com/p/C1a/", "https://www.instagram.com/bindrstudio/p/C1a/"), true);
+  assert.equal(zelfdeBericht("https://www.instagram.com/p/C1a/", "https://www.instagram.com/p/C1b/"), false);
+  assert.equal(zelfdeBericht("https://evil.example/p/C1a/", "https://www.instagram.com/p/C1a/"), false);
 });
 
 test("de link van de feed in Profiel en de test", () => {

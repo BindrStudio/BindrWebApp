@@ -1015,6 +1015,9 @@ async function afmelden() {
   themaCache = null;
   themasVolledig = false;
   themaLogosGeladen.clear();
+  if (beheerThemaOpnieuw) clearTimeout(beheerThemaOpnieuw);
+  beheerThemaOpnieuw = null;
+  beheerThemaPogingen = 0;
   await weg?.catch(() => undefined);
 }
 
@@ -2015,6 +2018,8 @@ export async function laadThemas(): Promise<void> {
  * van vandaag. Niet erg als het niet lukt (offline): dan gewoon ons logo.
  */
 let beheerThemaBezig = false;
+let beheerThemaOpnieuw: ReturnType<typeof setTimeout> | null = null;
+let beheerThemaPogingen = 0;
 export async function laadBeheerThema(): Promise<void> {
   const b = state.backend;
   if (!b || beheerThemaBezig || themasLaden || !kanThema()) return;
@@ -2031,9 +2036,14 @@ export async function laadBeheerThema(): Promise<void> {
       if (!themasVolledig && themaCache) themaCache = themaCache.map((x) => (x.id === t.id ? { ...x, logo: logos?.logo ?? null, logo_groot: logos?.logo_groot ?? null, logo_eend: logos?.logo_eend ?? null } : x));
       themaLogosGeladen.add(t.id);
     }
+    beheerThemaPogingen = 0;
     zet({ fotoVersie: state.fotoVersie + 1 });
   } catch {
-    // versiering: zonder thema werkt alles gewoon
+    // Versiering: zonder thema werkt alles gewoon. Wat later nog eens (slecht bereik op een beurs), hoogstens vijf keer.
+    if (!beheerThemaOpnieuw && beheerThemaPogingen < 5) {
+      beheerThemaPogingen++;
+      beheerThemaOpnieuw = setTimeout(() => { beheerThemaOpnieuw = null; void laadBeheerThema(); }, 30_000 * beheerThemaPogingen);
+    }
   } finally {
     beheerThemaBezig = false;
   }
@@ -2046,7 +2056,7 @@ export function beheerThema(): { thema: Thema; soort: ThemaSoort; logo: string |
   const soort = t ? soortVan(t.id) : undefined;
   if (!t || !soort) return null;
   // Zolang de eigen logo's van dit thema niet geladen zijn: ons gewone logo (niet eerst het meegeleverde en dan het eigen).
-  const klaar = themaLogosGeladen.has(t.id) || wachtendeOps("thema").some((o) => o.t.id === t.id);
+  const klaar = themaLogosGeladen.has(t.id);
   return {
     thema: t, soort,
     logo: klaar ? themaLogo(t, soort, "logo", veiligeFoto(t.logo)) : null,

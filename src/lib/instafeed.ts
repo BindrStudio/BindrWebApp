@@ -36,9 +36,17 @@ export function siteBerichten(j: unknown): InstaBericht[] {
   return uit;
 }
 
-/** Hetzelfde bericht (met of zonder / op het einde)? */
-export const zelfdeBericht = (a: string | null | undefined, b: string | null | undefined) =>
-  !!a && !!b && a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
+/** De code van een bericht op Instagram (…/p/ABC/, …/reel/ABC/?igsh=…, ook zonder www of met de naam ervoor), of null. */
+export function berichtCode(link: string | null | undefined): string | null {
+  const m = /^https?:\/\/(?:www\.|m\.)?instagram\.com\/(?:[^/?#]+\/)?(?:p|reels?|tv)\/([A-Za-z0-9_-]+)/i.exec(link ?? "");
+  return m ? m[1] : null;
+}
+
+/** Hetzelfde bericht? Op de code, zodat een link uit de app (met ?igsh=… of /reel/ in plaats van /p/) ook telt. */
+export function zelfdeBericht(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = berichtCode(a), y = berichtCode(b);
+  return !!x && x === y;
+}
 
 /** Wat een feed van Behold teruggeeft, kort: hoeveel berichten en de datum van het nieuwste (voor de test in Profiel). */
 export function feedSamenvatting(j: unknown): { aantal: number; nieuwste: string | null; naam: string | null } {

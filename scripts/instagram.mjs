@@ -18,6 +18,8 @@ const MAX = 16;
 export const FEED = /^https:\/\/feeds\.behold\.so\/[A-Za-z0-9_-]{6,64}$/;
 const FOTO_HOST = /^https:\/\/([a-z0-9-]+\.)*behold\.pictures\//;
 const BERICHT = /^https:\/\/www\.instagram\.com\/(p|reel|reels|tv)\/[A-Za-z0-9_-]+\/?$/;
+/** Nooit lang wachten: een host die hangt, mag de publicatie niet ophouden. */
+const haal = (url, opties = {}) => fetch(url, { ...opties, signal: AbortSignal.timeout(15000) });
 
 async function config() {
   const c = await readFile(path.join(root, "src/config.ts"), "utf8");
@@ -29,7 +31,7 @@ async function config() {
 async function feedUrl() {
   if (process.env.INSTAGRAM_FEED) return process.env.INSTAGRAM_FEED.trim();
   const { url, sleutel } = await config();
-  const r = await fetch(`${url}/rest/v1/publieke_instellingen?select=waarde&sleutel=eq.instagram_feed`, { headers: { apikey: sleutel } });
+  const r = await haal(`${url}/rest/v1/publieke_instellingen?select=waarde&sleutel=eq.instagram_feed`, { headers: { apikey: sleutel } });
   if (!r.ok) throw new Error(`publieke_instellingen gaf HTTP ${r.status}`);
   const rij = (await r.json())[0];
   return typeof rij?.waarde === "string" && rij.waarde.trim() ? rij.waarde.trim() : null;
@@ -71,7 +73,7 @@ async function vorige() {
   const [eigenaar, repo] = (process.env.GITHUB_REPOSITORY || "").split("/");
   if (!eigenaar || !repo) return false;
   const basis = `https://${eigenaar.toLowerCase()}.github.io/${repo}/`;
-  const r = await fetch(`${basis}data/instagram.json`);
+  const r = await haal(`${basis}data/instagram.json`);
   if (!r.ok) return false;
   const oud = await r.json();
   if (!Array.isArray(oud?.posts) || !oud.posts.length) return false;
@@ -79,7 +81,7 @@ async function vorige() {
   const posts = [];
   for (const p of oud.posts) {
     if (typeof p?.foto !== "string" || !/^img\/insta\/[A-Za-z0-9_-]+\.(webp|jpg|png)$/.test(p.foto)) continue;
-    const f = await fetch(basis + p.foto);
+    const f = await haal(basis + p.foto);
     if (!f.ok) continue;
     await writeFile(path.join(root, "public", p.foto), Buffer.from(await f.arrayBuffer()));
     posts.push(p);
@@ -90,20 +92,24 @@ async function vorige() {
 
 async function main() {
   await rm(FOTOS, { recursive: true, force: true });
-  const url = await feedUrl().catch((e) => { console.log(`::warning::Feed-URL niet gelezen: ${e.message}`); return null; });
+  // Kan Supabase niet antwoorden (gepauzeerd, even weg), dan niet doen alsof er geen feed is: main faalt en wat online
+  // stond, blijft staan. Enkel als de instelling echt leeg is: geen feed.
+  const url = await feedUrl();
   if (!url) { await schrijf([], null); console.log("Geen Instagram-feed ingesteld: enkel de foto's uit Profiel › Instagram."); return; }
   if (!FEED.test(url)) { await schrijf([], null); console.log(`::warning::Onbekende feed (enkel https://feeds.behold.so/…): ${url}`); return; }
   // Zoals de site zelf (staan er domeinen ingevuld bij Behold, dan staat dat van onze site erbij).
   const [eigenaar = "BindrStudio", repo = "BindrWebApp"] = (process.env.GITHUB_REPOSITORY || "").split("/").filter(Boolean);
   const site = `https://${eigenaar.toLowerCase()}.github.io`;
-  const r = await fetch(url, { headers: { accept: "application/json", origin: site, referer: `${site}/${repo}/` } });
+  const r = await haal(url, { headers: { accept: "application/json", origin: site, referer: `${site}/${repo}/` } });
   if (!r.ok) throw new Error(`De feed gaf HTTP ${r.status}`);
-  const lijst = berichten(await r.json());
+  const json = await r.json();
+  if (!Array.isArray(json) && !Array.isArray(json?.posts)) throw new Error("De feed gaf geen lijst met berichten");
+  const lijst = berichten(json);
   await mkdir(FOTOS, { recursive: true });
   const posts = [];
   for (const b of lijst) {
     try {
-      const f = await fetch(b.foto);
+      const f = await haal(b.foto);
       const type = f.headers.get("content-type") || "";
       if (!f.ok || !/^image\/(webp|jpeg|png)/.test(type)) continue;
       const data = Buffer.from(await f.arrayBuffer());
@@ -113,6 +119,7 @@ async function main() {
       posts.push({ id: b.id, foto: `img/insta/${naam}`, link: b.link, alt: b.alt, datum: b.datum });
     } catch { /* deze foto overslaan */ }
   }
+  if (lijst.length && !posts.length) throw new Error("Geen enkele foto van de feed kon opgehaald worden");
   await schrijf(posts, "behold");
   console.log(`${posts.length} Instagram-berichten opgehaald.`);
 }
